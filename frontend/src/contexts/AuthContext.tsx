@@ -37,22 +37,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
         .single();
 
-      if (error) {
+        if (error) {
         console.error('Failed to fetch user profile:', error.message);
         setProfile(null);
         return;
-      }
+        }
 
-      // Safety check: if user is soft-deleted or deactivated, treat as unauthenticated.
-      // This respects the RLS policy which filters deleted_at IS NULL,
-      // but we add a client-side check too for defense-in-depth.
-      if (!data.is_active) {
+        // Type assertion needed until we generate proper database types
+        const userProfile = data as unknown as UserProfile;
+
+        if (!userProfile.is_active) {
         console.warn('User account is deactivated. Signing out.');
         await supabase.auth.signOut();
         return;
-      }
+        }
 
-      setProfile(data as UserProfile);
+        setProfile(userProfile);
     } catch (err) {
       console.error('Unexpected error fetching profile:', err);
       setProfile(null);
