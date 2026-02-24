@@ -30,31 +30,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── Fetch public.users profile ──────────────────────────────────────
   const fetchProfile = useCallback(async (userId: string) => {
+    console.log('[AUTH] fetchProfile called for:', userId);
     try {
+      // Race the Supabase query against a 10-second timeout so a hanging
+      // RLS check or network issue doesn't lock the UI forever.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+
       const { data, error } = await supabase
         .from('users')
         .select('id, email, full_name, role, is_active, created_at, updated_at')
         .eq('id', userId)
+        .abortSignal(controller.signal)
+        .returns<UserProfile[]>()
         .single();
 
-        if (error) {
+      clearTimeout(timeout);
+
+      console.log('[AUTH] fetchProfile query returned:', { data: !!data, error: error?.message });
+
+      if (error) {
         console.error('Failed to fetch user profile:', error.message);
         setProfile(null);
         return;
-        }
+      }
 
-        // Type assertion needed until we generate proper database types
-        const userProfile = data as unknown as UserProfile;
+      if (!data) {
+        console.error('No profile found for user:', userId);
+        setProfile(null);
+        return;
+      }
 
-        if (!userProfile.is_active) {
+      if (!data.is_active) {
         console.warn('User account is deactivated. Signing out.');
         await supabase.auth.signOut();
         return;
-        }
+      }
 
-        setProfile(userProfile);
+      setProfile(data);
     } catch (err) {
-      console.error('Unexpected error fetching profile:', err);
+      // AbortError means our 10s timeout fired — the query hung.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.error('[AUTH] fetchProfile timed out after 10s — check RLS policies and network');
+      } else {
+        console.error('Unexpected error fetching profile:', err);
+      }
       setProfile(null);
     }
   }, []);
@@ -75,11 +95,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Initialize: check existing session + subscribe to changes ───────
   useEffect(() => {
     let isMounted = true;
+    // Track whether initializeAuth has finished so the onAuthStateChange
+    // handler knows whether to manage isLoading itself.
+    let initialized = false;
 
-    // 1. Check for existing session (user refreshed the page)
+    // 1. Subscribe to auth state changes FIRST so we never miss events.
+    //    Use a non-async wrapper — fire-and-forget the profile fetch so
+    //    the Supabase listener callback doesn't block internally.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event: AuthChangeEvent, newSession: Session | null) => {
+        if (!isMounted) return;
+
+        console.log('[AUTH] onAuthStateChange:', event, 'session:', !!newSession);
+
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+
+        switch (event) {
+          case 'SIGNED_IN':
+          case 'TOKEN_REFRESHED':
+          case 'USER_UPDATED':
+            if (newSession?.user) {
+              // If init already ran, we manage isLoading ourselves.
+              if (initialized) setIsLoading(true);
+              fetchProfile(newSession.user.id).finally(() => {
+                if (isMounted && initialized) setIsLoading(false);
+              });
+            }
+            break;
+
+          case 'SIGNED_OUT':
+            setProfile(null);
+            setIsLoading(false);
+            break;
+
+          case 'PASSWORD_RECOVERY':
+            // Task 2.7 handles the UI for this.
+            break;
+        }
+      }
+    );
+
+    // 2. Check for existing session (user refreshed the page)
     const initializeAuth = async () => {
       try {
+        console.log('[AUTH] initializeAuth starting...');
         const { data: { session: existingSession } } = await supabase.auth.getSession();
+        console.log('[AUTH] getSession returned:', !!existingSession);
 
         if (!isMounted) return;
 
@@ -91,6 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.error('Error initializing auth:', err);
       } finally {
+        initialized = true;
         if (isMounted) {
           setIsLoading(false);
         }
@@ -98,46 +161,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     initializeAuth();
-
-    // 2. Subscribe to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, newSession: Session | null) => {
-        if (!isMounted) return;
-
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-
-        switch (event) {
-          case 'SIGNED_IN':
-          case 'TOKEN_REFRESHED':
-            // On sign-in or token refresh, (re)fetch the profile.
-            // TOKEN_REFRESHED fires automatically — Supabase handles the timing.
-            if (newSession?.user) {
-              await fetchProfile(newSession.user.id);
-            }
-            break;
-
-          case 'SIGNED_OUT':
-            // Clear everything
-            setProfile(null);
-            break;
-
-          case 'USER_UPDATED':
-            // User changed their email or metadata in Supabase Auth.
-            // Refresh our profile to stay in sync.
-            if (newSession?.user) {
-              await fetchProfile(newSession.user.id);
-            }
-            break;
-
-          case 'PASSWORD_RECOVERY':
-            // User clicked the password reset link in their email.
-            // The session is set but they need to enter a new password.
-            // Task 2.7 will handle the UI for this.
-            break;
-        }
-      }
-    );
 
     // 3. Cleanup on unmount
     return () => {
