@@ -31,7 +31,6 @@
 --   Admin-only writes (enforced at DB level for safety):
 --     • users         — only admin can modify user accounts
 --     • trades        — only admin can modify controlled lookup data
---     • vendor_documents — only admin can manage compliance docs
 --   All other writes: go through FastAPI (service_role), no RLS write
 --   policies needed.
 --
@@ -296,9 +295,12 @@ CREATE POLICY vendor_trades_select_authenticated
 
 -- ── vendor_documents ───────────────────────────────────────────────────────
 -- READ:  Both roles can view onboarding documents (needed for compliance checks).
--- WRITE: Admin-only. These are legal compliance docs (W-9, insurance, MTA).
---        A PM uploading wrong docs could lead to awarding a vendor with
---        invalid insurance coverage.
+-- WRITE: Both roles. Kept flexible for now — either admin or PM may handle
+--        vendor onboarding depending on team workflow. FastAPI validates
+--        business logic (doc type, file format, expiration) regardless.
+--        NOTE: If this needs to be admin-only later, swap is_active_user()
+--        for is_admin() below. Matches storage bucket RLS (full CRUD for
+--        authenticated on vendor-documents bucket).
 
 CREATE POLICY vendor_documents_select_authenticated
   ON vendor_documents FOR SELECT
@@ -307,21 +309,21 @@ CREATE POLICY vendor_documents_select_authenticated
     (SELECT private.is_active_user())
   );
 
-CREATE POLICY vendor_documents_insert_admin
+CREATE POLICY vendor_documents_insert_authenticated
   ON vendor_documents FOR INSERT
   TO authenticated
   WITH CHECK (
-    (SELECT private.is_admin())
+    (SELECT private.is_active_user())
   );
 
-CREATE POLICY vendor_documents_update_admin
+CREATE POLICY vendor_documents_update_authenticated
   ON vendor_documents FOR UPDATE
   TO authenticated
   USING (
-    (SELECT private.is_admin())
+    (SELECT private.is_active_user())
   )
   WITH CHECK (
-    (SELECT private.is_admin())
+    (SELECT private.is_active_user())
   );
 
 
@@ -683,7 +685,8 @@ GRANT EXECUTE ON FUNCTION private.is_admin()         TO authenticated;
 -- Summary:
 --   Tables with RLS enabled:     28 (all)
 --   SELECT policies:             28 (one per table)
---   WRITE policies:               8 (admin-only: users, trades, vendor_documents
+--   WRITE policies:               8 (admin-only: users, trades
+--                                     + authenticated: vendor_documents
 --                                     + self/admin: vendor_flags
 --                                     + self-update: users, notifications)
 --   Admin-only tables:            1 (magic_link_tokens — SELECT restricted)
