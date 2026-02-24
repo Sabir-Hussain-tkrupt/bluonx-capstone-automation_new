@@ -1,18 +1,16 @@
+import { AuthProvider } from '@/contexts/AuthContext';
+// import { BrowserRouter } from 'react-router-dom';  // Task 2.2
+
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-blue-900">
-          BluOnX Capstone Automation
-        </h1>
-        <p className="mt-4 text-lg text-gray-600">
-          Bid Management & Vendor Coordination System
-        </p>
-        <p className="mt-2 text-sm text-gray-400">
-          Frontend initialized successfully
-        </p>
-      </div>
-    </div>
+    // <BrowserRouter>       {/* Task 2.2 */}
+      <AuthProvider>
+        {/* Your routes and layout will go here in Task 2.2 / 2.8 */}
+        <div className="min-h-screen">
+          <p>Auth framework loaded. Build login UI in Task 2.7.</p>
+        </div>
+      </AuthProvider>
+    // </BrowserRouter>
   );
 }
 
