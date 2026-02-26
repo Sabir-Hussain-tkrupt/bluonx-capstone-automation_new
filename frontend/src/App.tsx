@@ -1,16 +1,16 @@
+import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
-// import { BrowserRouter } from 'react-router-dom';  // Task 2.2
+import { AppRoutes } from '@/routes';
+import { ScrollToTop } from '@/components/layout/ScrollToTop';
 
 function App() {
   return (
-    // <BrowserRouter>       {/* Task 2.2 */}
+    <BrowserRouter>
+      <ScrollToTop />
       <AuthProvider>
-        {/* Your routes and layout will go here in Task 2.2 / 2.8 */}
-        <div className="min-h-screen">
-          <p>Auth framework loaded. Build login UI in Task 2.7.</p>
-        </div>
+        <AppRoutes />
       </AuthProvider>
-    // </BrowserRouter>
+    </BrowserRouter>
   );
 }
 

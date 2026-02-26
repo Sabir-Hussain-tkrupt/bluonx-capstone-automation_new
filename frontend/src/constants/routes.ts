@@ -1,0 +1,28 @@
+/**
+ * Centralized route path constants.
+ * Single source of truth — import ROUTES instead of hardcoding path strings.
+ */
+export const ROUTES = {
+  // Public auth routes
+  LOGIN: '/login',
+  FORGOT_PASSWORD: '/forgot-password',
+
+  // Auth callback routes (Supabase redirects here)
+  AUTH_CALLBACK: '/auth/callback',
+  AUTH_RESET_PASSWORD: '/auth/reset-password',
+
+  // Protected routes
+  DASHBOARD: '/dashboard',
+  VENDORS: '/vendors',
+  VENDOR_DETAIL: '/vendors/:id',
+  PROJECTS: '/projects',
+  PROJECT_DETAIL: '/projects/:id',
+  TASKS: '/projects/:id/tasks',
+  TASK_DETAIL: '/projects/:id/tasks/:taskId',
+  BID_MANAGEMENT: '/projects/:id/tasks/:taskId/bids',
+  AWARD: '/projects/:id/tasks/:taskId/award',
+  SETTINGS: '/settings',
+
+  // Error pages
+  UNAUTHORIZED: '/unauthorized',
+} as const;

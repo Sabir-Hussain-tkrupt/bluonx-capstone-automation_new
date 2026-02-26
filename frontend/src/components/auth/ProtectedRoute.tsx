@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
-// import { Navigate, useLocation } from 'react-router-dom';  // Task 2.2
+import { Navigate, useLocation } from 'react-router-dom';
+import { ROUTES } from '@/constants/routes';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -10,7 +11,7 @@ interface ProtectedRouteProps {
 /**
  * Wraps routes that require authentication.
  *
- * Usage (in Task 2.2 when routing is set up):
+ * Usage:
  *
  *   <Route path="/dashboard" element={
  *     <ProtectedRoute>
@@ -18,15 +19,15 @@ interface ProtectedRouteProps {
  *     </ProtectedRoute>
  *   } />
  *
- *   <Route path="/admin/users" element={
+ *   <Route path="/settings" element={
  *     <ProtectedRoute requiredRole="admin">
- *       <UserManagement />
+ *       <SettingsPage />
  *     </ProtectedRoute>
  *   } />
  */
 export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, profile } = useAuth();
-  // const location = useLocation();  // Task 2.2
+  const location = useLocation();
 
   // 1. Still checking session — show nothing (prevents flash of login page)
   if (isLoading) {
@@ -38,26 +39,15 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
     );
   }
 
-  // 2. Not authenticated — redirect to login
+  // 2. Not authenticated — redirect to login (preserves intended destination)
   if (!isAuthenticated) {
-    // Task 2.2: Replace with Navigate component
-    // return <Navigate to="/login" state={{ from: location }} replace />;
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-red-500">Not authenticated. Login page will be built in Task 2.7.</p>
-      </div>
-    );
+    return <Navigate to={ROUTES.LOGIN} state={{ from: location }} replace />;
   }
 
-  // 3. Authenticated but wrong role — show unauthorized
+  // 3. Authenticated but wrong role — silently redirect to dashboard
+  //    (don't reveal which role is required — prevents information leakage)
   if (requiredRole && profile?.role !== requiredRole) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-red-500">
-          Unauthorized. This page requires the "{requiredRole}" role.
-        </p>
-      </div>
-    );
+    return <Navigate to={ROUTES.DASHBOARD} replace />;
   }
 
   // 4. All good — render the protected content
