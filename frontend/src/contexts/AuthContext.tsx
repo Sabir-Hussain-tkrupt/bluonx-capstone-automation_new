@@ -8,6 +8,7 @@ import {
 } from 'react';
 import type { Session, User as SupabaseUser, AuthChangeEvent } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { unsubscribeAllChannels } from '@/lib/realtime';
 import type { AuthState, UserProfile } from '@/types/auth.types';
 
 // ─── Context Shape ───────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── Sign out ────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
+    unsubscribeAllChannels();
     await supabase.auth.signOut();
     // State cleanup happens in onAuthStateChange listener below
   }, []);
