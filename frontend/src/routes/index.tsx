@@ -24,6 +24,7 @@ import { AwardPage } from '@/features/contracts/pages/AwardPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
+import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
 
 export function AppRoutes() {
   return (
@@ -70,6 +71,9 @@ export function AppRoutes() {
           }
         />
       </Route>
+
+      {/* Dev-only showcase route */}
+      <Route path="/dev/components" element={<ComponentShowcasePage />} />
 
       {/* Error pages */}
       <Route path={ROUTES.UNAUTHORIZED} element={<UnauthorizedPage />} />
