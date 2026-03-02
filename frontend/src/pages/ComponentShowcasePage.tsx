@@ -18,6 +18,9 @@ import {
   EmptyState,
   Skeleton,
   SkeletonTable,
+  Breadcrumbs,
+  UserMenu,
+  useToast,
 } from '@/components/ui';
 import type { Column } from '@/components/ui';
 
@@ -416,11 +419,99 @@ export function ComponentShowcasePage() {
           keyExtractor={(row) => row.id}
         />
       </Section>
+
+      {/* ── Breadcrumbs ───────────────────────────────── */}
+      <Section title="Breadcrumbs">
+        <div className="space-y-4">
+          <Breadcrumbs
+            items={[
+              { label: 'Dashboard', href: '/dashboard' },
+              { label: 'Projects', href: '/projects' },
+              { label: 'Highway Extension' },
+            ]}
+          />
+          <Breadcrumbs
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Vendors', href: '/vendors' },
+              { label: 'ABC Plumbing', href: '/vendors/1' },
+              { label: 'Bid Submissions' },
+            ]}
+          />
+        </div>
+      </Section>
+
+      {/* ── UserMenu ──────────────────────────────────── */}
+      <Section title="UserMenu">
+        <div className="flex items-center gap-8">
+          <UserMenu
+            userName="Joe Carson"
+            userEmail="joe@bluonx.com"
+            userRole="Admin"
+            menuItems={[
+              { label: 'Profile', onClick: () => console.log('Profile clicked') },
+              { label: 'Settings', onClick: () => console.log('Settings clicked') },
+            ]}
+            onSignOut={() => console.log('Sign out clicked')}
+          />
+          <UserMenu
+            userName="Kylie Brown"
+            userEmail="kylie@capstonellc.com"
+            userRole="Project Manager"
+            onSignOut={() => console.log('Sign out clicked')}
+          />
+        </div>
+      </Section>
+
+      {/* ── Toast ─────────────────────────────────────── */}
+      <Section title="Toast">
+        <ToastDemo />
+      </Section>
     </div>
   );
 }
 
 // ── Helper ────────────────────────────────────────────────
+
+function ToastDemo() {
+  const { toast, dismissAll } = useToast();
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      <Button
+        variant="success"
+        size="sm"
+        onClick={() => toast({ variant: 'success', title: 'Saved', message: 'Vendor record updated successfully.' })}
+      >
+        Success Toast
+      </Button>
+      <Button
+        variant="danger"
+        size="sm"
+        onClick={() => toast({ variant: 'danger', title: 'Error', message: 'Failed to submit bid. Please try again.' })}
+      >
+        Error Toast
+      </Button>
+      <Button
+        variant="warning"
+        size="sm"
+        onClick={() => toast({ variant: 'warning', message: 'Bid deadline is tomorrow.' })}
+      >
+        Warning Toast
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => toast({ variant: 'info', message: '3 new submissions received.', duration: 10000 })}
+      >
+        Info Toast (10s)
+      </Button>
+      <Button variant="ghost" size="sm" onClick={dismissAll}>
+        Dismiss All
+      </Button>
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

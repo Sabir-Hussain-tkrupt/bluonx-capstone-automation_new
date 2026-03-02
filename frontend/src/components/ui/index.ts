@@ -42,3 +42,17 @@ export { EmptyState } from './EmptyState';
 export type { EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonTable } from './Skeleton';
 export type { SkeletonProps, SkeletonTableProps } from './Skeleton';
+
+// Navigation components
+export { Sidebar } from './Sidebar';
+export type { SidebarProps, SidebarItem, SidebarSection } from './Sidebar';
+export { Breadcrumbs } from './Breadcrumbs';
+export type { BreadcrumbsProps, BreadcrumbItem } from './Breadcrumbs';
+export { TopHeader } from './TopHeader';
+export type { TopHeaderProps } from './TopHeader';
+export { UserMenu } from './UserMenu';
+export type { UserMenuProps, UserMenuItem } from './UserMenu';
+
+// Toast system
+export { Toast, ToastProvider, useToast } from './Toast';
+export type { ToastData, ToastContextValue } from './Toast';

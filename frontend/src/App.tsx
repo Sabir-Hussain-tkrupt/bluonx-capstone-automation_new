@@ -5,6 +5,7 @@ import { queryClient } from '@/lib/queryClient';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { AppRoutes } from '@/routes';
 import { ScrollToTop } from '@/components/layout/ScrollToTop';
+import { ToastProvider } from '@/components/ui/Toast';
 
 function App() {
   return (
@@ -12,7 +13,9 @@ function App() {
       <ScrollToTop />
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <AppRoutes />
+          <ToastProvider>
+            <AppRoutes />
+          </ToastProvider>
         </AuthProvider>
         <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
