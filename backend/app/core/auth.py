@@ -1,45 +1,167 @@
 """
-FastAPI JWT Authentication Utilities (Stub)
-============================================
-Full implementation: Task 2.6
+JWT authentication and role-based authorization for FastAPI.
 
-This module will:
-1. Validate Supabase JWTs on incoming requests
-2. Extract user_id from the token
-3. Provide a dependency for protected endpoints
-4. Use the Supabase JWT secret to verify signatures
+Three-tier dependency chain:
+  1. get_current_user       — JWT validation only (no DB call)
+  2. get_current_active_user — JWT + DB lookup (checks is_active, gets role)
+  3. require_admin           — Extends above with admin role check
 
-Architecture:
-  - All writes go through FastAPI using service_role key (bypasses RLS)
-  - JWT validation confirms the caller is a legitimate authenticated user
-  - User role/permissions checked against public.users table
+Supports both ES256 (modern Supabase projects, verified via JWKS) and
+HS256 (legacy projects, verified via shared JWT secret). The algorithm
+is auto-detected from the token header.
+
+Most endpoints use get_current_active_user. Admin-only endpoints use require_admin.
 """
 
-# TODO (Task 2.6): Implement the following
-#
-# from fastapi import Depends, HTTPException, status
-# from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-# import jwt  # PyJWT library
-#
-# SUPABASE_JWT_SECRET = settings.SUPABASE_JWT_SECRET  # from env
-#
-# async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
-#     """
-#     Dependency that validates the JWT and returns the user_id.
-#
-#     Usage:
-#       @router.get("/vendors")
-#       async def list_vendors(user_id: str = Depends(get_current_user)):
-#           ...
-#     """
-#     token = credentials.credentials
-#     payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
-#     return payload["sub"]  # sub = user UUID
-#
-# async def require_admin(user_id: str = Depends(get_current_user)):
-#     """
-#     Dependency that requires the admin role.
-#     Queries public.users to check role.
-#     """
-#     # Query public.users where id = user_id and role = 'admin'
-#     pass
+import logging
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+from jwt import PyJWKClient
+from supabase import Client
+
+from app.core.config import settings
+from app.core.supabase_client import get_supabase
+
+logger = logging.getLogger(__name__)
+
+bearer_scheme = HTTPBearer()
+
+# JWKS client for ES256 verification — caches keys automatically.
+# Supabase publishes public keys at /.well-known/jwks.json.
+_jwks_client = PyJWKClient(
+    f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json",
+    cache_keys=True,
+    lifespan=3600,  # re-fetch keys every hour
+)
+
+
+def _decode_token(token: str) -> dict:
+    """
+    Decode a Supabase JWT, auto-detecting the signing algorithm.
+
+    - ES256 tokens (modern): verified via JWKS public key
+    - HS256 tokens (legacy): verified via SUPABASE_JWT_SECRET
+    """
+    # Peek at the header to determine the algorithm
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.DecodeError:
+        raise jwt.InvalidTokenError("Malformed token header")
+
+    alg = header.get("alg", "")
+
+    if alg == "ES256":
+        # Fetch the matching public key from Supabase JWKS
+        signing_key = _jwks_client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated",
+        )
+    else:
+        # Fallback: HS256 with the legacy shared secret
+        return jwt.decode(
+            token,
+            settings.SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    """
+    Validate the Supabase JWT and return basic identity.
+
+    Returns: {"user_id": "uuid", "email": "..."}
+    Fast path — no DB call. Use when you only need identity, not role.
+    """
+    token = credentials.credentials
+    try:
+        payload = _decode_token(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        )
+    except jwt.InvalidTokenError as e:
+        logger.warning("JWT validation failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    return {"user_id": user_id, "email": payload.get("email", "")}
+
+
+async def get_current_active_user(
+    user: dict = Depends(get_current_user),
+    db: Client = Depends(get_supabase),
+) -> dict:
+    """
+    Extend get_current_user with a DB lookup on public.users.
+
+    Checks is_active and deleted_at. Returns full user dict with role.
+    This is the standard dependency for most protected endpoints.
+
+    Returns: {"user_id": "uuid", "email": "...", "full_name": "...",
+              "role": "admin"|"project_manager", "is_active": True}
+    """
+    response = (
+        db.table("users")
+        .select("id, email, full_name, role, is_active, deleted_at")
+        .eq("id", user["user_id"])
+        .single()
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found",
+        )
+
+    profile = response.data
+
+    if profile.get("deleted_at"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account has been deleted",
+        )
+
+    if not profile.get("is_active"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+
+    return {
+        "user_id": profile["id"],
+        "email": profile["email"],
+        "full_name": profile["full_name"],
+        "role": profile["role"],
+        "is_active": profile["is_active"],
+    }
+
+
+async def require_admin(
+    user: dict = Depends(get_current_active_user),
+) -> dict:
+    """Dependency that requires admin role. Extends get_current_active_user."""
+    if user["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user
