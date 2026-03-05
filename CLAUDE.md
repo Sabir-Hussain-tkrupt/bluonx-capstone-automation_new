@@ -98,7 +98,6 @@ Storage policies: `database/storage_rls_policies.sql`
 ## Current Phase
 
 Phase 2: Frontend Foundation + Backend API + Authentication (Tasks 2.1–2.9).
-Task 2.1 (React + Vite scaffold) is complete. Working on routing, auth, and UI components next.
 
 For detailed task breakdowns, acceptance criteria, and what each subtask involves, see `docs/CURRENT_PHASE_TASKS.md`.
 For the complete 12-phase project plan, see `docs/PROJECT_PLAN.pdf`.
