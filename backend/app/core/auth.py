@@ -61,14 +61,16 @@ def _decode_token(token: str) -> dict:
             algorithms=["ES256"],
             audience="authenticated",
         )
-    else:
-        # Fallback: HS256 with the legacy shared secret
+    elif alg == "HS256":
+        # Legacy: shared secret verification
         return jwt.decode(
             token,
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
             audience="authenticated",
         )
+    else:
+        raise jwt.InvalidTokenError(f"Unsupported algorithm: {alg}")
 
 
 async def get_current_user(

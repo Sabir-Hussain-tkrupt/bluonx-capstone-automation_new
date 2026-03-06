@@ -25,6 +25,7 @@ from app.routers import (
     projects,
     tasks,
     trades,
+    users,
     vendors,
 )
 
@@ -60,6 +61,7 @@ app.include_router(health.router)
 # ── API v1 Routers ───────────────────────────────────────────────────────
 _v1 = settings.API_V1_PREFIX
 
+app.include_router(users.router, prefix=_v1, tags=["Users"])
 app.include_router(vendors.router, prefix=_v1, tags=["Vendors"])
 app.include_router(projects.router, prefix=_v1, tags=["Projects"])
 app.include_router(tasks.router, prefix=_v1, tags=["Tasks"])
