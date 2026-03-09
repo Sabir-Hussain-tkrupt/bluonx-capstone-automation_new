@@ -4,14 +4,15 @@ import { renderWithRouter } from '@/test/test-utils';
 import { AuthCallbackPage } from '../AuthCallbackPage';
 
 // Mock Supabase client
-const mockOnAuthStateChange = vi.fn(() => ({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockOnAuthStateChange = vi.fn((_cb: any) => ({
   data: { subscription: { unsubscribe: vi.fn() } },
 }));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     auth: {
-      onAuthStateChange: (...args: unknown[]) => mockOnAuthStateChange(...args),
+      onAuthStateChange: (cb: unknown) => mockOnAuthStateChange(cb),
     },
   },
 }));
@@ -40,7 +41,7 @@ describe('AuthCallbackPage', () => {
     renderWithRouter(<AuthCallbackPage />);
 
     // Get the callback that was passed to onAuthStateChange
-    const callback = mockOnAuthStateChange.mock.calls[0]?.[0] as (event: string) => void;
+    const callback = mockOnAuthStateChange.mock.calls[0][0] as (event: string) => void;
     expect(callback).toBeDefined();
 
     callback('SIGNED_IN');
@@ -54,7 +55,7 @@ describe('AuthCallbackPage', () => {
 
     renderWithRouter(<AuthCallbackPage />);
 
-    const callback = mockOnAuthStateChange.mock.calls[0]?.[0] as (event: string) => void;
+    const callback = mockOnAuthStateChange.mock.calls[0][0] as (event: string) => void;
     callback('PASSWORD_RECOVERY');
 
     expect(mockNavigate).toHaveBeenCalledWith('/auth/reset-password', { replace: true });
