@@ -38,11 +38,11 @@ export function Breadcrumbs({
 
   return (
     <nav aria-label="Breadcrumb" className={className}>
-      <ol className="flex items-center gap-1.5">
+      <ol className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
         {items.map((item, idx) => {
           const isLast = idx === items.length - 1;
           return (
-            <li key={idx} className="flex items-center gap-1.5">
+            <li key={idx} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
               {idx > 0 && (
                 <span aria-hidden="true">
                   {separator ?? <DefaultSeparator />}

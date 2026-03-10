@@ -65,7 +65,7 @@ export function RadioGroup({
               key={option.value}
               htmlFor={optionId}
               className={cn(
-                'flex items-start gap-3 cursor-pointer',
+                'flex min-h-[44px] items-center gap-3 py-1 cursor-pointer',
                 option.disabled && 'cursor-not-allowed opacity-50',
               )}
             >
@@ -78,7 +78,7 @@ export function RadioGroup({
                 onChange={() => onChange?.(option.value)}
                 {...(value !== undefined ? { checked: value === option.value } : {})}
                 className={cn(
-                  'mt-0.5 shrink-0 border-secondary-300 accent-primary-600',
+                  'shrink-0 border-secondary-300 accent-primary-600',
                   'focus:ring-2 focus:ring-primary-500/20 focus:ring-offset-2',
                   sizeStyles[size],
                 )}

@@ -31,6 +31,8 @@ export interface TableProps<T> {
   emptyState?: React.ReactNode;
   onRowClick?: (row: T) => void;
   className?: string;
+  /** Column ID to use as the card title on mobile. Defaults to first column. */
+  mobileTitle?: string;
 }
 
 const alignStyles: Record<string, string> = {
@@ -62,6 +64,58 @@ function SortIcon({ direction }: { direction?: 'asc' | 'desc' }) {
   );
 }
 
+/** Mobile card view for a single data row. */
+function MobileCard<T>({
+  row,
+  columns,
+  titleColumnId,
+  onRowClick,
+}: {
+  row: T;
+  columns: Column<T>[];
+  titleColumnId: string;
+  onRowClick?: (row: T) => void;
+}) {
+  const titleCol = columns.find((c) => c.id === titleColumnId) ?? columns[0];
+  const detailCols = columns.filter((c) => c.id !== titleCol.id);
+
+  const content = (
+    <>
+      <p className="text-sm font-semibold text-secondary-900">
+        {getCellValue(row, titleCol.accessor)}
+      </p>
+      {detailCols.length > 0 && (
+        <dl className="mt-2 space-y-1">
+          {detailCols.map((col) => (
+            <div key={col.id} className="flex items-baseline justify-between gap-2 text-sm">
+              <dt className="shrink-0 text-secondary-500">{col.header}</dt>
+              <dd className="text-right text-secondary-900">{getCellValue(row, col.accessor)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </>
+  );
+
+  if (onRowClick) {
+    return (
+      <button
+        type="button"
+        onClick={() => onRowClick(row)}
+        className="w-full rounded-lg border border-secondary-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-secondary-50 active:bg-secondary-100"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-secondary-200 bg-white p-4 shadow-sm">
+      {content}
+    </div>
+  );
+}
+
 export function Table<T>({
   columns,
   data,
@@ -74,12 +128,28 @@ export function Table<T>({
   emptyState,
   onRowClick,
   className,
+  mobileTitle,
 }: TableProps<T>) {
+  const titleColumnId = mobileTitle ?? columns[0]?.id ?? '';
+
   // Loading state
   if (isLoading) {
     return (
       <div className={cn('overflow-hidden rounded-lg border border-secondary-200', className)}>
-        <table className="w-full">
+        {/* Mobile skeleton */}
+        <div className="space-y-3 p-4 md:hidden">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-secondary-200 bg-white p-4">
+              <Skeleton width="50%" height="16px" />
+              <div className="mt-3 space-y-2">
+                <Skeleton height="14px" />
+                <Skeleton height="14px" />
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop skeleton */}
+        <table className="hidden w-full md:table">
           <thead>
             <tr className="border-b border-secondary-200 bg-secondary-50">
               {columns.map((col) => (
@@ -109,7 +179,8 @@ export function Table<T>({
   if (data.length === 0) {
     return (
       <div className={cn('overflow-hidden rounded-lg border border-secondary-200', className)}>
-        <table className="w-full">
+        {/* Desktop header */}
+        <table className="hidden w-full md:table">
           <thead>
             <tr className="border-b border-secondary-200 bg-secondary-50">
               {columns.map((col) => (
@@ -149,7 +220,21 @@ export function Table<T>({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-secondary-200', className)}>
-      <div className="overflow-x-auto">
+      {/* Mobile card view */}
+      <div className="space-y-3 p-4 md:hidden">
+        {data.map((row) => (
+          <MobileCard
+            key={keyExtractor(row)}
+            row={row}
+            columns={columns}
+            titleColumnId={titleColumnId}
+            onRowClick={onRowClick}
+          />
+        ))}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full">
           <thead>
             <tr className="border-b border-secondary-200 bg-secondary-50">
@@ -217,7 +302,7 @@ export function Table<T>({
 
       {/* Pagination */}
       {pagination && (
-        <div className="flex items-center justify-between border-t border-secondary-200 bg-white px-6 py-3">
+        <div className="flex flex-col gap-3 border-t border-secondary-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-sm text-secondary-500">
             Showing <span className="font-medium">{startRow}</span> to{' '}
             <span className="font-medium">{endRow}</span> of{' '}

@@ -8,6 +8,7 @@ import { UserMenu } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
 import type { SidebarSection } from '@/components/ui/Sidebar';
+import bluonxLogo from '@/assets/bluonx-logo.png';
 
 function NavIcon({ d }: { d: string }) {
   return (
@@ -107,6 +108,16 @@ export function DashboardLayout() {
           currentPath={location.pathname}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+          logo={
+            sidebarCollapsed ? (
+              <img src={bluonxLogo} alt="BluOnX" className="h-7 w-7" />
+            ) : (
+              <div className="flex items-center gap-2">
+                <img src={bluonxLogo} alt="" className="h-8 w-8" />
+                <span className="text-xl font-bold text-primary-600">BluOnX</span>
+              </div>
+            )
+          }
         />
       </div>
 

@@ -62,7 +62,7 @@ export function Tabs({
     <div>
       <div
         role="tablist"
-        className="flex border-b border-secondary-200"
+        className="flex overflow-x-auto border-b border-secondary-200 scrollbar-hide"
         onKeyDown={handleKeyDown}
       >
         {tabs.map((tab) => {
@@ -82,7 +82,7 @@ export function Tabs({
               disabled={tab.disabled}
               onClick={() => onChange(tab.id)}
               className={cn(
-                'relative font-medium transition-colors focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none',
+                'relative shrink-0 font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none',
                 sizeStyles[size],
                 isActive
                   ? 'text-primary-600'

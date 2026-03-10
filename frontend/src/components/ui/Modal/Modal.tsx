@@ -13,10 +13,10 @@ export interface ModalProps {
 }
 
 const sizeStyles: Record<string, string> = {
-  sm: 'max-w-sm',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
+  sm: 'sm:max-w-sm',
+  md: 'sm:max-w-lg',
+  lg: 'sm:max-w-2xl',
+  xl: 'sm:max-w-4xl',
 };
 
 export function Modal({
@@ -76,7 +76,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
       onKeyDown={handleKeyDown}
     >
       {/* Backdrop */}
@@ -94,7 +94,7 @@ export function Modal({
         aria-labelledby="modal-title"
         tabIndex={-1}
         className={cn(
-          'relative z-10 w-full rounded-lg bg-white shadow-xl',
+          'relative z-10 w-full bg-white shadow-xl rounded-t-lg sm:rounded-lg',
           'max-h-[90vh] flex flex-col',
           sizeStyles[size],
         )}

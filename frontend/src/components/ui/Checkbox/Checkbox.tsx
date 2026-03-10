@@ -31,7 +31,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
 
     return (
       <div className="w-full">
-        <label htmlFor={inputId} className="flex items-start gap-3 cursor-pointer">
+        <label htmlFor={inputId} className="flex min-h-[44px] items-center gap-3 py-1 cursor-pointer">
           <input
             ref={ref}
             id={inputId}
@@ -41,7 +41,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
               [errorId, descId].filter(Boolean).join(' ') || undefined
             }
             className={cn(
-              'mt-0.5 shrink-0 rounded border-secondary-300 accent-primary-600',
+              'shrink-0 rounded border-secondary-300 accent-primary-600',
               'focus:ring-2 focus:ring-primary-500/20 focus:ring-offset-2',
               sizeStyles[size],
               'disabled:cursor-not-allowed disabled:opacity-50',
