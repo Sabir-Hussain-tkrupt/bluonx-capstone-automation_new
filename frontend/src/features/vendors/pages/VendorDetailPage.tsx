@@ -258,6 +258,8 @@ export function VendorDetailPage() {
               <ContactForm
                 onCancel={() => setShowAddContact(false)}
                 isLoading={createContactMutation.isPending}
+                hasPrimaryContact={contacts.some((c) => c.is_primary)}
+                contactCount={contacts.length}
                 onSubmit={(data) => {
                   createContactMutation.mutate(
                     { vendorId: id!, ...data },
@@ -275,6 +277,8 @@ export function VendorDetailPage() {
                   contact={editingContact}
                   onCancel={() => setEditingContact(null)}
                   isLoading={updateContactMutation.isPending}
+                  hasPrimaryContact={contacts.some((c) => c.is_primary)}
+                  contactCount={contacts.length}
                   onSubmit={(data) => {
                     updateContactMutation.mutate(
                       { vendorId: id!, contactId: editingContact.id, ...data },

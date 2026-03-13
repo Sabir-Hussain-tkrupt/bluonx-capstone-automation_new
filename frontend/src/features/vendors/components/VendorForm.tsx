@@ -75,7 +75,16 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
     },
   });
 
+  const [contactsError, setContactsError] = useState('');
+
   const handleFormSubmit = (data: VendorFormValues) => {
+    // Require at least one contact when creating a new vendor
+    if (!isEdit && contacts.length === 0) {
+      setContactsError('At least one contact with email is required to create a vendor.');
+      return;
+    }
+    setContactsError('');
+
     const cleanedData = {
       ...data,
       insurance_coverage_amount: data.insurance_coverage_amount === '' ? undefined : Number(data.insurance_coverage_amount),
@@ -123,10 +132,19 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
     setContactEmail('');
     setContactPhone('');
     setContactTitle('');
+    setContactsError('');
   };
 
   const removeContact = (idx: number) => {
-    setContacts(contacts.filter((_, i) => i !== idx));
+    const wasPrimary = contacts[idx].is_primary;
+    const updated = contacts.filter((_, i) => i !== idx);
+    // If we removed the primary contact, promote the first remaining contact
+    if (wasPrimary && updated.length > 0) {
+      updated[0] = { ...updated[0], is_primary: true };
+    }
+    setContacts(updated);
+    // Clear contacts error if still at least one contact
+    if (updated.length > 0) setContactsError('');
   };
 
   return (
@@ -265,7 +283,14 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
         {/* Contacts (Create mode only) */}
         {!isEdit && (
           <div>
-            <h3 className="mb-3 text-sm font-semibold text-secondary-900">Contacts</h3>
+            <h3 className="mb-3 text-sm font-semibold text-secondary-900">
+              Contacts <span className="text-danger-500">*</span>
+            </h3>
+            {contactsError && (
+              <p className="mb-3 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">
+                {contactsError}
+              </p>
+            )}
 
             {contacts.length > 0 && (
               <div className="mb-3 space-y-2">

@@ -190,9 +190,24 @@ async def create_vendor(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Create a new vendor with optional contacts and trade associations."""
+    """Create a new vendor with contacts and optional trade associations.
+
+    At least one contact with an email address is required.
+    """
     contacts_data = vendor.contacts or []
     trade_ids = vendor.trade_ids or []
+
+    # Validate: at least one contact is required
+    if not contacts_data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one contact with an email address is required.",
+        )
+
+    # Ensure exactly one primary contact (first contact if none marked)
+    has_primary = any(c.is_primary for c in contacts_data)
+    if not has_primary:
+        contacts_data[0].is_primary = True
 
     # Build vendor insert data (exclude contacts and trade_ids)
     vendor_data = vendor.model_dump(exclude={"contacts", "trade_ids"})
@@ -360,11 +375,34 @@ async def create_vendor_contact(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Add a contact to a vendor."""
+    """Add a contact to a vendor.
+
+    If is_primary=True, any existing primary contact is automatically demoted.
+    If this is the first contact for the vendor, it is automatically set as primary.
+    """
     _get_vendor_or_404(db, vendor_id)
 
     contact_data = contact.model_dump()
     contact_data["vendor_id"] = str(vendor_id)
+
+    # Check existing contacts for this vendor
+    existing = (
+        db.table("vendor_contacts")
+        .select("id, is_primary")
+        .eq("vendor_id", str(vendor_id))
+        .execute()
+    )
+    existing_contacts = existing.data or []
+
+    # Auto-promote to primary if this is the first contact
+    if len(existing_contacts) == 0:
+        contact_data["is_primary"] = True
+
+    # If marking as primary, demote all other primaries
+    if contact_data.get("is_primary"):
+        primary_ids = [c["id"] for c in existing_contacts if c["is_primary"]]
+        for pid in primary_ids:
+            db.table("vendor_contacts").update({"is_primary": False}).eq("id", pid).execute()
 
     response = db.table("vendor_contacts").insert(contact_data).execute()
 
@@ -385,7 +423,11 @@ async def update_vendor_contact(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Update a vendor contact."""
+    """Update a vendor contact.
+
+    If is_primary is set to True, all other contacts for this vendor are
+    automatically demoted to non-primary.
+    """
     _get_vendor_or_404(db, vendor_id)
 
     update_data = contact.model_dump(exclude_unset=True)
@@ -394,6 +436,19 @@ async def update_vendor_contact(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    # If promoting to primary, demote all other primaries first
+    if update_data.get("is_primary") is True:
+        existing = (
+            db.table("vendor_contacts")
+            .select("id, is_primary")
+            .eq("vendor_id", str(vendor_id))
+            .neq("id", str(contact_id))
+            .eq("is_primary", True)
+            .execute()
+        )
+        for c in (existing.data or []):
+            db.table("vendor_contacts").update({"is_primary": False}).eq("id", c["id"]).execute()
 
     response = (
         db.table("vendor_contacts")
@@ -419,22 +474,45 @@ async def delete_vendor_contact(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Delete a vendor contact."""
+    """Delete a vendor contact.
+
+    If the deleted contact was primary, the first remaining contact is
+    automatically promoted to primary.
+    """
     _get_vendor_or_404(db, vendor_id)
 
-    response = (
+    # Fetch the contact to check if it was primary
+    target = (
         db.table("vendor_contacts")
-        .delete()
+        .select("id, is_primary")
         .eq("id", str(contact_id))
         .eq("vendor_id", str(vendor_id))
+        .single()
         .execute()
     )
-
-    if not response.data:
+    if not target.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contact not found",
         )
+
+    was_primary = target.data.get("is_primary", False)
+
+    # Delete the contact
+    db.table("vendor_contacts").delete().eq("id", str(contact_id)).execute()
+
+    # If we just deleted the primary, promote the first remaining contact
+    if was_primary:
+        remaining = (
+            db.table("vendor_contacts")
+            .select("id")
+            .eq("vendor_id", str(vendor_id))
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+        if remaining.data:
+            db.table("vendor_contacts").update({"is_primary": True}).eq("id", remaining.data[0]["id"]).execute()
 
 
 # ── Vendor Trades ────────────────────────────────────────────────────────

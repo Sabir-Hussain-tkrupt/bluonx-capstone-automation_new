@@ -22,9 +22,23 @@ interface ContactFormProps {
   onSubmit: (data: ContactFormValues) => void;
   onCancel: () => void;
   isLoading?: boolean;
+  /** Whether the vendor already has a primary contact */
+  hasPrimaryContact?: boolean;
+  /** Total existing contact count for the vendor */
+  contactCount?: number;
 }
 
-export function ContactForm({ contact, onSubmit, onCancel, isLoading = false }: ContactFormProps) {
+export function ContactForm({
+  contact,
+  onSubmit,
+  onCancel,
+  isLoading = false,
+  hasPrimaryContact = false,
+  contactCount = 0,
+}: ContactFormProps) {
+  // Auto-set primary if this is the first contact for the vendor
+  const isFirstContact = !contact && contactCount === 0;
+
   const {
     register,
     handleSubmit,
@@ -36,7 +50,7 @@ export function ContactForm({ contact, onSubmit, onCancel, isLoading = false }: 
       email: contact?.email ?? '',
       phone: contact?.phone ?? '',
       title: contact?.title ?? '',
-      is_primary: contact?.is_primary ?? false,
+      is_primary: contact?.is_primary ?? isFirstContact,
     },
   });
 
@@ -57,7 +71,18 @@ export function ContactForm({ contact, onSubmit, onCancel, isLoading = false }: 
         </FormField>
       </div>
 
-      <Checkbox label="Primary contact" {...register('is_primary')} />
+      <Checkbox
+        label="Primary contact"
+        {...register('is_primary')}
+        disabled={isFirstContact}
+        description={
+          isFirstContact
+            ? 'First contact is automatically the primary contact.'
+            : hasPrimaryContact && !contact?.is_primary
+              ? 'Setting this will replace the current primary contact.'
+              : undefined
+        }
+      />
 
       <div className="flex justify-end gap-3">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={isLoading}>

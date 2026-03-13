@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import Papa from 'papaparse';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -83,6 +83,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
   const { toast } = useToast();
   const importMutation = useImportVendors();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Step state
   const [step, setStep] = useState<Step>('upload');
@@ -273,9 +274,18 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
       {/* ─── Step 1: Upload ──────────────────────────────────── */}
       {step === 'upload' && (
         <div
-          className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-secondary-300 p-6 text-center transition-colors hover:border-primary-400 sm:p-12"
+          role="button"
+          tabIndex={0}
+          className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-secondary-300 p-6 text-center transition-colors hover:border-primary-400 hover:bg-secondary-50 sm:p-12"
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
         >
           <svg
             className="mb-4 h-12 w-12 text-secondary-400"
@@ -293,18 +303,17 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
           <p className="mb-2 text-sm font-medium text-secondary-700">
             Drag and drop your CSV file here
           </p>
-          <p className="mb-4 text-xs text-secondary-500">or click to browse</p>
-          <label className="cursor-pointer">
-            <Button variant="outline" size="sm" type="button">
-              Choose File
-            </Button>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleFileInput}
-            />
-          </label>
+          <p className="mb-4 text-xs text-secondary-500">or click anywhere to browse</p>
+          <div className="rounded-lg bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700">
+            Choose File
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleFileInput}
+          />
           <p className="mt-4 text-xs text-secondary-400">
             Expected columns: Company Name, Address, City, State, ZIP, Contact Name, Email, Phone
           </p>
