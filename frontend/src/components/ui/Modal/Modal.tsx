@@ -10,6 +10,8 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   footer?: React.ReactNode;
   closeOnOverlayClick?: boolean;
+  /** Additional classes for the modal body container (e.g. 'overflow-visible' for dropdowns) */
+  bodyClassName?: string;
 }
 
 const sizeStyles: Record<string, string> = {
@@ -27,6 +29,7 @@ export function Modal({
   size = 'md',
   footer,
   closeOnOverlayClick = true,
+  bodyClassName,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
@@ -117,7 +120,7 @@ export function Modal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+        <div className={cn('flex-1 overflow-y-auto px-6 py-4', bodyClassName)}>{children}</div>
 
         {/* Footer */}
         {footer && (

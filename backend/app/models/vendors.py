@@ -34,6 +34,9 @@ class VendorCreate(BluOnXBase):
     onboarding_status: Literal["pending", "partial", "complete"] = "pending"
     status: Literal["active", "inactive", "suspended"] = "active"
     notes: str | None = None
+    # Optional inline creation of contacts and trade associations
+    contacts: list["VendorContactCreateInline"] | None = None
+    trade_ids: list[UUID] | None = None
 
 
 class VendorUpdate(BluOnXBase):
@@ -75,7 +78,32 @@ class VendorResponse(BluOnXBase):
     deleted_at: datetime | None = None
 
 
+class VendorDetailResponse(VendorResponse):
+    """Extended vendor response with related entities for detail view."""
+    contacts: list["VendorContactResponse"] = []
+    trades: list["VendorTradeWithNameResponse"] = []
+    documents: list["VendorDocumentResponse"] = []
+    flags: list["VendorFlagResponse"] = []
+
+
+class VendorListResponse(BluOnXBase):
+    """Paginated vendor list response."""
+    items: list[VendorResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 # ── vendor_contacts ──────────────────────────────────────────────────────
+
+
+class VendorContactCreateInline(BluOnXBase):
+    """Contact creation when creating a vendor (no vendor_id needed)."""
+    full_name: str
+    email: str
+    phone: str | None = None
+    title: str | None = None
+    is_primary: bool = False
 
 
 class VendorContactCreate(BluOnXBase):
@@ -115,10 +143,25 @@ class VendorTradeCreate(BluOnXBase):
     trade_id: UUID
 
 
+class VendorBulkTradeCreate(BluOnXBase):
+    """Bulk trade association — accepts multiple trade IDs at once."""
+    trade_ids: list[UUID]
+
+
 class VendorTradeResponse(BluOnXBase):
     id: UUID
     vendor_id: UUID
     trade_id: UUID
+    created_at: datetime
+
+
+class VendorTradeWithNameResponse(BluOnXBase):
+    """Trade association with the trade name and phase included."""
+    id: UUID
+    vendor_id: UUID
+    trade_id: UUID
+    trade_name: str | None = None
+    trade_phase: str | None = None
     created_at: datetime
 
 
@@ -147,3 +190,52 @@ class VendorDocumentResponse(BluOnXBase):
     uploaded_by: UUID
     uploaded_at: datetime
     updated_at: datetime
+
+
+# ── vendor_flags ─────────────────────────────────────────────────────────
+
+
+class VendorFlagResponse(BluOnXBase):
+    id: UUID
+    vendor_id: UUID
+    flagged_by: UUID
+    reason: str
+    notes: str | None = None
+    milestone_id: UUID | None = None
+    is_resolved: bool
+    resolved_at: datetime | None = None
+    resolved_by: UUID | None = None
+    created_at: datetime
+
+
+# ── CSV Import ───────────────────────────────────────────────────────────
+
+
+class VendorImportRow(BluOnXBase):
+    """Single row from a CSV import."""
+    company_name: str
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    contact_title: str | None = None
+    notes: str | None = None
+
+
+class VendorImportRequest(BluOnXBase):
+    """Request body for bulk CSV import."""
+    rows: list[VendorImportRow]
+
+
+class VendorImportError(BluOnXBase):
+    row: int
+    message: str
+
+
+class VendorImportResponse(BluOnXBase):
+    """Response for CSV import operation."""
+    created: int
+    errors: list[VendorImportError]

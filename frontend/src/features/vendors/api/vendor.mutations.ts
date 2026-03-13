@@ -1,57 +1,137 @@
 import { api } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
-import type { Vendor } from '@/features/vendors/api/vendor.queries';
 
 // ─── Mutation Input Types ─────────────────────────────────────────────
 
 export interface CreateVendorInput {
   company_name: string;
-  entity_type: string;
-  address_line1: string;
-  city: string;
-  state: string;
-  zip_code: string;
-  dba_name?: string;
-  phone?: string;
-  email?: string;
-  website?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  insurance_expiration_date?: string;
+  insurance_coverage_amount?: number;
+  bonding_capacity?: number;
+  max_active_jobs?: number;
+  onboarding_status?: 'pending' | 'partial' | 'complete';
+  status?: 'active' | 'inactive' | 'suspended';
   notes?: string;
+  contacts?: ContactInlineInput[];
+  trade_ids?: string[];
+}
+
+export interface ContactInlineInput {
+  full_name: string;
+  email: string;
+  phone?: string;
+  title?: string;
+  is_primary?: boolean;
 }
 
 export interface UpdateVendorInput {
   id: string;
   company_name?: string;
-  phone?: string;
-  email?: string;
-  website?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  insurance_expiration_date?: string;
+  insurance_coverage_amount?: number;
+  bonding_capacity?: number;
+  max_active_jobs?: number;
+  onboarding_status?: 'pending' | 'partial' | 'complete';
+  status?: 'active' | 'inactive' | 'suspended';
   notes?: string;
-  vendor_status?: string;
+}
+
+export interface CreateContactInput {
+  vendorId: string;
+  full_name: string;
+  email: string;
+  phone?: string;
+  title?: string;
+  is_primary?: boolean;
+}
+
+export interface UpdateContactInput {
+  vendorId: string;
+  contactId: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  title?: string;
+  is_primary?: boolean;
+}
+
+export interface BulkTradeInput {
+  vendorId: string;
+  trade_ids: string[];
+}
+
+export interface VendorImportRow {
+  company_name: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  contact_title?: string;
+  notes?: string;
+}
+
+export interface VendorImportResponse {
+  created: number;
+  errors: { row: number; message: string }[];
 }
 
 // ─── FastAPI Write Operations ─────────────────────────────────────────
-// NOTE: FastAPI backend is not built yet (Task 2.6).
-// These functions establish the pattern for all write operations.
 
-/**
- * Create a new vendor via FastAPI.
- * FastAPI validates, writes with service_role, returns the created vendor.
- */
-export async function createVendor(input: CreateVendorInput): Promise<Vendor> {
-  const { data } = await api.post<Vendor>(API_ENDPOINTS.VENDORS, input);
+export async function createVendor(input: CreateVendorInput) {
+  const { data } = await api.post(API_ENDPOINTS.VENDORS, input);
   return data;
 }
 
-/**
- * Update an existing vendor via FastAPI.
- */
-export async function updateVendor({ id, ...input }: UpdateVendorInput): Promise<Vendor> {
-  const { data } = await api.patch<Vendor>(API_ENDPOINTS.VENDOR(id), input);
+export async function updateVendor({ id, ...input }: UpdateVendorInput) {
+  const { data } = await api.patch(API_ENDPOINTS.VENDOR(id), input);
   return data;
 }
 
-/**
- * Soft-delete a vendor via FastAPI (sets deleted_at timestamp).
- */
 export async function deleteVendor(id: string): Promise<void> {
   await api.delete(API_ENDPOINTS.VENDOR(id));
+}
+
+// ─── Contacts ─────────────────────────────────────────────────────────
+
+export async function createContact({ vendorId, ...input }: CreateContactInput) {
+  const { data } = await api.post(API_ENDPOINTS.VENDOR_CONTACTS(vendorId), input);
+  return data;
+}
+
+export async function updateContact({ vendorId, contactId, ...input }: UpdateContactInput) {
+  const { data } = await api.patch(API_ENDPOINTS.VENDOR_CONTACT(vendorId, contactId), input);
+  return data;
+}
+
+export async function deleteContact(vendorId: string, contactId: string): Promise<void> {
+  await api.delete(API_ENDPOINTS.VENDOR_CONTACT(vendorId, contactId));
+}
+
+// ─── Trades ───────────────────────────────────────────────────────────
+
+export async function addVendorTrades({ vendorId, trade_ids }: BulkTradeInput) {
+  const { data } = await api.post(API_ENDPOINTS.VENDOR_TRADES_ENDPOINT(vendorId), { trade_ids });
+  return data;
+}
+
+export async function removeVendorTrade(vendorId: string, tradeId: string): Promise<void> {
+  await api.delete(API_ENDPOINTS.VENDOR_TRADE(vendorId, tradeId));
+}
+
+// ─── CSV Import ───────────────────────────────────────────────────────
+
+export async function importVendorsCSV(rows: VendorImportRow[]): Promise<VendorImportResponse> {
+  const { data } = await api.post<VendorImportResponse>(API_ENDPOINTS.VENDOR_IMPORT, { rows });
+  return data;
 }

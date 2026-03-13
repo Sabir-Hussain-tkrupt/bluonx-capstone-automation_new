@@ -10,6 +10,11 @@ export const API_ENDPOINTS = {
   // Vendors
   VENDORS: '/vendors',
   VENDOR: (id: string) => `/vendors/${id}`,
+  VENDOR_CONTACTS: (vendorId: string) => `/vendors/${vendorId}/contacts`,
+  VENDOR_CONTACT: (vendorId: string, contactId: string) => `/vendors/${vendorId}/contacts/${contactId}`,
+  VENDOR_TRADES_ENDPOINT: (vendorId: string) => `/vendors/${vendorId}/trades`,
+  VENDOR_TRADE: (vendorId: string, tradeId: string) => `/vendors/${vendorId}/trades/${tradeId}`,
+  VENDOR_IMPORT: '/vendors/import',
 
   // Projects
   PROJECTS: '/projects',
