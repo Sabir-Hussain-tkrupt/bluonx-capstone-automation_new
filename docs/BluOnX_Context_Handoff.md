@@ -1,4 +1,4 @@
-# BluOnX Bid Management System -- Project Context Handoff
+# BluOnX Development Operations Platform -- Project Context Handoff
 **Date:** March 6, 2026
 **Version:** 3.1
 **Purpose:** Complete project context for continuing development across conversation threads.

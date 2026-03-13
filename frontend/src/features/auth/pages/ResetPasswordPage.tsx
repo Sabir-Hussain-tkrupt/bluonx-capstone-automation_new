@@ -72,7 +72,7 @@ export function ResetPasswordPage() {
       <div className="w-full max-w-md p-6">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-primary-700">BluOnX</h1>
-          <p className="text-xs text-gray-400">Bid Management System</p>
+          <p className="text-xs text-gray-400">Development Operations Platform</p>
         </div>
 
         <div className="mb-8 text-center">

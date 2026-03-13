@@ -1,4 +1,4 @@
-# Current Phase Tasks — BluOnX Bid Management System
+# Current Phase Tasks — BluOnX Development Operations Platform
 
 **Last Updated:** March 11, 2026
 
