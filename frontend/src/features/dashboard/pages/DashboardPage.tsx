@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
+import { supabase } from '@/lib/supabase';
 
 function VendorsIcon() {
   return (
@@ -69,6 +71,32 @@ function StatPlaceholder({ label, value }: { label: string; value: string }) {
 export function DashboardPage() {
   const { profile } = useAuth();
 
+  const { data: activeProjectCount } = useQuery({
+    queryKey: ['dashboard', 'activeProjects'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('projects')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active')
+        .is('deleted_at', null);
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
+  const { data: activeVendorCount } = useQuery({
+    queryKey: ['dashboard', 'activeVendors'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('vendors')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active')
+        .is('deleted_at', null);
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
   const currentDate = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
@@ -94,12 +122,12 @@ export function DashboardPage() {
         </p>
       </div>
 
-      {/* Summary stats placeholders */}
+      {/* Summary stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPlaceholder label="Active Projects" value="--" />
+        <StatPlaceholder label="Active Projects" value={activeProjectCount != null ? String(activeProjectCount) : '--'} />
         <StatPlaceholder label="Open Tasks" value="--" />
         <StatPlaceholder label="Pending Bids" value="--" />
-        <StatPlaceholder label="Active Vendors" value="--" />
+        <StatPlaceholder label="Active Vendors" value={activeVendorCount != null ? String(activeVendorCount) : '--'} />
       </div>
 
       {/* Quick navigation cards */}

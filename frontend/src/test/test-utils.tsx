@@ -12,6 +12,7 @@ function createTestQueryClient() {
   });
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 function AllProviders({ children }: { children: React.ReactNode }) {
   const queryClient = createTestQueryClient();
   return (

@@ -2,44 +2,79 @@ import { supabase } from '@/lib/supabase';
 import type { ApiError } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────
+
+export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+
 /**
- * Project row shape.
- *
- * Temporary type until database.types.ts is fully generated.
+ * Project row shape matching the projects table in the database.
  */
 export interface Project {
   id: string;
-  project_name: string;
-  project_code: string | null;
-  project_type: string;
-  address_line1: string;
-  city: string;
-  state: string;
-  zip_code: string;
+  name: string;
+  description: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
   latitude: number | null;
   longitude: number | null;
-  project_status: string;
+  budget: number | null;
+  status: ProjectStatus;
   start_date: string | null;
   estimated_end_date: string | null;
-  total_budget: number | null;
-  notes: string | null;
-  created_by: string | null;
-  is_active: boolean;
+  created_by: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface ProjectListFilters {
+  search?: string;
+  status?: string;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
+  page?: number;
+  page_size?: number;
+}
+
+export interface PaginatedProjects {
+  items: Project[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 // ─── Supabase Direct Reads ────────────────────────────────────────────
 
 /**
- * Fetch all projects. RLS ensures only authenticated users see data.
+ * Fetch projects with optional search, filter, sort, and pagination.
+ * RLS ensures only authenticated users see data.
  */
-export async function fetchProjects(): Promise<Project[]> {
-  const { data, error } = await supabase
+export async function fetchProjects(filters?: ProjectListFilters): Promise<PaginatedProjects> {
+  const page = filters?.page ?? 1;
+  const pageSize = filters?.page_size ?? 25;
+  const sortBy = filters?.sort_by ?? 'name';
+  const ascending = (filters?.sort_dir ?? 'asc') !== 'desc';
+
+  let query = supabase
     .from('projects')
-    .select('*')
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
+    .select('*', { count: 'exact' })
+    .is('deleted_at', null);
+
+  if (filters?.search) {
+    query = query.ilike('name', `%${filters.search}%`);
+  }
+
+  if (filters?.status) {
+    query = query.eq('status', filters.status);
+  }
+
+  query = query.order(sortBy, { ascending });
+
+  const offset = (page - 1) * pageSize;
+  query = query.range(offset, offset + pageSize - 1);
+
+  const { data, error, count } = await query;
 
   if (error) {
     const apiError: ApiError = {
@@ -51,9 +86,12 @@ export async function fetchProjects(): Promise<Project[]> {
     throw apiError;
   }
 
-  // Cast through unknown because database.types.ts is a placeholder.
-  // Once full types are generated, these casts can be removed.
-  return (data ?? []) as unknown as Project[];
+  return {
+    items: (data ?? []) as unknown as Project[],
+    total: count ?? 0,
+    page,
+    page_size: pageSize,
+  };
 }
 
 /**
@@ -64,6 +102,7 @@ export async function fetchProjectById(id: string): Promise<Project> {
     .from('projects')
     .select('*')
     .eq('id', id)
+    .is('deleted_at', null)
     .single();
 
   if (error) {

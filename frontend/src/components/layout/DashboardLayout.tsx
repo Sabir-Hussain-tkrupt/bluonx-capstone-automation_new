@@ -25,8 +25,10 @@ export function DashboardLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Close mobile sidebar on navigation
+  // Close mobile sidebar on navigation — setState here is intentional:
+  // we reset UI state in response to route changes (an external system).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting UI on route change is a valid pattern
     setMobileMenuOpen(false);
   }, [location.pathname]);
 

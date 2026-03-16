@@ -37,6 +37,7 @@ export type Database = {
       };
       // Other tables will be auto-generated.
       // This placeholder only includes 'users' since auth needs it.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       [key: string]: any;
     };
     Views: Record<string, never>;
