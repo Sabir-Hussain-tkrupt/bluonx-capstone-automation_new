@@ -38,7 +38,7 @@
 
 ---
 
-## Phase 3: Core Entity Management (65h) — 🔄 IN PROGRESS
+## Phase 3: Core Entity Management — 🔄 IN PROGRESS
 
 **Goal:** Full CRUD interfaces and API endpoints for four core entities (vendors, projects, tasks, bid templates) plus document upload and Google Maps integration. After this phase, PMs can manage all data needed before the bid invitation flow begins.
 
