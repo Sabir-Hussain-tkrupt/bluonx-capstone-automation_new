@@ -14,9 +14,9 @@
 --
 -- SEEDS:
 --   1. Trades (28 scope categories with correct phase assignments)
---   2. Vendors (38 synthetic companies with realistic MO addresses)
---   3. Vendor contacts (1-2 per vendor, ~43 total)
---   4. Vendor ↔ Trade associations (~45 links, includes multi-trade vendors)
+--   2. Vendors (44 synthetic companies with realistic MO addresses)
+--   3. Vendor contacts (1-2 per vendor, ~48 total)
+--   4. Vendor ↔ Trade associations (~48 links, includes multi-trade vendors)
 --
 -- TEST EDGE CASES INCLUDED:
 --   - 3 vendors with expired insurance (filter testing)
@@ -848,6 +848,6 @@ $$;
 
 -- ============================================================================
 -- END — Summary:
---   Trades: 28 | Vendors: 38 | Contacts: ~43 | Associations: ~45
+--   Trades: 28 | Vendors: 44 | Contacts: ~48 | Associations: ~48
 --   Expired insurance: 3 | Incomplete onboarding: 2 | Multi-trade: 5
 -- ============================================================================

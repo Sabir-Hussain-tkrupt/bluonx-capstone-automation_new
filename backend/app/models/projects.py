@@ -68,6 +68,14 @@ class ProjectResponse(BluOnXBase):
     deleted_at: datetime | None = None
 
 
+class ProjectListResponse(BluOnXBase):
+    """Paginated project list response."""
+    items: list[ProjectResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 # ── project_documents ────────────────────────────────────────────────────
 
 
