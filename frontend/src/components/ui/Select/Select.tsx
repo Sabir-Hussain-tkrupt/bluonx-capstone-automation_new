@@ -26,8 +26,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ options, size = 'md', error, placeholder, className, id, ...rest }, ref) => {
     const autoId = useId();
     const selectId = id ?? autoId;
-    const errorId = error ? `${selectId}-error` : undefined;
-
     return (
       <div className="w-full">
         <div className="relative">
@@ -35,7 +33,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             id={selectId}
             aria-invalid={error ? true : undefined}
-            aria-describedby={errorId}
             className={cn(
               'w-full appearance-none rounded-lg border bg-white px-3 pr-10 transition-colors',
               'focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none',
@@ -75,11 +72,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             </svg>
           </div>
         </div>
-        {error && (
-          <p id={errorId} className="mt-1 text-sm text-danger-600">
-            {error}
-          </p>
-        )}
       </div>
     );
   },

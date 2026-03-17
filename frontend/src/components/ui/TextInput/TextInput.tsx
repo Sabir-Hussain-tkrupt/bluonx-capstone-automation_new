@@ -21,8 +21,6 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
     const autoId = useId();
     const inputId = id ?? autoId;
     const hasError = !!error;
-    const errorMessage = typeof error === 'string' ? error : undefined;
-    const errorId = errorMessage ? `${inputId}-error` : undefined;
 
     return (
       <div className="w-full">
@@ -36,7 +34,6 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             ref={ref}
             id={inputId}
             aria-invalid={hasError ? true : undefined}
-            aria-describedby={errorId}
             className={cn(
               'w-full rounded-lg border bg-white px-3 transition-colors',
               'focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none',
@@ -58,11 +55,6 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             </div>
           )}
         </div>
-        {errorMessage && (
-          <p id={errorId} className="mt-1 text-sm text-danger-600">
-            {errorMessage}
-          </p>
-        )}
       </div>
     );
   },
