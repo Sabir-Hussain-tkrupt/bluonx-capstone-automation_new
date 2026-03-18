@@ -100,6 +100,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Track whether initializeAuth has finished so the onAuthStateChange
     // handler knows whether to manage isLoading itself.
     let initialized = false;
+    // Track whether a profile has been successfully loaded at least once.
+    // Used to avoid flashing loading screen on background auth events
+    // (TOKEN_REFRESHED, SIGNED_IN on tab return) which would unmount
+    // ProtectedRoute children and destroy open modals/form state.
+    let hasProfile = false;
 
     // 1. Subscribe to auth state changes FIRST so we never miss events.
     //    Use a non-async wrapper — fire-and-forget the profile fetch so
@@ -118,15 +123,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           case 'TOKEN_REFRESHED':
           case 'USER_UPDATED':
             if (newSession?.user) {
-              // If init already ran, we manage isLoading ourselves.
-              if (initialized) setIsLoading(true);
-              fetchProfile(newSession.user.id).finally(() => {
-                if (isMounted && initialized) setIsLoading(false);
+              // Only show loading if no profile has been loaded yet (initial
+              // sign-in). Once the user is in the app, background auth events
+              // (TOKEN_REFRESHED, SIGNED_IN on tab return) re-fetch the profile
+              // silently without disrupting the UI. If the user was deactivated,
+              // fetchProfile() calls signOut() → SIGNED_OUT clears the session.
+              const needsLoading = initialized && !hasProfile;
+              if (needsLoading) setIsLoading(true);
+              fetchProfile(newSession.user.id).then(() => {
+                hasProfile = true;
+              }).finally(() => {
+                if (isMounted && needsLoading) setIsLoading(false);
               });
             }
             break;
 
           case 'SIGNED_OUT':
+            hasProfile = false;
             setProfile(null);
             setIsLoading(false);
             break;
@@ -151,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setSession(existingSession);
           setUser(existingSession.user);
           await fetchProfile(existingSession.user.id);
+          hasProfile = true;
         }
       } catch (err) {
         console.error('Error initializing auth:', err);
