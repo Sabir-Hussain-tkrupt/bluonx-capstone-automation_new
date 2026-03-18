@@ -20,11 +20,11 @@ from app.models.common import BluOnXBase
 
 
 class VendorCreate(BluOnXBase):
-    company_name: str
+    company_name: str = Field(..., min_length=2, max_length=255)
     address: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip_code: str | None = None
+    city: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, max_length=50)
+    zip_code: str | None = Field(default=None, max_length=20)
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     insurance_expiration_date: date | None = None
@@ -40,11 +40,11 @@ class VendorCreate(BluOnXBase):
 
 
 class VendorUpdate(BluOnXBase):
-    company_name: str | None = None
+    company_name: str | None = Field(default=None, min_length=2, max_length=255)
     address: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip_code: str | None = None
+    city: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, max_length=50)
+    zip_code: str | None = Field(default=None, max_length=20)
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     insurance_expiration_date: date | None = None

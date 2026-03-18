@@ -11,11 +11,11 @@ import type { Vendor } from '@/features/vendors/api/vendor.queries';
 import { useState } from 'react';
 
 const vendorSchema = z.object({
-  company_name: z.string().min(2, 'Company name is required (min 2 characters)'),
+  company_name: z.string().min(2, 'Company name is required (min 2 characters)').max(255, 'Company name must be 255 characters or fewer'),
   address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  zip_code: z.string().optional(),
+  city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),
+  state: z.string().max(50, 'State must be 50 characters or fewer').optional().or(z.literal('')),
+  zip_code: z.string().max(20, 'ZIP code must be 20 characters or fewer').optional().or(z.literal('')),
   insurance_expiration_date: z.string().optional(),
   insurance_coverage_amount: z.coerce.number().min(0, 'Must be >= 0').optional().or(z.literal('')),
   bonding_capacity: z.coerce.number().min(0, 'Must be >= 0').optional().or(z.literal('')),

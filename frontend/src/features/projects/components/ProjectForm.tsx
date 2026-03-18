@@ -9,12 +9,12 @@ import { Select } from '@/components/ui/Select';
 import type { Project } from '@/features/projects/api/project.queries';
 
 const projectSchema = z.object({
-  name: z.string().min(2, 'Project name is required (min 2 characters)'),
+  name: z.string().min(2, 'Project name is required (min 2 characters)').max(255, 'Project name must be 255 characters or fewer'),
   description: z.string().optional(),
   address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  zip_code: z.string().optional(),
+  city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),
+  state: z.string().max(50, 'State must be 50 characters or fewer').optional().or(z.literal('')),
+  zip_code: z.string().max(20, 'ZIP code must be 20 characters or fewer').optional().or(z.literal('')),
   budget: z.coerce.number().min(0, 'Budget must be >= 0').optional().or(z.literal('')),
   status: z.enum(['planning', 'active', 'on_hold', 'completed', 'cancelled']),
   start_date: z.string().optional(),

@@ -19,12 +19,12 @@ from app.models.common import BluOnXBase
 
 
 class ProjectCreate(BluOnXBase):
-    name: str
+    name: str = Field(..., min_length=2, max_length=255)
     description: str | None = None
     address: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip_code: str | None = None
+    city: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, max_length=50)
+    zip_code: str | None = Field(default=None, max_length=20)
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     budget: Decimal | None = Field(default=None, ge=0)
@@ -34,12 +34,12 @@ class ProjectCreate(BluOnXBase):
 
 
 class ProjectUpdate(BluOnXBase):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = None
     address: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip_code: str | None = None
+    city: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, max_length=50)
+    zip_code: str | None = Field(default=None, max_length=20)
     latitude: Decimal | None = None
     longitude: Decimal | None = None
     budget: Decimal | None = Field(default=None, ge=0)

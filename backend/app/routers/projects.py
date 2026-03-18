@@ -2,8 +2,13 @@
 
 from uuid import UUID
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from postgrest.exceptions import APIError
 from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
@@ -118,7 +123,14 @@ async def create_project(
         if project_data.get(key) is not None:
             project_data[key] = project_data[key].isoformat()
 
-    response = db.table("projects").insert(project_data).execute()
+    try:
+        response = db.table("projects").insert(project_data).execute()
+    except APIError as exc:
+        logger.error("Supabase insert failed for projects: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
 
     if not response.data:
         raise HTTPException(
@@ -156,12 +168,19 @@ async def update_project(
         if key in update_data and update_data[key] is not None:
             update_data[key] = update_data[key].isoformat()
 
-    response = (
-        db.table("projects")
-        .update(update_data)
-        .eq("id", str(project_id))
-        .execute()
-    )
+    try:
+        response = (
+            db.table("projects")
+            .update(update_data)
+            .eq("id", str(project_id))
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Supabase update failed for projects/%s: %s", project_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
 
     if not response.data:
         raise HTTPException(

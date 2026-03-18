@@ -2,8 +2,13 @@
 
 from uuid import UUID
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from postgrest.exceptions import APIError
 from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
@@ -221,7 +226,14 @@ async def create_vendor(
     if vendor_data.get("insurance_expiration_date") is not None:
         vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
 
-    response = db.table("vendors").insert(vendor_data).execute()
+    try:
+        response = db.table("vendors").insert(vendor_data).execute()
+    except APIError as exc:
+        logger.error("Supabase insert failed for vendors: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
 
     if not response.data:
         raise HTTPException(
@@ -301,12 +313,19 @@ async def update_vendor(
     if "insurance_expiration_date" in update_data and update_data["insurance_expiration_date"] is not None:
         update_data["insurance_expiration_date"] = update_data["insurance_expiration_date"].isoformat()
 
-    response = (
-        db.table("vendors")
-        .update(update_data)
-        .eq("id", str(vendor_id))
-        .execute()
-    )
+    try:
+        response = (
+            db.table("vendors")
+            .update(update_data)
+            .eq("id", str(vendor_id))
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Supabase update failed for vendors/%s: %s", vendor_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
 
     if not response.data:
         raise HTTPException(
