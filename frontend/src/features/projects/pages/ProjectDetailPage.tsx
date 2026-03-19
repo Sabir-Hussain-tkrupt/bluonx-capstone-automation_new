@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { TaskList } from '@/features/tasks/components/TaskList';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
 import { useDeleteProject } from '@/features/projects/hooks/useDeleteProject';
@@ -152,10 +153,7 @@ export function ProjectDetailPage() {
         )}
 
         {activeTab === 'tasks' && (
-          <EmptyState
-            title="Tasks"
-            description="Task management will be available in a future update (Task 3.3)."
-          />
+          <TaskList projectId={id!} projectBudget={project.budget} />
         )}
 
         {activeTab === 'documents' && (

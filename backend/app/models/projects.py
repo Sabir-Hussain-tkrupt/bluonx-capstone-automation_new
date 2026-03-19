@@ -107,20 +107,18 @@ TASK_STATUSES = Literal[
 
 
 class TaskCreate(BluOnXBase):
-    project_id: UUID
     trade_id: UUID
-    name: str
-    description: str | None = None
+    name: str = Field(..., min_length=2, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
     phase: Literal["due_diligence", "development"]
     bid_type: Literal["competitive", "direct_assign", "internal"]
     budget_estimate: Decimal | None = Field(default=None, ge=0)
-    sort_order: int = 0
-    status: TASK_STATUSES = "draft"
 
 
 class TaskUpdate(BluOnXBase):
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
+    trade_id: UUID | None = None
     phase: Literal["due_diligence", "development"] | None = None
     bid_type: Literal["competitive", "direct_assign", "internal"] | None = None
     budget_estimate: Decimal | None = Field(default=None, ge=0)
@@ -143,3 +141,16 @@ class TaskResponse(BluOnXBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    trade_name: str | None = None
+
+
+class TaskListResponse(BluOnXBase):
+    items: list[TaskResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class TaskReorderItem(BluOnXBase):
+    task_id: UUID
+    sort_order: int

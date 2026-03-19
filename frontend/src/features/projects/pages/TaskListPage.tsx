@@ -1,13 +1,52 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useProject } from '@/features/projects/hooks/useProject';
+import { TaskList } from '@/features/tasks/components/TaskList';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { Alert } from '@/components/ui/Alert';
 
 export function TaskListPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { data: project, isLoading, error } = useProject(id!);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton height="32px" width="50%" />
+        <Skeleton height="300px" />
+      </div>
+    );
+  }
+
+  if (error || !project) {
+    return (
+      <Alert variant="danger" title="Project not found">
+        The project you are looking for does not exist or has been deleted.
+      </Alert>
+    );
+  }
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Tasks</h1>
-      <p className="mt-2 text-sm text-gray-500">Project ID: {id}</p>
-      <p className="mt-1 text-sm text-gray-400">Task list will be built in Phase 3 (Task 3.3).</p>
+    <div className="space-y-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={() => navigate(`/projects/${id}`)}
+          className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
+        <h1 className="text-xl font-semibold text-secondary-900 sm:text-2xl">
+          {project.name} — Tasks
+        </h1>
+      </div>
+      <TaskList projectId={id!} projectBudget={project.budget} />
     </div>
   );
 }

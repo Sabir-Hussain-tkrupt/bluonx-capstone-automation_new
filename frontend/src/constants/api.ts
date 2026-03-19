@@ -20,9 +20,10 @@ export const API_ENDPOINTS = {
   PROJECTS: '/projects',
   PROJECT: (id: string) => `/projects/${id}`,
 
-  // Tasks
-  TASKS: '/tasks',
-  TASK: (id: string) => `/tasks/${id}`,
+  // Tasks (project-scoped)
+  PROJECT_TASKS: (projectId: string) => `/projects/${projectId}/tasks`,
+  PROJECT_TASK: (projectId: string, taskId: string) => `/projects/${projectId}/tasks/${taskId}`,
+  PROJECT_TASKS_REORDER: (projectId: string) => `/projects/${projectId}/tasks/reorder`,
 
   // Trades
   TRADES: '/trades',
