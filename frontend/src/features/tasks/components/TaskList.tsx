@@ -1,8 +1,24 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -12,25 +28,14 @@ import { useTasks } from '@/features/tasks/hooks/useTasks';
 import { useCreateTask } from '@/features/tasks/hooks/useCreateTask';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
 import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
+import { useReorderTasks } from '@/features/tasks/hooks/useReorderTasks';
 import { TaskForm } from './TaskForm';
+import { SortableTaskRow, TaskRowOverlay } from './SortableTaskRow';
 import type { Task } from '@/features/tasks/api/task.queries';
 
 function formatCurrency(value: number | null): string {
   if (value == null) return '\u2014';
   return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
-
-function formatPhase(phase: string): string {
-  return phase === 'due_diligence' ? 'Due Diligence' : 'Development';
-}
-
-function formatBidType(bidType: string): string {
-  switch (bidType) {
-    case 'competitive': return 'Competitive';
-    case 'direct_assign': return 'Direct Assign';
-    case 'internal': return 'Internal';
-    default: return bidType;
-  }
 }
 
 interface TaskListProps {
@@ -45,15 +50,64 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editTask, setEditTask] = useState<Task | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Task | undefined>();
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
 
   const { data, isLoading, error } = useTasks({ projectId, page_size: 100 });
   const createMutation = useCreateTask(projectId);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId);
+  const reorderMutation = useReorderTasks(projectId);
 
   const tasks = data?.items ?? [];
 
-  // Budget summary
+  // DnD is only enabled in default sort_order view (no custom sort/search)
+  const isDragDisabled = false; // Could be extended: set true when sort/filter is active
+
+  // ─── Sensors ────────────────────────────────────────────────────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+
+  // ─── Drag handlers ─────────────────────────────────────────────────
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const task = tasks.find((t) => t.id === event.active.id);
+      setActiveTask(task ?? null);
+    },
+    [tasks],
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveTask(null);
+
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = tasks.findIndex((t) => t.id === active.id);
+      const newIndex = tasks.findIndex((t) => t.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(tasks, oldIndex, newIndex);
+      const items = reordered.map((t, idx) => ({ task_id: t.id, sort_order: idx + 1 }));
+
+      reorderMutation.mutate(items, {
+        onError: () => {
+          toast({ variant: 'danger', message: 'Failed to reorder tasks. Order has been reverted.' });
+        },
+      });
+    },
+    [tasks, reorderMutation, toast],
+  );
+
+  const handleDragCancel = useCallback(() => {
+    setActiveTask(null);
+  }, []);
+
+  // ─── Budget summary ────────────────────────────────────────────────
   const totalTaskBudget = useMemo(
     () => tasks.reduce((sum, t) => sum + (t.budget_estimate ?? 0), 0),
     [tasks],
@@ -61,6 +115,7 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
   const budgetRemaining = projectBudget != null ? projectBudget - totalTaskBudget : null;
   const isOverBudget = budgetRemaining != null && budgetRemaining < 0;
 
+  // ─── Loading / Error ───────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -74,6 +129,7 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
     return <Alert variant="danger" title="Failed to load tasks">Could not fetch tasks for this project.</Alert>;
   }
 
+  // ─── CRUD handlers ─────────────────────────────────────────────────
   const handleCreate = (formData: Record<string, unknown>) => {
     createMutation.mutate(formData as Parameters<typeof createMutation.mutate>[0], {
       onSuccess: () => {
@@ -115,6 +171,13 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
     });
   };
 
+  const handleRowClick = (task: Task) => {
+    navigate(`/projects/${projectId}/tasks/${task.id}`);
+  };
+
+  // Find the index of the active (dragging) task for overlay
+  const activeIndex = activeTask ? tasks.findIndex((t) => t.id === activeTask.id) : -1;
+
   return (
     <div className="space-y-4">
       {/* Header with Add button and budget summary */}
@@ -145,7 +208,7 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
         </Alert>
       )}
 
-      {/* Task list */}
+      {/* Task list with drag-and-drop */}
       {tasks.length === 0 ? (
         <EmptyState
           title="No tasks yet"
@@ -154,61 +217,49 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-secondary-200">
-                  <th className="px-4 py-3 font-medium text-secondary-500">#</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500">Name</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500 hidden md:table-cell">Trade</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500 hidden lg:table-cell">Phase</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500 hidden lg:table-cell">Bid Type</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500">Status</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500 hidden sm:table-cell text-right">Budget</th>
-                  <th className="px-4 py-3 font-medium text-secondary-500 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-secondary-100">
-                {tasks.map((task, idx) => (
-                  <tr
-                    key={task.id}
-                    className="hover:bg-secondary-50 cursor-pointer transition-colors"
-                    onClick={() => navigate(`/projects/${projectId}/tasks/${task.id}`)}
-                  >
-                    <td className="px-4 py-3 text-secondary-400">{idx + 1}</td>
-                    <td className="px-4 py-3 font-medium text-secondary-900">{task.name}</td>
-                    <td className="px-4 py-3 text-secondary-600 hidden md:table-cell">{task.trade_name ?? '\u2014'}</td>
-                    <td className="px-4 py-3 text-secondary-600 hidden lg:table-cell">{formatPhase(task.phase)}</td>
-                    <td className="px-4 py-3 text-secondary-600 hidden lg:table-cell">{formatBidType(task.bid_type)}</td>
-                    <td className="px-4 py-3"><StatusBadge status={task.status} size="sm" /></td>
-                    <td className="px-4 py-3 text-secondary-600 hidden sm:table-cell text-right">{formatCurrency(task.budget_estimate)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="rounded p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-                          title="Edit task"
-                          onClick={() => setEditTask(task)}
-                        >
-                          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded p-1 text-secondary-400 hover:bg-danger-50 hover:text-danger-600"
-                          title="Delete task"
-                          onClick={() => setDeleteTarget(task)}
-                        >
-                          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-secondary-200">
+                    <th className="px-4 py-3 font-medium text-secondary-500">#</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500">Name</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500 hidden md:table-cell">Trade</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500 hidden lg:table-cell">Phase</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500 hidden lg:table-cell">Bid Type</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500">Status</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500 hidden sm:table-cell text-right">Budget</th>
+                    <th className="px-4 py-3 font-medium text-secondary-500 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+                  <tbody className="divide-y divide-secondary-100">
+                    {tasks.map((task, idx) => (
+                      <SortableTaskRow
+                        key={task.id}
+                        task={task}
+                        index={idx}
+                        isDragDisabled={isDragDisabled}
+                        onRowClick={handleRowClick}
+                        onEdit={setEditTask}
+                        onDelete={setDeleteTarget}
+                      />
+                    ))}
+                  </tbody>
+                </SortableContext>
+              </table>
+
+              <DragOverlay dropAnimation={null}>
+                {activeTask && (
+                  <TaskRowOverlay task={activeTask} index={activeIndex} />
+                )}
+              </DragOverlay>
+            </DndContext>
           </div>
         </Card>
       )}
