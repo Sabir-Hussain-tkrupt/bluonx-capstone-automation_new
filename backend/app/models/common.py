@@ -18,3 +18,9 @@ class MessageResponse(BaseModel):
     """Generic message response."""
 
     detail: str
+
+
+class SignedUrlResponse(BaseModel):
+    """Response containing a signed download URL."""
+
+    url: str

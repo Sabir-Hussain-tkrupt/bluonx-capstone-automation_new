@@ -4,17 +4,19 @@ from uuid import UUID
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
 from supabase import Client
 
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
+from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
+from app.models.common import SignedUrlResponse
 from app.models.projects import (
     ProjectCreate,
-    ProjectDocumentCreate,
     ProjectDocumentResponse,
     ProjectListResponse,
     ProjectResponse,
@@ -214,6 +216,9 @@ async def delete_project(
         )
 
 
+PROJECT_BUCKET = "project-documents"
+
+
 # ── Project Documents ────────────────────────────────────────────────────
 
 
@@ -224,8 +229,17 @@ async def list_project_documents(
     db: Client = Depends(get_supabase),
 ):
     """List documents for a project."""
-    # TODO: Implement in Task 3.4
-    return []
+    _get_project_or_404(db, project_id)
+
+    response = (
+        db.table("project_documents")
+        .select("*")
+        .eq("project_id", str(project_id))
+        .order("uploaded_at", desc=True)
+        .execute()
+    )
+
+    return response.data or []
 
 
 @router.post(
@@ -235,13 +249,85 @@ async def list_project_documents(
 )
 async def upload_project_document(
     project_id: UUID,
-    document: ProjectDocumentCreate,
+    file: UploadFile = File(...),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Upload a document for a project."""
-    # TODO: Implement in Task 3.4
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Upload a document for a project.
+
+    Accepts multipart/form-data with:
+    - file: the document file (PDF, JPEG, PNG, TIFF; max 50MB)
+    """
+    _get_project_or_404(db, project_id)
+
+    # Read file bytes
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty.",
+        )
+
+    # Validate file
+    content_type = file.content_type or "application/octet-stream"
+    filename = sanitize_filename(file.filename or "document")
+    validate_upload(file_bytes, filename, content_type, PROJECT_BUCKET)
+
+    # Upload to storage: {project_id}/{filename}
+    storage_path = f"{project_id}/{filename}"
+    upload_file(db, PROJECT_BUCKET, storage_path, file_bytes, content_type)
+
+    # Insert project_documents row
+    doc_data: dict = {
+        "project_id": str(project_id),
+        "file_name": filename,
+        "file_path": storage_path,
+        "file_type": content_type,
+        "file_size": len(file_bytes),
+        "uploaded_by": user["user_id"],
+    }
+
+    response = db.table("project_documents").insert(doc_data).execute()
+
+    if not response.data:
+        delete_file(db, PROJECT_BUCKET, storage_path)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to save document record.",
+        )
+
+    return response.data[0]
+
+
+@router.get(
+    "/projects/{project_id}/documents/{document_id}/url",
+    response_model=SignedUrlResponse,
+)
+async def get_project_document_url(
+    project_id: UUID,
+    document_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Generate a signed download URL for a project document (1hr expiry)."""
+    _get_project_or_404(db, project_id)
+
+    doc_resp = (
+        db.table("project_documents")
+        .select("file_path")
+        .eq("id", str(document_id))
+        .eq("project_id", str(project_id))
+        .single()
+        .execute()
+    )
+    if not doc_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    url = get_signed_url(db, PROJECT_BUCKET, doc_resp.data["file_path"])
+    return SignedUrlResponse(url=url)
 
 
 @router.delete(
@@ -254,6 +340,26 @@ async def delete_project_document(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Delete a project document."""
-    # TODO: Implement in Task 3.4
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Delete a project document from storage and database."""
+    _get_project_or_404(db, project_id)
+
+    # Fetch doc to get file_path
+    doc_resp = (
+        db.table("project_documents")
+        .select("file_path")
+        .eq("id", str(document_id))
+        .eq("project_id", str(project_id))
+        .single()
+        .execute()
+    )
+    if not doc_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    # Delete from storage first
+    delete_file(db, PROJECT_BUCKET, doc_resp.data["file_path"])
+
+    # Delete DB row
+    db.table("project_documents").delete().eq("id", str(document_id)).execute()

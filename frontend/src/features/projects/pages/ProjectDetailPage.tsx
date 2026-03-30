@@ -7,13 +7,19 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { DocumentList } from '@/components/ui/DocumentList';
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
 import { useDeleteProject } from '@/features/projects/hooks/useDeleteProject';
+import {
+  useProjectDocumentsList,
+  useDeleteProjectDocument,
+  useProjectDocumentDownload,
+} from '@/features/projects/hooks/useProjectDocuments';
 import { ProjectForm } from '@/features/projects/components/ProjectForm';
+import { ProjectDocumentUpload } from '@/features/projects/components/ProjectDocumentUpload';
 import type { StatusVariant } from '@/components/ui/types';
 
 const statusVariantMap: Record<string, StatusVariant> = {
@@ -51,10 +57,15 @@ export function ProjectDetailPage() {
   const { data: project, isLoading, error } = useProject(id!);
   const updateProjectMutation = useUpdateProject();
   const deleteProjectMutation = useDeleteProject();
+  const { data: projectDocuments = [] } = useProjectDocumentsList(id!);
+  const deleteDocMutation = useDeleteProjectDocument();
+  const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showUploadDoc, setShowUploadDoc] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -86,7 +97,7 @@ export function ProjectDetailPage() {
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
     { id: 'tasks', label: 'Tasks' },
-    { id: 'documents', label: 'Documents' },
+    { id: 'documents', label: `Documents (${projectDocuments.length})` },
   ];
 
   return (
@@ -157,10 +168,39 @@ export function ProjectDetailPage() {
         )}
 
         {activeTab === 'documents' && (
-          <EmptyState
-            title="Documents"
-            description="Document management will be available in a future update (Task 3.4)."
-          />
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setShowUploadDoc(true)}>+ Upload Document</Button>
+            </div>
+            <DocumentList
+              documents={projectDocuments}
+              onDownload={(docId) => downloadDoc(id!, docId)}
+              onDelete={(docId) => {
+                setDeletingDocId(docId);
+                deleteDocMutation.mutate(
+                  { projectId: id!, docId },
+                  {
+                    onSuccess: () => {
+                      setDeletingDocId(null);
+                      toast({ variant: 'success', message: 'Document deleted.' });
+                    },
+                    onError: () => {
+                      setDeletingDocId(null);
+                      toast({ variant: 'danger', message: 'Failed to delete document.' });
+                    },
+                  },
+                );
+              }}
+              isDeleting={deletingDocId}
+              isDownloading={downloadingId}
+              emptyMessage="No documents uploaded yet. Upload civil plans, drawings, specs, or site photos."
+            />
+            <ProjectDocumentUpload
+              projectId={id!}
+              isOpen={showUploadDoc}
+              onClose={() => setShowUploadDoc(false)}
+            />
+          </div>
         )}
       </Tabs>
 

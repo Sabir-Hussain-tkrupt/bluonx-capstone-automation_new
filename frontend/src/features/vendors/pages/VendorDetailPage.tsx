@@ -14,9 +14,12 @@ import { useUpdateVendor } from '@/features/vendors/hooks/useUpdateVendor';
 import { useDeleteVendor } from '@/features/vendors/hooks/useDeleteVendor';
 import { useCreateContact, useUpdateContact, useDeleteContact } from '@/features/vendors/hooks/useVendorContacts';
 import { useAddVendorTrades, useRemoveVendorTrade } from '@/features/vendors/hooks/useVendorTrades';
+import { useDeleteVendorDocument, useVendorDocumentDownload } from '@/features/vendors/hooks/useVendorDocuments';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
 import { ContactForm } from '@/features/vendors/components/ContactForm';
 import { TradeMultiSelect } from '@/features/vendors/components/TradeMultiSelect';
+import { VendorDocumentUpload } from '@/features/vendors/components/VendorDocumentUpload';
+import { DocumentList } from '@/components/ui/DocumentList';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import type { StatusVariant } from '@/components/ui/types';
 
@@ -25,9 +28,6 @@ const statusVariantMap: Record<string, StatusVariant> = {
 };
 const onboardingVariantMap: Record<string, StatusVariant> = {
   pending: 'warning', partial: 'info', complete: 'success',
-};
-const docTypeLabels: Record<string, string> = {
-  w9: 'W-9', insurance_certificate: 'Insurance Certificate', master_trade_agreement: 'Master Trade Agreement',
 };
 const flagReasonLabels: Record<string, string> = {
   missed_deadline: 'Missed Deadline', poor_quality: 'Poor Quality', unresponsive: 'Unresponsive', other: 'Other',
@@ -55,6 +55,8 @@ export function VendorDetailPage() {
   const deleteContactMutation = useDeleteContact();
   const addTradesMutation = useAddVendorTrades();
   const removeTradesMutation = useRemoveVendorTrade();
+  const deleteDocMutation = useDeleteVendorDocument();
+  const { download: downloadDoc, downloadingId } = useVendorDocumentDownload();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditForm, setShowEditForm] = useState(false);
@@ -63,6 +65,8 @@ export function VendorDetailPage() {
   const [editingContact, setEditingContact] = useState<VendorContact | null>(null);
   const [showAddTrades, setShowAddTrades] = useState(false);
   const [newTradeIds, setNewTradeIds] = useState<string[]>([]);
+  const [showUploadDoc, setShowUploadDoc] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -356,29 +360,38 @@ export function VendorDetailPage() {
         )}
 
         {activeTab === 'documents' && (
-          <div>
-            {documents.length === 0 ? (
-              <EmptyState title="No documents" description="Documents will be uploaded in the document management module (Task 3.4)." />
-            ) : (
-              <div className="space-y-3">
-                {documents.map((doc) => (
-                  <Card key={doc.id}>
-                    <div className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <span className="font-medium text-secondary-900">{doc.file_name}</span>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-secondary-500">
-                          <span>{docTypeLabels[doc.document_type] ?? doc.document_type}</span>
-                          {doc.expiration_date && <span>Expires: {doc.expiration_date}</span>}
-                        </div>
-                      </div>
-                      <div className="shrink-0">
-                        <StatusBadge status={doc.status} />
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setShowUploadDoc(true)}>+ Upload Document</Button>
+            </div>
+            <DocumentList
+              documents={documents}
+              onDownload={(docId) => downloadDoc(id!, docId)}
+              onDelete={(docId) => {
+                setDeletingDocId(docId);
+                deleteDocMutation.mutate(
+                  { vendorId: id!, docId },
+                  {
+                    onSuccess: () => {
+                      setDeletingDocId(null);
+                      toast({ variant: 'success', message: 'Document deleted.' });
+                    },
+                    onError: () => {
+                      setDeletingDocId(null);
+                      toast({ variant: 'danger', message: 'Failed to delete document.' });
+                    },
+                  },
+                );
+              }}
+              isDeleting={deletingDocId}
+              isDownloading={downloadingId}
+              emptyMessage="No documents uploaded yet. Upload W-9, Insurance Certificate, or Master Trade Agreement."
+            />
+            <VendorDocumentUpload
+              vendorId={id!}
+              isOpen={showUploadDoc}
+              onClose={() => setShowUploadDoc(false)}
+            />
           </div>
         )}
 

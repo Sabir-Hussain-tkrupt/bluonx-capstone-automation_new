@@ -1,17 +1,21 @@
 """Vendor endpoints — /api/v1/vendors"""
 
+from datetime import date
 from uuid import UUID
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
 from supabase import Client
 
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
+from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
+from app.models.common import SignedUrlResponse
 from app.models.vendors import (
     VendorBulkTradeCreate,
     VendorContactCreateInline,
@@ -19,7 +23,6 @@ from app.models.vendors import (
     VendorContactUpdate,
     VendorCreate,
     VendorDetailResponse,
-    VendorDocumentCreate,
     VendorDocumentResponse,
     VendorImportError,
     VendorImportRequest,
@@ -652,6 +655,10 @@ async def list_vendor_documents(
     return response.data or []
 
 
+VENDOR_DOC_TYPES = {"w9", "insurance_certificate", "master_trade_agreement"}
+VENDOR_BUCKET = "vendor-documents"
+
+
 @router.post(
     "/vendors/{vendor_id}/documents",
     response_model=VendorDocumentResponse,
@@ -659,29 +666,133 @@ async def list_vendor_documents(
 )
 async def upload_vendor_document(
     vendor_id: UUID,
-    document: VendorDocumentCreate,
+    file: UploadFile = File(...),
+    document_type: str = Form(...),
+    expiration_date: str | None = Form(default=None),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Upload a document for a vendor."""
+    """Upload a document for a vendor.
+
+    Accepts multipart/form-data with:
+    - file: the document file (PDF, JPEG, PNG; max 50MB)
+    - document_type: w9 | insurance_certificate | master_trade_agreement
+    - expiration_date: YYYY-MM-DD (required for insurance_certificate)
+    """
     _get_vendor_or_404(db, vendor_id)
 
-    doc_data = document.model_dump()
-    doc_data["vendor_id"] = str(vendor_id)
-    doc_data["uploaded_by"] = user["user_id"]
+    # Validate document_type
+    if document_type not in VENDOR_DOC_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid document_type. Must be one of: {', '.join(sorted(VENDOR_DOC_TYPES))}",
+        )
 
-    if doc_data.get("expiration_date") is not None:
-        doc_data["expiration_date"] = doc_data["expiration_date"].isoformat()
+    # Require expiration_date for insurance_certificate
+    parsed_expiration: date | None = None
+    if document_type == "insurance_certificate":
+        if not expiration_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="expiration_date is required for insurance_certificate.",
+            )
+        try:
+            parsed_expiration = date.fromisoformat(expiration_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="expiration_date must be in YYYY-MM-DD format.",
+            )
+    elif expiration_date:
+        try:
+            parsed_expiration = date.fromisoformat(expiration_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="expiration_date must be in YYYY-MM-DD format.",
+            )
+
+    # Read file bytes
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty.",
+        )
+
+    # Validate file (MIME, size, magic bytes)
+    content_type = file.content_type or "application/octet-stream"
+    filename = sanitize_filename(file.filename or "document")
+    validate_upload(file_bytes, filename, content_type, VENDOR_BUCKET)
+
+    # Upload to storage: {vendor_id}/{document_type}/{filename}
+    storage_path = f"{vendor_id}/{document_type}/{filename}"
+    upload_file(db, VENDOR_BUCKET, storage_path, file_bytes, content_type)
+
+    # Insert vendor_documents row
+    doc_data: dict = {
+        "vendor_id": str(vendor_id),
+        "document_type": document_type,
+        "file_name": filename,
+        "file_path": storage_path,
+        "file_size": len(file_bytes),
+        "uploaded_by": user["user_id"],
+        "status": "valid",
+    }
+    if parsed_expiration:
+        doc_data["expiration_date"] = parsed_expiration.isoformat()
 
     response = db.table("vendor_documents").insert(doc_data).execute()
 
     if not response.data:
+        # Clean up storage if DB insert fails
+        delete_file(db, VENDOR_BUCKET, storage_path)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to upload document",
+            detail="Failed to save document record.",
         )
 
+    # Side-effect: update vendors.insurance_expiration_date for insurance certs
+    if document_type == "insurance_certificate" and parsed_expiration:
+        try:
+            db.table("vendors").update(
+                {"insurance_expiration_date": parsed_expiration.isoformat()}
+            ).eq("id", str(vendor_id)).execute()
+        except Exception as exc:
+            logger.warning("Failed to update vendor insurance date: %s", exc)
+
     return response.data[0]
+
+
+@router.get(
+    "/vendors/{vendor_id}/documents/{document_id}/url",
+    response_model=SignedUrlResponse,
+)
+async def get_vendor_document_url(
+    vendor_id: UUID,
+    document_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Generate a signed download URL for a vendor document (1hr expiry)."""
+    _get_vendor_or_404(db, vendor_id)
+
+    doc_resp = (
+        db.table("vendor_documents")
+        .select("file_path")
+        .eq("id", str(document_id))
+        .eq("vendor_id", str(vendor_id))
+        .single()
+        .execute()
+    )
+    if not doc_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    url = get_signed_url(db, VENDOR_BUCKET, doc_resp.data["file_path"])
+    return SignedUrlResponse(url=url)
 
 
 @router.delete("/vendors/{vendor_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -691,22 +802,29 @@ async def delete_vendor_document(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Delete a vendor document."""
+    """Delete a vendor document from storage and database."""
     _get_vendor_or_404(db, vendor_id)
 
-    response = (
+    # Fetch doc to get file_path before deleting
+    doc_resp = (
         db.table("vendor_documents")
-        .delete()
+        .select("file_path")
         .eq("id", str(document_id))
         .eq("vendor_id", str(vendor_id))
+        .single()
         .execute()
     )
-
-    if not response.data:
+    if not doc_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
+
+    # Delete from storage first
+    delete_file(db, VENDOR_BUCKET, doc_resp.data["file_path"])
+
+    # Delete DB row
+    db.table("vendor_documents").delete().eq("id", str(document_id)).execute()
 
 
 # ── CSV Import ───────────────────────────────────────────────────────────
