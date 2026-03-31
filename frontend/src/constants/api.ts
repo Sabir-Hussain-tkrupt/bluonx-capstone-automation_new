@@ -19,6 +19,7 @@ export const API_ENDPOINTS = {
   // Projects
   PROJECTS: '/projects',
   PROJECT: (id: string) => `/projects/${id}`,
+  NEARBY_VENDORS: (projectId: string) => `/projects/${projectId}/nearby-vendors`,
 
   // Tasks (project-scoped)
   PROJECT_TASKS: (projectId: string) => `/projects/${projectId}/tasks`,

@@ -11,6 +11,7 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
+from app.services.geocoding import geocode_address
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
@@ -125,6 +126,19 @@ async def create_project(
         if project_data.get(key) is not None:
             project_data[key] = project_data[key].isoformat()
 
+    # Auto-geocode if address fields are provided
+    address_fields = (project.address, project.city, project.state, project.zip_code)
+    if any(f for f in address_fields):
+        try:
+            lat, lng = await geocode_address(
+                project.address, project.city, project.state, project.zip_code,
+            )
+            if lat is not None and lng is not None:
+                project_data["latitude"] = str(lat)
+                project_data["longitude"] = str(lng)
+        except Exception as exc:
+            logger.warning("Geocoding failed for project %s: %s", project.name, exc)
+
     try:
         response = db.table("projects").insert(project_data).execute()
     except APIError as exc:
@@ -151,7 +165,7 @@ async def update_project(
     db: Client = Depends(get_supabase),
 ):
     """Update a project."""
-    _get_project_or_404(db, project_id)
+    existing = _get_project_or_404(db, project_id)
 
     update_data = project.model_dump(exclude_unset=True)
     if not update_data:
@@ -159,6 +173,21 @@ async def update_project(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    # Re-geocode if any address field changed
+    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
+    if _ADDRESS_FIELDS & set(update_data.keys()):
+        try:
+            merged_address = update_data.get("address", existing.get("address"))
+            merged_city = update_data.get("city", existing.get("city"))
+            merged_state = update_data.get("state", existing.get("state"))
+            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
+            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
+            if lat is not None and lng is not None:
+                update_data["latitude"] = lat
+                update_data["longitude"] = lng
+        except Exception as exc:
+            logger.warning("Geocoding failed for project %s: %s", project_id, exc)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("budget", "latitude", "longitude"):

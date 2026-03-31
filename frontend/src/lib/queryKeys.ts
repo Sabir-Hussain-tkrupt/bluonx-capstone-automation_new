@@ -127,6 +127,14 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.milestones.details(), id] as const,
   },
 
+  nearbyVendors: {
+    all: (projectId: string) => ['projects', projectId, 'nearby-vendors'] as const,
+    list: (projectId: string, filters?: { radius?: number; tradeId?: string }) =>
+      filters
+        ? ([...queryKeys.nearbyVendors.all(projectId), filters] as const)
+        : queryKeys.nearbyVendors.all(projectId),
+  },
+
   notifications: {
     all: ['notifications'] as const,
     lists: () => [...queryKeys.notifications.all, 'list'] as const,

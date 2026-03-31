@@ -19,6 +19,7 @@ from app.routers import (
     bid_packages,
     bid_submissions,
     contracts,
+    geocoding,
     health,
     milestones,
     notifications,
@@ -73,3 +74,4 @@ app.include_router(awards.router, prefix=_v1, tags=["Awards"])
 app.include_router(contracts.router, prefix=_v1, tags=["Contracts"])
 app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
+app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])

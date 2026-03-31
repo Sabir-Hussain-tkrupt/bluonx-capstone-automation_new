@@ -27,5 +27,8 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 
+    # Google Maps
+    GOOGLE_MAPS_API_KEY: str | None = None
+
 
 settings = Settings()

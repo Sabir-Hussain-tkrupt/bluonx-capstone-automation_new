@@ -12,6 +12,7 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
+from app.services.geocoding import geocode_address
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
@@ -229,6 +230,19 @@ async def create_vendor(
     if vendor_data.get("insurance_expiration_date") is not None:
         vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
 
+    # Auto-geocode if address fields are provided
+    address_fields = (vendor.address, vendor.city, vendor.state, vendor.zip_code)
+    if any(f for f in address_fields):
+        try:
+            lat, lng = await geocode_address(
+                vendor.address, vendor.city, vendor.state, vendor.zip_code,
+            )
+            if lat is not None and lng is not None:
+                vendor_data["latitude"] = str(lat)
+                vendor_data["longitude"] = str(lng)
+        except Exception as exc:
+            logger.warning("Geocoding failed for vendor %s: %s", vendor.company_name, exc)
+
     try:
         response = db.table("vendors").insert(vendor_data).execute()
     except APIError as exc:
@@ -298,7 +312,7 @@ async def update_vendor(
     db: Client = Depends(get_supabase),
 ):
     """Update a vendor."""
-    _get_vendor_or_404(db, vendor_id)
+    existing = _get_vendor_or_404(db, vendor_id)
 
     update_data = vendor.model_dump(exclude_unset=True)
     if not update_data:
@@ -306,6 +320,21 @@ async def update_vendor(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    # Re-geocode if any address field changed
+    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
+    if _ADDRESS_FIELDS & set(update_data.keys()):
+        try:
+            merged_address = update_data.get("address", existing.get("address"))
+            merged_city = update_data.get("city", existing.get("city"))
+            merged_state = update_data.get("state", existing.get("state"))
+            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
+            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
+            if lat is not None and lng is not None:
+                update_data["latitude"] = lat
+                update_data["longitude"] = lng
+        except Exception as exc:
+            logger.warning("Geocoding failed for vendor %s: %s", vendor_id, exc)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("insurance_coverage_amount", "bonding_capacity", "latitude", "longitude"):
