@@ -204,7 +204,7 @@ async def filter_vendors_by_distance(
             db.table("vendors")
             .select("id, company_name, city, state, latitude, longitude, status")
             .is_("deleted_at", "null")
-            .not_("latitude", "is", "null")
+            .not_.is_("latitude", "null")
             .in_("id", vendor_ids)
         )
     else:
@@ -212,7 +212,7 @@ async def filter_vendors_by_distance(
             db.table("vendors")
             .select("id, company_name, city, state, latitude, longitude, status")
             .is_("deleted_at", "null")
-            .not_("latitude", "is", "null")
+            .not_.is_("latitude", "null")
         )
 
     vendor_resp = vendor_query.execute()

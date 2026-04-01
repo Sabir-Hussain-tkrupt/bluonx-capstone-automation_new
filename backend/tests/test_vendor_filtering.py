@@ -82,7 +82,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(
             data=[VENDOR_NEARBY, VENDOR_WITHIN_75, VENDOR_OUTSIDE_75, VENDOR_NO_COORDS]
         )
@@ -124,7 +124,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(data=[VENDOR_OUTSIDE_75])
 
         def table_side_effect(name):
@@ -159,7 +159,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(data=[VENDOR_NO_COORDS])
 
         def table_side_effect(name):
@@ -194,7 +194,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(data=[])
 
         def table_side_effect(name):
@@ -252,7 +252,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(
             data=[VENDOR_NEARBY, VENDOR_WITHIN_75, VENDOR_OUTSIDE_75]
         )
@@ -301,7 +301,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.in_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(data=[VENDOR_NEARBY])
 
@@ -343,7 +343,7 @@ class TestFilterVendorsByDistance:
         vendor_query = MagicMock()
         vendor_query.select.return_value = vendor_query
         vendor_query.is_.return_value = vendor_query
-        vendor_query.not_.return_value = vendor_query
+        vendor_query.not_.is_.return_value = vendor_query
         vendor_query.execute.return_value = MagicMock(data=[VENDOR_NEARBY])
 
         def table_side_effect(name):

@@ -45,13 +45,11 @@ def _ok_result(lat: float = 30.2672, lng: float = -97.7431):
 
 @pytest.fixture(autouse=True)
 def _clear_geocode_cache():
-    """Clear the LRU cache between tests so caching tests are deterministic."""
+    """Clear the geocode cache between tests so caching tests are deterministic."""
     yield
-    # Import after yield to handle the case where the module isn't created yet
     try:
-        from app.services.geocoding import geocode_address
-        if hasattr(geocode_address, "cache_clear"):
-            geocode_address.cache_clear()
+        from app.services.geocoding import clear_geocode_cache
+        clear_geocode_cache()
     except (ImportError, AttributeError):
         pass
 

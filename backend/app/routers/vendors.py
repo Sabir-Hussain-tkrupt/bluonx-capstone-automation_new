@@ -329,7 +329,10 @@ async def update_vendor(
             merged_city = update_data.get("city", existing.get("city"))
             merged_state = update_data.get("state", existing.get("state"))
             merged_zip = update_data.get("zip_code", existing.get("zip_code"))
+            logger.info("Re-geocoding vendor %s: address=%s, city=%s, state=%s, zip=%s",
+                        vendor_id, merged_address, merged_city, merged_state, merged_zip)
             lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
+            logger.info("Geocode result for vendor %s: lat=%s, lng=%s", vendor_id, lat, lng)
             if lat is not None and lng is not None:
                 update_data["latitude"] = lat
                 update_data["longitude"] = lng

@@ -10,7 +10,6 @@ import logging
 from decimal import Decimal
 
 import httpx
-from async_lru import alru_cache
 
 from app.core.config import settings
 
@@ -58,10 +57,20 @@ def normalize_address(
 
 # ── Geocoding ───────────────────────────────────────────────────────────────
 
+# Simple dict cache — avoids async_lru event-loop issues with uvicorn
+_geocode_cache: dict[str, tuple[Decimal | None, Decimal | None]] = {}
 
-@alru_cache(maxsize=1024)
+
 async def _geocode_cached(normalized_address: str) -> tuple[Decimal | None, Decimal | None]:
     """Internal cached geocoding call. Keyed on normalized address string."""
+
+    # Check cache first
+    if normalized_address in _geocode_cache:
+        logger.debug("Geocode cache HIT: %s", normalized_address)
+        return _geocode_cache[normalized_address]
+
+    logger.debug("Geocode cache MISS: %s — calling Google API", normalized_address)
+
     async with httpx.AsyncClient(timeout=GEOCODING_TIMEOUT) as client:
         response = await client.get(
             GEOCODING_URL,
@@ -73,30 +82,35 @@ async def _geocode_cached(normalized_address: str) -> tuple[Decimal | None, Deci
         response.raise_for_status()
 
     data = response.json()
-    status = data.get("status", "UNKNOWN_ERROR")
+    api_status = data.get("status", "UNKNOWN_ERROR")
 
-    if status == "OK":
+    if api_status == "OK":
         results = data.get("results", [])
         if not results:
+            _geocode_cache[normalized_address] = (None, None)
             return (None, None)
         location = results[0]["geometry"]["location"]
         lat = Decimal(str(location["lat"]))
         lng = Decimal(str(location["lng"]))
+        logger.info("Geocoded '%s' → (%s, %s)", normalized_address, lat, lng)
+        _geocode_cache[normalized_address] = (lat, lng)
         return (lat, lng)
 
-    if status == "ZERO_RESULTS":
+    if api_status == "ZERO_RESULTS":
+        logger.info("Geocode ZERO_RESULTS for '%s'", normalized_address)
+        _geocode_cache[normalized_address] = (None, None)
         return (None, None)
 
-    if status in ("OVER_QUERY_LIMIT", "OVER_DAILY_LIMIT"):
+    if api_status in ("OVER_QUERY_LIMIT", "OVER_DAILY_LIMIT"):
         error_msg = data.get("error_message", "Rate limit exceeded")
         raise GeocodingRateLimitError(error_msg)
 
-    if status == "REQUEST_DENIED":
+    if api_status == "REQUEST_DENIED":
         error_msg = data.get("error_message", "Request denied — check API key")
         raise GeocodingAuthError(error_msg)
 
     # INVALID_REQUEST, UNKNOWN_ERROR, or anything else
-    error_msg = data.get("error_message", f"Geocoding failed with status: {status}")
+    error_msg = data.get("error_message", f"Geocoding failed with status: {api_status}")
     raise GeocodingError(error_msg)
 
 
@@ -128,8 +142,15 @@ async def geocode_address(
         return (None, None)
 
     try:
-        return await _geocode_cached(normalized)
+        lat, lng = await _geocode_cached(normalized)
+        logger.info("geocode_address result for '%s': (%s, %s)", normalized, lat, lng)
+        return (lat, lng)
     except httpx.TimeoutException as exc:
         raise GeocodingError(f"Geocoding request timed out: {exc}") from exc
     except httpx.HTTPError as exc:
         raise GeocodingError(f"Geocoding HTTP error: {exc}") from exc
+
+
+def clear_geocode_cache() -> None:
+    """Clear the geocoding cache. Useful for testing."""
+    _geocode_cache.clear()
