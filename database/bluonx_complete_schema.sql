@@ -261,7 +261,7 @@ COMMENT ON COLUMN tasks.sort_order   IS 'Numeric ordering for chronological disp
 -- Bid templates: defines bid format per trade
 CREATE TABLE bid_templates (
   id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  trade_id     UUID          NOT NULL REFERENCES trades(id) ON DELETE RESTRICT,
+  trade_id     UUID          REFERENCES trades(id) ON DELETE RESTRICT,
   name         VARCHAR(255)  NOT NULL,
   is_lump_sum  BOOLEAN       NOT NULL DEFAULT TRUE,
   created_by   UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -294,6 +294,8 @@ CREATE TABLE bid_packages (
   deadline      TIMESTAMPTZ   NOT NULL,
   status        VARCHAR(20)   NOT NULL DEFAULT 'open'
                               CHECK (status IN ('open', 'closed', 'evaluating', 'cancelled')),
+
+  bid_template_id UUID        REFERENCES bid_templates(id) ON DELETE RESTRICT,
   created_by    UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
@@ -700,6 +702,9 @@ CREATE INDEX idx_bid_submissions_vendor_id          ON bid_submissions (vendor_i
 CREATE INDEX idx_bid_submissions_status             ON bid_submissions (status);
 CREATE INDEX idx_bid_line_items_submission_id       ON bid_line_items (bid_submission_id);
 CREATE INDEX idx_bid_attachments_submission_id      ON bid_attachments (bid_submission_id);
+
+-- Create later on when added bid_template_id foreign key to bid_packages
+CREATE INDEX idx_bid_packages_bid_template_id       ON bid_packages (bid_template_id);
 
 -- ---- Group 5: Award & Contract ----
 CREATE INDEX idx_awards_task_id                     ON awards (task_id);
