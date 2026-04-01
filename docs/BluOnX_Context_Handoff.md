@@ -38,10 +38,24 @@ Both phases use the same bid workflow and unified vendor pool. Phase is for **ta
 - **Rebidding:** `bid_packages` has a `round_number` (auto-incremented by trigger). New round = new bid_package for the same task. Full history preserved.
 - **Re-award:** Partial unique indexes on `awards` and `contracts` tables allow one active record per task while preserving declined/cancelled history. A vendor can decline, the old award moves to `declined_by_vendor`, and a new award is created.
 
-### 2.5 Bid Templates
-Steve confirmed some trades use lump sum and others need structured line-item templates. `bid_templates` + `bid_template_items` tables define per-trade bid formats. When a vendor opens the bid form, the system checks if the task's trade has a template. If yes, it pre-populates line items. If no, it shows a simple lump sum field.
+### 2.5 Bid Templates (Template Library Model)
+Templates define how vendors submit pricing — lump sum total vs. structured line-item breakdown. The `bid_templates` table stores a library of reusable templates. Each template is **optionally affiliated with a trade** via a nullable `trade_id` FK:
+- **Trade-affiliated** (`trade_id = <uuid>`) — appears as a suggestion when the PM bids on tasks of that trade
+- **General-purpose** (`trade_id = NULL`) — available for any task, PM selects manually
 
-A **bid template management UI** is scoped as Task 3.6. Admin can create/edit templates per trade, manage line items, and preview the template structure.
+**Template selection happens at bid package creation**, not at task creation. `bid_packages.bid_template_id` (nullable FK) records which template the PM chose for that bidding round. NULL means "lump sum only." All vendors in a bid package use the same template, ensuring comparable submissions for the scoring engine.
+
+**PM-driven flow (no auto-selection):**
+1. System queries templates matching the task's trade + general-purpose templates
+2. If matches found → PM picks one or chooses "Lump sum only"
+3. If no matches → PM is informed, can browse all templates or proceed with lump sum
+4. Selection stored on `bid_packages.bid_template_id`
+
+**Downstream impact:** When a vendor opens the bid form, the system reads `bid_packages.bid_template_id`. If non-NULL, `bid_template_items` rows pre-populate the form. Vendor responses are captured in `bid_line_items` (which is template-agnostic — no FK to `bid_template_items`). The comparison engine (Phase 8) works because all vendors on the same bid package share the same line-item structure.
+
+**Design rationale:** Client spreadsheet data revealed templates don't map cleanly 1:1 to trades — some templates are trade-level, some are task-specific, and some are cross-trade. Decoupling templates from a strict trade requirement while preserving optional trade affiliation gives flexibility without losing organizational convenience.
+
+A **bid template management UI** is scoped as Task 3.6. PM/Admin can create/edit templates, optionally associate with a trade, manage line items (description, item_type, unit_of_measure, sort_order), and preview the template structure.
 
 ### 2.6 Document Sharing with Bid Invitations
 Documents are uploaded at **project level** (`project_documents`). When setting up a bid package, the PM selects which project documents to include via `bid_package_documents` junction table. Actual files stay in Supabase Storage, no duplication.

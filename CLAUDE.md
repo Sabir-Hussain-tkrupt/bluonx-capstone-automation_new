@@ -4,8 +4,6 @@
 
 Bid Management & Vendor Coordination System for BluOnX Development (land/horizontal) and Capstone LLC (vertical construction). Manages the complete vendor lifecycle: bid invitation → bid collection → comparison/scoring → contract award → milestone tracking.
 
-**Client team:** Joe Carson (business requirements), Steve Valentine (operational/technical knowledge), Kylie Brown (CEO).
-
 ## Tech Stack
 
 - **Frontend:** React 18 + Vite + TypeScript + TailwindCSS v4 (in `frontend/`)
@@ -94,10 +92,6 @@ Storage policies: `database/storage_rls_policies.sql`
 - `admin` — full access, manages vendors/trades/users
 - `project_manager` — manages projects, tasks, bid process, awards
 - All projects visible to all users for MVP (no project-level access restriction)
-
-## Current Phase
-
-Phase 2: Frontend Foundation + Backend API + Authentication (Tasks 2.1–2.9).
 
 For detailed task breakdowns, acceptance criteria, and what each subtask involves, see `docs/CURRENT_PHASE_TASKS.md`.
 For the complete 12-phase project plan, see `docs/PROJECT_PLAN.pdf`.

@@ -224,32 +224,74 @@
 
 ---
 
-### Task 3.6 — Bid Template Management Interface (10h)
+### Task 3.6: Build Bid Template Management Interface (16h)
 
-**Tables:** `bid_templates`, `bid_template_items`
+**Context:** Bid templates define how vendors submit pricing for a task — either a single lump sum or a structured line-item breakdown. Templates are stored as a reusable library. Each template is **optionally affiliated with a trade** (`trade_id` is nullable). When a PM creates a bid package (Phase 4), they select a template from this library. The selected template determines the vendor bid form structure. This task builds the admin/PM interface for managing this template library.
 
-**Backend endpoints:**
-- `GET /v1/bid-templates` — list all, optional filter by `trade_id`
-- `GET /v1/bid-templates/{id}` — detail with items
-- `POST /v1/bid-templates` — create template + items in one request. `created_by` from JWT.
-- `PUT /v1/bid-templates/{id}` — update metadata + items (full replace: delete existing items, insert new)
-- `DELETE /v1/bid-templates/{id}` — delete template (CASCADE handles items)
-- `GET /v1/trades/{trade_id}/bid-template` — get template for a trade (used by bid form in Phase 5)
+**Schema (already applied):**
+- `bid_templates`: `id`, `trade_id` (nullable FK → trades), `name`, `is_lump_sum`, `created_by`, timestamps
+- `bid_template_items`: `id`, `bid_template_id` (FK → bid_templates, CASCADE), `description`, `item_type` ('lump_sum' | 'unit_price'), `unit_of_measure`, `sort_order`
+- `bid_packages.bid_template_id`: nullable FK → bid_templates (used in Phase 4, not this task)
 
-**Frontend components:**
-- `BidTemplateListPage` — table: trade name, template name, type (lump sum / structured), item count, created date
-- `BidTemplateForm` — create/edit:
-  - Trade dropdown (single-select from `trades`)
-  - Name field
-  - `is_lump_sum` toggle: TRUE = vendor submits one total (no line items). FALSE = manage items below.
-  - Line items editor (when not lump sum): add/remove/reorder rows. Per item: description, `item_type` (lump_sum/unit_price), `unit_of_measure` (for unit_price), `sort_order`. Drag-and-drop or arrows to reorder.
-  - Template preview: show what the vendor bid form will look like
+**Backend — FastAPI endpoints:**
 
-**Key constraints:**
-- One template per trade is expected, but schema allows multiple. Show warning if trade already has one.
-- A single template can mix `lump_sum` and `unit_price` items (e.g., mobilization lump sum + excavation per CY).
-- `unit_of_measure` only relevant for `unit_price` items (CY, LF, EA, SF, etc.).
-- This task was added in v2.1 review (gap identified by Steve) — structured line items needed for some trades.
+1. **GET /v1/bid-templates** — List all templates. Support query params: `?trade_id=<uuid>` to filter by trade, `?search=<string>` to search by name. Include `trade` name in response (join). Return item count per template.
+2. **GET /v1/bid-templates/{id}** — Get template with all its `bid_template_items` ordered by `sort_order`.
+3. **POST /v1/bid-templates** — Create template. Body: `{ name, trade_id (optional/nullable), is_lump_sum, items: [{ description, item_type, unit_of_measure, sort_order }] }`. Accept items inline on create (single API call). `created_by` set from JWT auth context.
+4. **PUT /v1/bid-templates/{id}** — Update template metadata (name, trade_id, is_lump_sum). Separate from item management.
+5. **DELETE /v1/bid-templates/{id}** — Delete template. Will fail with 409 if referenced by any `bid_packages` (FK RESTRICT). Return clear error message.
+6. **POST /v1/bid-templates/{id}/items** — Add a line item to template.
+7. **PUT /v1/bid-templates/{id}/items/{item_id}** — Update a line item.
+8. **DELETE /v1/bid-templates/{id}/items/{item_id}** — Remove a line item (CASCADE handles FK).
+9. **PUT /v1/bid-templates/{id}/items/reorder** — Bulk update sort_order for all items. Body: `{ items: [{ id, sort_order }] }`.
+
+**Validation rules:**
+- Template `name` is required, non-empty
+- `trade_id` when provided must reference an active trade
+- When `is_lump_sum = false`, template must have at least one item
+- Item `description` is required
+- Item `unit_of_measure` is required when `item_type = 'unit_price'`, nullable when `item_type = 'lump_sum'`
+
+**Frontend — Template List Page** (`/templates` or `/bid-templates`):
+- Table/card list showing: template name, associated trade (or "General"), item count, is_lump_sum badge, created date
+- Search bar (filters by template name)
+- Trade filter dropdown (includes "All Trades" and "General / No Trade" options)
+- "Create Template" button → opens create form
+- Row click → navigates to template detail/edit page
+- Delete button per row with confirmation dialog. Show error toast if template is in use by a bid package.
+
+**Frontend — Template Create/Edit Page** (`/bid-templates/new`, `/bid-templates/{id}/edit`):
+- Form fields: Template Name (text input, required), Trade (dropdown with "None — General Purpose" as first option, then active trades alphabetically), Is Lump Sum (toggle switch — when ON, line items section is hidden/disabled)
+- **Line Items Section** (visible when is_lump_sum is OFF):
+  - Table of existing items: description, item_type (dropdown: lump_sum/unit_price), unit_of_measure (text input, shown only when item_type = unit_price), sort_order
+  - "Add Item" button appends a new row
+  - Delete icon per row to remove an item
+  - Drag-and-drop OR up/down arrow buttons for reordering (updates sort_order)
+  - Inline editing — no separate modal for items
+- Save button (calls POST on create, PUT on edit + manages items)
+- Cancel button → returns to list
+
+**Frontend — Template Preview** (within detail/edit page or as a tab):
+- Read-only view mimicking how the vendor bid form will render
+- For lump sum: shows a single "Total Amount" field
+- For structured: shows the line item table with columns matching what the vendor sees (Description, Type, Unit, Qty input placeholder, Unit Price input placeholder, Line Total placeholder)
+- This is a visual preview only — no data entry
+
+**Follows existing patterns from Tasks 3.1–3.5:**
+- Use the same FastAPI router pattern (router file under `/routers`, Pydantic v2 models under `/models`)
+- Use the same React Query hooks pattern (`useQuery`, `useMutation` with cache invalidation)
+- Use the same form validation approach (React Hook Form or existing form library)
+- Use the same table/list component pattern established in vendor and project list views
+- Use existing UI components (Button, Input, Select, Modal, Table, Card) from the component library (Task 2.2)
+- Toast notifications for success/error feedback
+- Loading skeletons while data fetches
+
+**Navigation:** Add "Bid Templates" link to the sidebar navigation under an appropriate section.
+
+**NOT in scope for this task:**
+- Template selection during bid package creation (that's Phase 4 — Task 4.1/4.6)
+- Vendor-facing bid form rendering from template (that's Phase 5 — Task 5.1/5.4)
+- Seeding templates from client spreadsheet data (can be done manually or as a follow-up)
 
 ---
 
