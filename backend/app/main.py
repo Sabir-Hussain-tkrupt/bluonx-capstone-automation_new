@@ -18,6 +18,7 @@ from app.routers import (
     bid_invitations,
     bid_packages,
     bid_submissions,
+    bid_templates,
     contracts,
     geocoding,
     health,
@@ -68,6 +69,7 @@ app.include_router(projects.router, prefix=_v1, tags=["Projects"])
 app.include_router(tasks.router, prefix=_v1, tags=["Tasks"])
 app.include_router(trades.router, prefix=_v1, tags=["Trades"])
 app.include_router(bid_packages.router, prefix=_v1, tags=["Bid Packages"])
+app.include_router(bid_templates.router, prefix=_v1, tags=["Bid Templates"])
 app.include_router(bid_invitations.router, prefix=_v1, tags=["Bid Invitations"])
 app.include_router(bid_submissions.router, prefix=_v1, tags=["Bid Submissions"])
 app.include_router(awards.router, prefix=_v1, tags=["Awards"])

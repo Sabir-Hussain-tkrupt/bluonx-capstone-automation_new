@@ -30,6 +30,10 @@ export const API_ENDPOINTS = {
   TRADES: '/trades',
   TRADE: (id: string) => `/trades/${id}`,
 
+  // Bid Templates
+  BID_TEMPLATES: '/bid-templates',
+  BID_TEMPLATE: (id: string) => `/bid-templates/${id}`,
+
   // Bid Packages
   BID_PACKAGES: '/bid-packages',
   BID_PACKAGE: (id: string) => `/bid-packages/${id}`,

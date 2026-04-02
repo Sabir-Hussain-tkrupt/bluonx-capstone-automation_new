@@ -72,6 +72,17 @@ export const queryKeys = {
     list: (vendorId: string) => [...queryKeys.vendorTrades.all(vendorId), 'list'] as const,
   },
 
+  bidTemplates: {
+    all: ['bid_templates'] as const,
+    lists: () => [...queryKeys.bidTemplates.all, 'list'] as const,
+    list: (filters?: Record<string, unknown>) =>
+      filters
+        ? ([...queryKeys.bidTemplates.lists(), filters] as const)
+        : queryKeys.bidTemplates.lists(),
+    details: () => [...queryKeys.bidTemplates.all, 'detail'] as const,
+    detail: (id: string) => [...queryKeys.bidTemplates.details(), id] as const,
+  },
+
   bidPackages: {
     all: ['bid_packages'] as const,
     lists: () => [...queryKeys.bidPackages.all, 'list'] as const,

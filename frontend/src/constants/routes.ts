@@ -21,6 +21,10 @@ export const ROUTES = {
   TASK_DETAIL: '/projects/:id/tasks/:taskId',
   BID_MANAGEMENT: '/projects/:id/tasks/:taskId/bids',
   AWARD: '/projects/:id/tasks/:taskId/award',
+  BID_TEMPLATES: '/bid-templates',
+  BID_TEMPLATE_NEW: '/bid-templates/new',
+  BID_TEMPLATE_DETAIL: '/bid-templates/:id',
+  BID_TEMPLATE_EDIT: '/bid-templates/:id/edit',
   SETTINGS: '/settings',
 
   // Error pages

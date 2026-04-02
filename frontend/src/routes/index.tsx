@@ -21,6 +21,9 @@ import { TaskListPage } from '@/features/projects/pages/TaskListPage';
 import { TaskDetailPage } from '@/features/projects/pages/TaskDetailPage';
 import { BidManagementPage } from '@/features/bids/pages/BidManagementPage';
 import { AwardPage } from '@/features/contracts/pages/AwardPage';
+import { BidTemplateListPage } from '@/features/bid-templates/pages/BidTemplateListPage';
+import { BidTemplateDetailPage } from '@/features/bid-templates/pages/BidTemplateDetailPage';
+import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateFormPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
@@ -62,6 +65,10 @@ export function AppRoutes() {
         <Route path={ROUTES.TASK_DETAIL} element={<TaskDetailPage />} />
         <Route path={ROUTES.BID_MANAGEMENT} element={<BidManagementPage />} />
         <Route path={ROUTES.AWARD} element={<AwardPage />} />
+        <Route path={ROUTES.BID_TEMPLATES} element={<BidTemplateListPage />} />
+        <Route path={ROUTES.BID_TEMPLATE_NEW} element={<BidTemplateFormPage />} />
+        <Route path={ROUTES.BID_TEMPLATE_DETAIL} element={<BidTemplateDetailPage />} />
+        <Route path={ROUTES.BID_TEMPLATE_EDIT} element={<BidTemplateFormPage />} />
         <Route
           path={ROUTES.SETTINGS}
           element={
