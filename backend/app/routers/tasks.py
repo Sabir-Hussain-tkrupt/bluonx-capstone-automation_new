@@ -16,6 +16,8 @@ from app.models.projects import (
     TaskResponse,
     TaskUpdate,
 )
+from app.models.vendor_filtering import QualifiedVendorsResponse
+from app.services.vendor_filtering import filter_qualified_vendors
 
 logger = logging.getLogger(__name__)
 
@@ -387,3 +389,37 @@ async def reorder_tasks(
         ).eq("id", str(item.task_id)).eq(
             "project_id", str(project_id)
         ).is_("deleted_at", "null").execute()
+
+
+# ── Vendor Filtering ────────────────────────────────────────────────────
+
+
+@router.get(
+    "/tasks/{task_id}/qualified-vendors",
+    response_model=QualifiedVendorsResponse,
+)
+async def get_qualified_vendors(
+    task_id: UUID,
+    radius_miles: float = Query(default=75, ge=1, le=500, description="Max distance in miles"),
+    include_flagged: bool = Query(default=True, description="Include vendors with unresolved flags"),
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Find qualified vendors for a competitive task.
+
+    Runs the multi-stage filtering pipeline: trade match, status,
+    onboarding, insurance, bonding, capacity, distance, and flags.
+    Returns qualified and disqualified vendors with detailed reasons.
+    """
+    try:
+        return await filter_qualified_vendors(
+            db=db,
+            task_id=str(task_id),
+            radius_miles=radius_miles,
+            include_flagged=include_flagged,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg) from exc
