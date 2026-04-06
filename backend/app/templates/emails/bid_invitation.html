@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}Bid Invitation — {{ project_name }}{% endblock %}
+
+{% block preheader %}You've been invited to bid on {{ task_name }} for the {{ project_name }} project. Deadline: {{ bid_deadline }}.{% endblock %}
+
+{% block content %}
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ vendor_contact_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      {{ vendor_company_name }} has been invited to submit a bid for
+      <strong>{{ task_name }}</strong> on the <strong>{{ project_name }}</strong> project.
+      We value your expertise and look forward to receiving your proposal.
+    </td>
+  </tr>
+</table>
+
+<!-- Project Details Card -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px; padding:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:12px; border-bottom:1px solid #e0e0e0;">
+            Project Details
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Project:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ project_name }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Location:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ project_location }}
+                </td>
+              </tr>
+              {% if project_description %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Description:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; line-height:1.5; vertical-align:top;">
+                  {{ project_description }}
+                </td>
+              </tr>
+              {% endif %}
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Bid Details Card -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px; padding:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:12px; border-bottom:1px solid #e0e0e0;">
+            Bid Details
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Scope:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ task_name }}
+                </td>
+              </tr>
+              {% if task_description %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Details:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; line-height:1.5; vertical-align:top;">
+                  {{ task_description }}
+                </td>
+              </tr>
+              {% endif %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Deadline:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#c62828; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ bid_deadline }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Bid Format:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ bid_format }}
+                </td>
+              </tr>
+              {% if document_names %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">
+                  Documents:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ document_names | length }} file{{ "s" if document_names | length != 1 }} included
+                </td>
+              </tr>
+              {% endif %}
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:8px;">
+  <tr>
+    <td align="center" style="padding:8px 0;">
+      <!--[if mso]>
+      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ magic_link_url }}" style="height:50px; v-text-anchor:middle; width:260px;" arcsize="8%" strokecolor="#1a73e8" fillcolor="#1a73e8">
+        <w:anchorlock/>
+        <center style="color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold;">Submit Your Bid</center>
+      </v:roundrect>
+      <![endif]-->
+      <!--[if !mso]><!-->
+      <a href="{{ magic_link_url }}" target="_blank" class="cta-button" style="display:inline-block; padding:14px 40px; background-color:#1a73e8; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; text-decoration:none; border-radius:4px; text-align:center; mso-hide:all;">Submit Your Bid</a>
+      <!--<![endif]-->
+    </td>
+  </tr>
+</table>
+
+<!-- Fallback link -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#999999; line-height:1.5; text-align:center; padding-bottom:24px;">
+      If the button above doesn't work, copy and paste this link into your browser:<br />
+      <a href="{{ magic_link_url }}" target="_blank" style="color:#1a73e8; word-break:break-all;">{{ magic_link_url }}</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Contact Section -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; padding-bottom:24px; border-top:1px solid #eeeeee; padding-top:20px;">
+      Questions about this bid opportunity? Contact <strong>{{ pm_name }}</strong> at
+      <a href="mailto:{{ pm_email }}" style="color:#1a73e8; text-decoration:none;">{{ pm_email }}</a>.
+    </td>
+  </tr>
+</table>
+
+<!-- Document List (conditional) -->
+{% if document_names %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; padding-bottom:8px;">
+      <strong>The following project documents are included with this bid package:</strong>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding-left:8px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        {% for doc in document_names %}
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#555555; line-height:1.8; padding-left:8px;">
+            &#8226;&nbsp; {{ doc }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </td>
+  </tr>
+</table>
+{% endif %}
+{% endblock %}

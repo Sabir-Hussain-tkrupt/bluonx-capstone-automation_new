@@ -1,0 +1,105 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>{% block title %}BluOnX{% endblock %}</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style>
+    /* Progressive enhancement only — all critical styles are inline */
+    @media only screen and (max-width: 620px) {
+      .email-container {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .email-content {
+        padding: 20px 16px !important;
+      }
+      .email-header {
+        padding: 20px 16px !important;
+      }
+      .email-footer {
+        padding: 16px !important;
+      }
+      .detail-card {
+        padding: 16px !important;
+      }
+      .cta-button {
+        display: block !important;
+        width: 100% !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+      }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f4f4; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
+  <!-- Preheader text (hidden preview text for email clients) -->
+  <span style="display:none !important; visibility:hidden; mso-hide:all; font-size:1px; color:#f4f4f4; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
+    {% block preheader %}{% endblock %}
+    &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847;
+  </span>
+
+  <!-- Outer wrapper table -->
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:0; padding:0; background-color:#f4f4f4;">
+    <tr>
+      <td align="center" style="padding:20px 10px;">
+
+        <!-- Main email container -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="email-container" style="max-width:600px; width:100%; background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+
+          <!-- Header -->
+          <tr>
+            <td class="email-header" style="background-color:#1a73e8; padding:28px 30px; text-align:left;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="font-family:Arial, Helvetica, sans-serif; font-size:24px; font-weight:bold; color:#ffffff; line-height:1.2;">
+                    BluOnX
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td class="email-content" style="padding:30px; background-color:#ffffff;">
+              {% block content %}{% endblock %}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="email-footer" style="padding:20px 30px; background-color:#f9f9f9; border-top:1px solid #eeeeee;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#999999; line-height:1.5; text-align:center;">
+                    {{ company_name | default("BluOnX Development") }}<br />
+                    This email was sent as part of the bid management process.<br />
+                    Please do not reply directly to this email.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Main email container -->
+
+      </td>
+    </tr>
+  </table>
+  <!-- /Outer wrapper table -->
+</body>
+</html>

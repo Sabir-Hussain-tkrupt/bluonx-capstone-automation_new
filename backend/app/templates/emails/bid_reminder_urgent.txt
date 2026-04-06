@@ -1,0 +1,25 @@
+{{ company_name | default("BluOnX Development") }}
+================================================================
+
+*** DEADLINE APPROACHING ***
+
+Dear {{ vendor_contact_name }},
+
+The deadline to submit your bid for {{ task_name }} on the {{ project_name }} project is approaching quickly. We have not yet received your submission and want to ensure you don't miss this opportunity.
+
+SUBMISSION DEADLINE: {{ bid_deadline }}
+
+SUBMIT YOUR BID NOW
+----------------------------------------------------------------
+Click the link below to access the bid portal and submit your proposal:
+
+{{ magic_link_url }}
+
+QUESTIONS?
+----------------------------------------------------------------
+Contact {{ pm_name }} at {{ pm_email }} if you have any questions.
+
+--
+{{ company_name | default("BluOnX Development") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.
