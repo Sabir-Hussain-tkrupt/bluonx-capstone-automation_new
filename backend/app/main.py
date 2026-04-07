@@ -29,6 +29,7 @@ from app.routers import (
     trades,
     users,
     vendors,
+    webhooks,
 )
 
 
@@ -77,3 +78,4 @@ app.include_router(contracts.router, prefix=_v1, tags=["Contracts"])
 app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])
+app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
