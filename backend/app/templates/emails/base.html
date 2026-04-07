@@ -79,13 +79,30 @@
             </td>
           </tr>
 
+          <!-- Logo -->
+          <tr>
+            <td style="padding:24px 30px 0; background-color:#ffffff; text-align:center;">
+              {% if logo_url %}
+              <img src="{{ logo_url }}" alt="BluOnX" width="140" style="display:inline-block; width:140px; max-width:100%; height:auto; border:0;" />
+              {% else %}
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                <tr>
+                  <td style="font-family:Arial, Helvetica, sans-serif; font-size:20px; font-weight:bold; color:#1a73e8; letter-spacing:1px;">
+                    BluOnX Development LLC
+                  </td>
+                </tr>
+              </table>
+              {% endif %}
+            </td>
+          </tr>
+
           <!-- Footer -->
           <tr>
-            <td class="email-footer" style="padding:20px 30px; background-color:#f9f9f9; border-top:1px solid #eeeeee;">
+            <td class="email-footer" style="padding:16px 30px 20px; background-color:#ffffff; border-top:1px solid #eeeeee; margin-top:8px;">
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                 <tr>
-                  <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#999999; line-height:1.5; text-align:center;">
-                    {{ company_name | default("BluOnX Development") }}<br />
+                  <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#999999; line-height:1.5; text-align:center; padding-top:12px;">
+                    "BluOnX Development LLC<br />
                     This email was sent as part of the bid management process.<br />
                     Please do not reply directly to this email.
                   </td>
