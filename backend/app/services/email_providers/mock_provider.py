@@ -8,7 +8,11 @@ interface as the real SES provider so calling code is identical.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from app.services.email_service import EmailSendResult
 
 logger = logging.getLogger(__name__)
 

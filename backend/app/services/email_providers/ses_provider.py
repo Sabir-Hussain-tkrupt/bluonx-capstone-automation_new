@@ -20,6 +20,11 @@ No changes needed to EmailService, email_log integration, template rendering, or
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.email_service import EmailSendResult
+
 
 class SESEmailProvider:
     """AWS SES email provider (not implemented — requires AWS credentials)."""
