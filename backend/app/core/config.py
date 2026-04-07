@@ -30,5 +30,10 @@ class Settings(BaseSettings):
     # Google Maps
     GOOGLE_MAPS_API_KEY: str | None = None
 
+    # Email
+    EMAIL_PROVIDER: str = "mock"  # "mock" or "ses"
+    SES_FROM_EMAIL: str = "noreply@bluonx.com"
+    SES_REGION: str = "us-east-1"
+
 
 settings = Settings()
