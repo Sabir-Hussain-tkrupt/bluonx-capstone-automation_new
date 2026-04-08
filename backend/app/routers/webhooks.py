@@ -6,10 +6,16 @@ Handles AWS SNS notifications for SES delivery/bounce/complaint events.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import re
+from urllib.parse import urlparse
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, utils
 from fastapi import APIRouter, Request, Response, status
 
 from app.core.supabase_client import get_supabase
@@ -18,25 +24,100 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Cert URL must be from amazonaws.com on HTTPS to prevent spoofing.
+_VALID_CERT_URL_RE = re.compile(
+    r"^https://sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?/"
+)
+
 
 # ── SNS signature verification ──────────────────────────────────────────────
+
+
+def _build_signing_string(payload: dict) -> str:
+    """
+    Build the canonical string-to-sign for an SNS message.
+
+    The fields and order differ by message type.
+    See: https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html
+    """
+    msg_type = payload.get("Type", "")
+
+    if msg_type == "Notification":
+        fields = ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"]
+    else:
+        # SubscriptionConfirmation and UnsubscribeConfirmation
+        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "TopicArn", "Type"]
+
+    parts: list[str] = []
+    for field in fields:
+        value = payload.get(field)
+        if value is not None:
+            parts.append(field)
+            parts.append(str(value))
+
+    return "\n".join(parts) + "\n"
 
 
 def verify_sns_signature(payload: dict) -> bool:
     """
     Verify the cryptographic signature of an incoming SNS message.
 
-    TODO: Implement real SNS signature verification when AWS credentials arrive.
     Steps:
-      1. Download the signing certificate from payload["SigningCertURL"]
-      2. Verify the URL is from amazonaws.com (prevent spoofing)
-      3. Build the canonical message string for the message type
-      4. Verify the signature using the certificate's public key
-    See: https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html
+      1. Validate SigningCertURL is from amazonaws.com (HTTPS)
+      2. Download the X.509 certificate
+      3. Build the canonical signing string
+      4. Verify the signature using the certificate's public key (SHA1WithRSA)
 
-    For now, returns True to allow development/testing to proceed.
+    Returns True if the signature is valid, False otherwise.
     """
-    return True
+    cert_url = payload.get("SigningCertURL", "")
+    signature_b64 = payload.get("Signature", "")
+    sig_version = payload.get("SignatureVersion", "")
+
+    # ── Basic field validation ──────────────────────────────────────
+    if not cert_url or not signature_b64:
+        logger.warning("SNS message missing SigningCertURL or Signature")
+        return False
+
+    # Only SignatureVersion "1" is supported (SHA1WithRSA).
+    if sig_version not in ("1", "2"):
+        logger.warning("Unsupported SNS SignatureVersion: %s", sig_version)
+        return False
+
+    # ── Validate cert URL origin ────────────────────────────────────
+    if not _VALID_CERT_URL_RE.match(cert_url):
+        logger.warning("SNS SigningCertURL not from amazonaws.com: %s", cert_url)
+        return False
+
+    parsed = urlparse(cert_url)
+    if parsed.scheme != "https":
+        logger.warning("SNS SigningCertURL is not HTTPS: %s", cert_url)
+        return False
+
+    try:
+        # ── Download certificate ────────────────────────────────────
+        cert_resp = httpx.get(cert_url, timeout=10)
+        cert_resp.raise_for_status()
+        cert = x509.load_pem_x509_certificate(cert_resp.content)
+
+        # ── Build signing string and verify ─────────────────────────
+        signing_string = _build_signing_string(payload)
+        signature = base64.b64decode(signature_b64)
+
+        hash_algo = hashes.SHA256() if sig_version == "2" else hashes.SHA1()
+
+        cert.public_key().verify(
+            signature,
+            signing_string.encode("utf-8"),
+            padding.PKCS1v15(),
+            hash_algo,
+        )
+
+        return True
+
+    except Exception:
+        logger.exception("SNS signature verification failed")
+        return False
 
 
 # ── SES notification webhook ────────────────────────────────────────────────

@@ -245,3 +245,27 @@ class EmailService:
         if not self._db or not log_id:
             return
         self._db.table("email_log").update(data).eq("id", log_id).execute()
+
+
+# ── Factory ─────────────────────────────────────────────────────────────────
+
+
+def create_email_provider() -> EmailProvider:
+    """
+    Create the appropriate email provider based on EMAIL_PROVIDER setting.
+
+    Returns MockEmailProvider (default) or SESEmailProvider.
+    """
+    if settings.EMAIL_PROVIDER == "ses":
+        if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+            raise RuntimeError(
+                "EMAIL_PROVIDER=ses requires AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY to be set in environment / .env"
+            )
+        return SESEmailProvider(
+            region=settings.AWS_REGION,
+            access_key_id=settings.AWS_ACCESS_KEY_ID,
+            secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+
+    return MockEmailProvider()

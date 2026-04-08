@@ -9,7 +9,7 @@ Verifies that the mock provider:
 """
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -62,7 +62,12 @@ class TestMockProviderProtocol:
 
     def test_ses_provider_also_implements_protocol(self):
         """SESEmailProvider should also implement the same protocol."""
-        provider = SESEmailProvider()
+        with patch("app.services.email_providers.ses_provider.boto3"):
+            provider = SESEmailProvider(
+                region="us-east-1",
+                access_key_id="AKIATEST",
+                secret_access_key="SECRET",
+            )
         assert isinstance(provider, EmailProvider)
 
 
