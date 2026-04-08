@@ -324,4 +324,10 @@ class TestProviderProtocol:
         assert isinstance(MockEmailProvider(), EmailProvider)
 
     def test_ses_provider_implements_protocol(self):
-        assert isinstance(SESEmailProvider(), EmailProvider)
+        with patch("app.services.email_providers.ses_provider.boto3"):
+            provider = SESEmailProvider(
+                region="us-east-1",
+                access_key_id="AKIATEST",
+                secret_access_key="SECRET",
+            )
+        assert isinstance(provider, EmailProvider)
