@@ -30,10 +30,14 @@ class Settings(BaseSettings):
     # Google Maps
     GOOGLE_MAPS_API_KEY: str | None = None
 
+    # AWS
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
+    AWS_REGION: str = "us-east-1"
+
     # Email
-    EMAIL_PROVIDER: str = "mock"  # "mock" or "ses"
-    SES_FROM_EMAIL: str = "noreply@bluonx.com"
-    SES_REGION: str = "us-east-1"
+    EMAIL_PROVIDER: str = "ses"  # "mock" or "ses"
+    SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
 
 
 settings = Settings()
