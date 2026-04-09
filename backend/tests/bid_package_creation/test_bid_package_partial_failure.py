@@ -60,6 +60,18 @@ def _setup_creation_mocks(mock_supabase, deadline_iso: str):
     bid_package_id = uuid4()
     invitation_ids = {str(VENDOR_IDS[i]): str(uuid4()) for i in range(3)}
 
+    # Per-ID lookup data for vendors and contacts
+    _vendors_by_id = {
+        str(VENDOR_IDS[0]): {"id": str(VENDOR_IDS[0]), "company_name": "Smith Grading Co.", "status": "active", "deleted_at": None},
+        str(VENDOR_IDS[1]): {"id": str(VENDOR_IDS[1]), "company_name": "Apex Earthworks", "status": "active", "deleted_at": None},
+        str(VENDOR_IDS[2]): {"id": str(VENDOR_IDS[2]), "company_name": "Summit Sitework", "status": "active", "deleted_at": None},
+    }
+    _contacts_by_id = {
+        str(VENDOR_CONTACT_IDS[0]): {"id": str(VENDOR_CONTACT_IDS[0]), "vendor_id": str(VENDOR_IDS[0]), "full_name": "John Smith", "email": "john@smithgrading.com"},
+        str(VENDOR_CONTACT_IDS[1]): {"id": str(VENDOR_CONTACT_IDS[1]), "vendor_id": str(VENDOR_IDS[1]), "full_name": "Maria Garcia", "email": "maria@apexearth.com"},
+        str(VENDOR_CONTACT_IDS[2]): {"id": str(VENDOR_CONTACT_IDS[2]), "vendor_id": str(VENDOR_IDS[2]), "full_name": "David Chen", "email": "david@summitsite.com"},
+    }
+
     def table_side_effect(table_name):
         chain = MagicMock()
 
@@ -91,6 +103,26 @@ def _setup_creation_mocks(mock_supabase, deadline_iso: str):
                 result.execute.return_value = MagicMock(data=[{**row, "id": str(uuid4())}])
                 return result
             chain.insert.side_effect = token_insert
+        elif table_name == "vendors":
+            def vendors_eq(field, value):
+                vendor = _vendors_by_id.get(str(value))
+                result = MagicMock()
+                result.single.return_value = result
+                result.eq.return_value = result
+                result.execute.return_value = MagicMock(data=[vendor] if vendor else [])
+                return result
+            chain.select.return_value = chain
+            chain.eq.side_effect = vendors_eq
+        elif table_name == "vendor_contacts":
+            def contacts_eq(field, value):
+                contact = _contacts_by_id.get(str(value))
+                result = MagicMock()
+                result.single.return_value = result
+                result.eq.return_value = result
+                result.execute.return_value = MagicMock(data=[contact] if contact else [])
+                return result
+            chain.select.return_value = chain
+            chain.eq.side_effect = contacts_eq
         else:
             result = MagicMock()
             result.execute.return_value = MagicMock(data=[])

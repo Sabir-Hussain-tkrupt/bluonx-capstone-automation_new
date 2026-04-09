@@ -39,5 +39,8 @@ class Settings(BaseSettings):
     EMAIL_PROVIDER: str = "ses"  # "mock" or "ses"
     SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
 
+    # Portal (vendor-facing URL for magic links)
+    PORTAL_BASE_URL: str = "http://localhost:5173"
+
 
 settings = Settings()

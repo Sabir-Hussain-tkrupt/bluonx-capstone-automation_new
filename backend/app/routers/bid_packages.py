@@ -1,12 +1,15 @@
 """Bid package endpoints — /api/v1/bid-packages"""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
 from app.core.auth import get_current_active_user
+from app.core.config import settings
 from app.core.supabase_client import get_supabase
+from app.models.bid_packages import BidPackageCreateRequest, BidPackageCreateResponse
 from app.models.bids import (
     BidPackageCreate,
     BidPackageDocumentCreate,
@@ -14,8 +17,71 @@ from app.models.bids import (
     BidPackageResponse,
     BidPackageUpdate,
 )
+from app.services.bid_package_service import (
+    BidPackageValidationError,
+    create_bid_package_with_invitations,
+)
+from app.services.email_service import EmailService
+from app.services.template_renderer import template_renderer
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _get_email_service(db: Client) -> EmailService:
+    """Instantiate EmailService with the correct provider."""
+    if settings.EMAIL_PROVIDER == "mock":
+        from app.services.email_providers.mock_provider import MockEmailProvider
+
+        provider = MockEmailProvider()
+    else:
+        from app.services.email_providers.ses_provider import SESEmailProvider
+
+        provider = SESEmailProvider()
+    return EmailService(provider=provider, db_client=db)
+
+
+@router.post(
+    "/tasks/{task_id}/bid-packages",
+    response_model=BidPackageCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_bid_package_endpoint(
+    task_id: UUID,
+    request: BidPackageCreateRequest,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Create a bid package with invitations and send emails to vendors."""
+    email_service = _get_email_service(db)
+    payload = {
+        "task_id": str(task_id),
+        "bid_template_id": str(request.bid_template_id),
+        "deadline": request.deadline.isoformat(),
+        "project_document_ids": [str(d) for d in request.project_document_ids],
+        "vendor_selections": [
+            {
+                "vendor_id": str(vs.vendor_id),
+                "vendor_contact_id": str(vs.vendor_contact_id),
+            }
+            for vs in request.vendor_selections
+        ],
+    }
+
+    try:
+        result = await create_bid_package_with_invitations(
+            task_id=task_id,
+            payload=payload,
+            created_by=user["user_id"],
+            db=db,
+            email_service=email_service,
+            template_renderer=template_renderer,
+        )
+    except BidPackageValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    return result
 
 
 @router.get("/bid-packages", response_model=list[BidPackageResponse])

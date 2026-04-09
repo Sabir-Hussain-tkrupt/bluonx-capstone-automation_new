@@ -258,10 +258,22 @@ def mock_email_service() -> AsyncMock:
 
 @pytest.fixture()
 def mock_template_renderer() -> MagicMock:
-    """Mock TemplateRenderer that returns placeholder HTML and text."""
+    """Mock TemplateRenderer that returns placeholder HTML and text.
+
+    Includes magic_link_url in output so token-extraction tests can find it.
+    """
     renderer = MagicMock()
-    renderer.render.return_value = "<html><body>Bid Invitation</body></html>"
-    renderer.render_text.return_value = "Bid Invitation (plain text)"
+
+    def _render(template_name, context):
+        url = context.get("magic_link_url", "")
+        return f'<html><body>Bid Invitation <a href="{url}">{url}</a></body></html>'
+
+    def _render_text(template_name, context):
+        url = context.get("magic_link_url", "")
+        return f"Bid Invitation (plain text) {url}"
+
+    renderer.render.side_effect = _render
+    renderer.render_text.side_effect = _render_text
     return renderer
 
 
@@ -300,3 +312,11 @@ def mock_supabase() -> MagicMock:
 # ── Portal URL ─────────────────────────────────────────────────────────────
 
 PORTAL_BASE_URL = "https://portal.bluonx.com"
+
+
+@pytest.fixture(autouse=True)
+def _patch_portal_url(monkeypatch):
+    """Ensure the service uses the test PORTAL_BASE_URL for all tests."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PORTAL_BASE_URL", PORTAL_BASE_URL)

@@ -86,6 +86,7 @@ def _setup_rendering_mocks(mock_supabase, deadline_iso: str, pm_user: dict, task
         elif table_name == "project_documents":
             chain.select.return_value = chain
             chain.eq.return_value = chain
+            chain.single.return_value = chain
             chain.execute.return_value = MagicMock(data=[
                 {"id": str(DOC_IDS[0]), "project_id": str(PROJECT_ID), "file_name": "grading_plan.pdf"},
                 {"id": str(DOC_IDS[1]), "project_id": str(PROJECT_ID), "file_name": "site_survey.dwg"},

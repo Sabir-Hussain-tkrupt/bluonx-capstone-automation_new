@@ -462,6 +462,15 @@ class TestProjectDocumentValidation:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "project_documents":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
@@ -519,6 +528,15 @@ class TestVendorExistenceValidation:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "vendors":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
@@ -579,6 +597,15 @@ class TestVendorExistenceValidation:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "vendors":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
@@ -639,6 +666,15 @@ class TestVendorExistenceValidation:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "vendors":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
@@ -705,6 +741,15 @@ class TestVendorContactValidation:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "vendors":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
@@ -767,6 +812,15 @@ class TestErrorResponseDetails:
                 chain.is_.return_value = chain
                 chain.single.return_value = chain
                 chain.execute.return_value = MagicMock(data=[sample_task_competitive])
+            elif table_name == "bid_templates":
+                chain.select.return_value = chain
+                chain.eq.return_value = chain
+                chain.single.return_value = chain
+                chain.execute.return_value = MagicMock(data=[{
+                    "id": str(BID_TEMPLATE_ID),
+                    "name": "Standard Grading Template",
+                    "is_lump_sum": True,
+                }])
             elif table_name == "vendors":
                 chain.select.return_value = chain
                 chain.eq.return_value = chain
