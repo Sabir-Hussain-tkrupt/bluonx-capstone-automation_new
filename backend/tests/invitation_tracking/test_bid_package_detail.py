@@ -156,11 +156,9 @@ class TestLazyExpiration:
             else:
                 chain = build_chain(data=[])
 
-            original_update = chain.update
-
-            def capture(payload):
-                updates_captured.append({"table": name, "payload": payload})
-                return original_update(payload)
+            def capture(payload, _chain=chain, _name=name):
+                updates_captured.append({"table": _name, "payload": payload})
+                return _chain
 
             chain.update.side_effect = capture
             return chain
@@ -216,11 +214,9 @@ class TestLazyExpiration:
             else:
                 chain = build_chain(data=[])
 
-            original_update = chain.update
-
-            def capture(payload):
-                updates_captured.append({"table": name, "payload": payload})
-                return original_update(payload)
+            def capture(payload, _chain=chain, _name=name):
+                updates_captured.append({"table": _name, "payload": payload})
+                return _chain
 
             chain.update.side_effect = capture
             return chain

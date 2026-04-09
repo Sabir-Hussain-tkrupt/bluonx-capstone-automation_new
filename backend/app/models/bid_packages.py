@@ -54,3 +54,104 @@ class ResendInvitationResponse(BluOnXBase):
     vendor_id: str
     new_token_generated: bool
     email_status: str
+
+
+# ── Task 4.5: Invitation Tracking ────────────────────────────────────────
+
+
+class InvitationSummary(BluOnXBase):
+    """Per-status counts for invitations in a bid package."""
+
+    total: int
+    sent: int
+    opened: int
+    submitted: int
+    declined: int
+    expired: int
+    no_response: int
+
+
+class InvitationItem(BluOnXBase):
+    """A single invitation row with vendor display fields."""
+
+    id: UUID
+    vendor_id: UUID | None = None
+    vendor_company_name: str | None = None
+    vendor_contact_name: str | None = None
+    vendor_contact_email: str | None = None
+    status: str
+    sent_at: datetime | None = None
+    opened_at: datetime | None = None
+    responded_at: datetime | None = None
+
+
+class BidTemplateSummary(BluOnXBase):
+    id: UUID
+    name: str
+    is_lump_sum: bool | None = None
+
+
+class BidPackageDocumentItem(BluOnXBase):
+    id: UUID
+    file_name: str | None = None
+
+
+class BidPackageDetailResponse(BluOnXBase):
+    """Response for GET /v1/bid-packages/{bid_package_id}."""
+
+    id: UUID
+    task_name: str | None = None
+    round_number: int
+    deadline: datetime
+    status: str
+    bid_template: BidTemplateSummary | None = None
+    documents: list[BidPackageDocumentItem] = Field(default_factory=list)
+    invitation_summary: InvitationSummary
+    invitations: list[InvitationItem] = Field(default_factory=list)
+
+
+class InvitationListResponse(BluOnXBase):
+    """Response for GET /v1/bid-packages/{bid_package_id}/invitations."""
+
+    invitations: list[InvitationItem]
+
+
+class InvitationStatusUpdateRequest(BluOnXBase):
+    """Request body for PUT /v1/bid-invitations/{invitation_id}/status.
+
+    Status is kept as a plain string here so the service layer can return
+    a 400 with a descriptive detail message. The Pydantic layer only
+    enforces that a value is provided.
+    """
+
+    status: str
+
+
+class InvitationUpdatedResponse(BluOnXBase):
+    """Response for PUT /v1/bid-invitations/{invitation_id}/status."""
+
+    id: UUID
+    bid_package_id: UUID | None = None
+    vendor_id: UUID | None = None
+    vendor_contact_id: UUID | None = None
+    status: str
+    sent_at: datetime | None = None
+    opened_at: datetime | None = None
+    responded_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class EmailLogItem(BluOnXBase):
+    id: UUID | None = None
+    recipient_email: str | None = None
+    email_type: str | None = None
+    subject: str | None = None
+    status: str | None = None
+    sent_at: datetime | None = None
+    error_message: str | None = None
+
+
+class EmailLogResponse(BluOnXBase):
+    """Response for GET /v1/bid-packages/{bid_package_id}/email-log."""
+
+    items: list[EmailLogItem]

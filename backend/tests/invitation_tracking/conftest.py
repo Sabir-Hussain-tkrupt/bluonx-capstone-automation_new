@@ -316,11 +316,12 @@ def mock_supabase(
             chain = build_chain(data=[])
 
         # Capture writes — service may call .update(payload).eq(...).execute()
-        original_update = chain.update
-
-        def capture(payload):
-            updates_captured.append({"table": name, "payload": payload})
-            return original_update(payload)
+        # The side_effect returns `chain` directly (mirroring the
+        # chain.update.return_value set up in build_chain) so subsequent
+        # chaining like .eq(...).execute() still works.
+        def capture(payload, _chain=chain, _name=name):
+            updates_captured.append({"table": _name, "payload": payload})
+            return _chain
 
         chain.update.side_effect = capture
         return chain

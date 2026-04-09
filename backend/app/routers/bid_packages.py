@@ -9,7 +9,13 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.config import settings
 from app.core.supabase_client import get_supabase
-from app.models.bid_packages import BidPackageCreateRequest, BidPackageCreateResponse
+from app.models.bid_packages import (
+    BidPackageCreateRequest,
+    BidPackageCreateResponse,
+    BidPackageDetailResponse,
+    EmailLogResponse,
+    InvitationListResponse,
+)
 from app.models.bids import (
     BidPackageCreate,
     BidPackageDocumentCreate,
@@ -20,6 +26,12 @@ from app.models.bids import (
 from app.services.bid_package_service import (
     BidPackageValidationError,
     create_bid_package_with_invitations,
+)
+from app.services.invitation_tracking_service import (
+    InvitationTrackingError,
+    get_bid_package_detail,
+    get_bid_package_email_log,
+    list_invitations,
 )
 from app.services.email_service import EmailService
 from app.services.template_renderer import template_renderer
@@ -95,15 +107,64 @@ async def list_bid_packages(
     return []
 
 
-@router.get("/bid-packages/{bid_package_id}", response_model=BidPackageResponse)
+@router.get(
+    "/bid-packages/{bid_package_id}",
+    response_model=BidPackageDetailResponse,
+)
 async def get_bid_package(
     bid_package_id: UUID,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Get a single bid package by ID."""
-    # TODO: Implement in later phase
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Get a bid package with invitation summary, invitations, and documents.
+
+    Applies lazy expiration: if the deadline has passed, outstanding
+    invitations are marked 'expired' and the package is closed before
+    the response is built.
+    """
+    try:
+        return await get_bid_package_detail(bid_package_id=bid_package_id, db=db)
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(
+    "/bid-packages/{bid_package_id}/invitations",
+    response_model=InvitationListResponse,
+)
+async def list_bid_package_invitations(
+    bid_package_id: UUID,
+    status: str | None = None,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """List invitations for a bid package. Supports ?status=<filter>."""
+    try:
+        invitations = await list_invitations(
+            bid_package_id=bid_package_id,
+            status_filter=status,
+            db=db,
+        )
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {"invitations": invitations}
+
+
+@router.get(
+    "/bid-packages/{bid_package_id}/email-log",
+    response_model=EmailLogResponse,
+)
+async def get_bid_package_email_log_endpoint(
+    bid_package_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Return all email_log rows referencing invitations in this bid package."""
+    try:
+        items = await get_bid_package_email_log(bid_package_id=bid_package_id, db=db)
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {"items": items}
 
 
 @router.post("/bid-packages", response_model=BidPackageResponse, status_code=status.HTTP_201_CREATED)

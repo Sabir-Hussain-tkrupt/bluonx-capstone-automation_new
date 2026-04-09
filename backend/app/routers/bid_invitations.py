@@ -9,7 +9,11 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.config import settings
 from app.core.supabase_client import get_supabase
-from app.models.bid_packages import ResendInvitationResponse
+from app.models.bid_packages import (
+    InvitationStatusUpdateRequest,
+    InvitationUpdatedResponse,
+    ResendInvitationResponse,
+)
 from app.models.bids import (
     BidInvitationCreate,
     BidInvitationResponse,
@@ -18,6 +22,10 @@ from app.models.bids import (
 from app.services.bid_package_service import (
     BidPackageValidationError,
     resend_invitation,
+)
+from app.services.invitation_tracking_service import (
+    InvitationTrackingError,
+    update_invitation_status,
 )
 from app.services.email_service import EmailService
 from app.services.template_renderer import template_renderer
@@ -63,6 +71,28 @@ async def resend_invitation_endpoint(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     return result
+
+
+@router.put(
+    "/bid-invitations/{invitation_id}/status",
+    response_model=InvitationUpdatedResponse,
+)
+async def update_invitation_status_endpoint(
+    invitation_id: UUID,
+    payload: InvitationStatusUpdateRequest,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """PM-driven status update. Only 'declined', 'expired', and
+    'no_response' are allowed — system-managed statuses return 400."""
+    try:
+        return await update_invitation_status(
+            invitation_id=invitation_id,
+            new_status=payload.status,
+            db=db,
+        )
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/bid-invitations", response_model=list[BidInvitationResponse])
