@@ -39,6 +39,14 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   // Milestone statuses
   pending: 'warning',
   overdue: 'danger',
+  // Bid package statuses
+  open: 'info',
+  closed: 'neutral',
+  // Bid invitation statuses
+  sent: 'info',
+  opened: 'warning',
+  declined: 'danger',
+  no_response: 'neutral',
 };
 
 const variantStyles: Record<StatusVariant, string> = {

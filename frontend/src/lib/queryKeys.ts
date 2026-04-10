@@ -92,6 +92,19 @@ export const queryKeys = {
         : queryKeys.bidPackages.lists(),
     details: () => [...queryKeys.bidPackages.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.bidPackages.details(), id] as const,
+    forTask: (taskId: string) => [...queryKeys.bidPackages.all, 'task', taskId] as const,
+  },
+
+  qualifiedVendors: {
+    all: (taskId: string) => ['qualified_vendors', taskId] as const,
+  },
+
+  projectDocuments: {
+    all: (projectId: string) => ['projects', projectId, 'documents'] as const,
+  },
+
+  bidInvitations: {
+    emailLog: (bidPackageId: string) => ['bid_packages', bidPackageId, 'email_log'] as const,
   },
 
   bidSubmissions: {

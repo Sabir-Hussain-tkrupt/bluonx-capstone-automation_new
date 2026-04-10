@@ -6,12 +6,13 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
 import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
 import { TaskForm } from '@/features/tasks/components/TaskForm';
+import { useBidPackagesForTask } from '@/features/bids/hooks/useBidPackagesForTask';
+import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -53,6 +54,8 @@ export function TaskDetailPage() {
   const { data: task, isLoading, error } = useTask(projectId!, taskId!);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId!);
+
+  const { data: bidPackages = [], isLoading: bidPackagesLoading } = useBidPackagesForTask(taskId!);
 
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -167,15 +170,31 @@ export function TaskDetailPage() {
         </Card>
       </div>
 
-      {/* Future sections placeholder */}
-      <Card>
-        <div className="p-6">
-          <EmptyState
-            title="Bid Pipeline"
-            description="Bid packages, submissions, awards, and contracts will appear here in future phases."
-          />
-        </div>
-      </Card>
+      {/* Bid Packages Section */}
+      {task.bid_type === 'competitive' && (
+        <Card>
+          <div className="p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-secondary-900">Bid Packages</h3>
+              {task.status === 'draft' && (
+                <Button
+                  size="sm"
+                  onClick={() => navigate(`/projects/${projectId}/tasks/${taskId}/create-bid-package`)}
+                >
+                  {bidPackages.length > 0 ? 'Start New Round' : 'Start Bidding'}
+                </Button>
+              )}
+            </div>
+            <BidPackagesTable
+              bidPackages={bidPackages}
+              isLoading={bidPackagesLoading}
+              onRowClick={(row) =>
+                navigate(`/projects/${projectId}/tasks/${taskId}/bid-packages/${row.id}`)
+              }
+            />
+          </div>
+        </Card>
+      )}
 
       {/* Edit Task Modal */}
       <TaskForm

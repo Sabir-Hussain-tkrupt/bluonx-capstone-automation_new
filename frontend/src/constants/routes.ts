@@ -25,6 +25,8 @@ export const ROUTES = {
   BID_TEMPLATE_NEW: '/bid-templates/new',
   BID_TEMPLATE_DETAIL: '/bid-templates/:id',
   BID_TEMPLATE_EDIT: '/bid-templates/:id/edit',
+  CREATE_BID_PACKAGE: '/projects/:id/tasks/:taskId/create-bid-package',
+  BID_PACKAGE_DETAIL: '/projects/:id/tasks/:taskId/bid-packages/:bidPackageId',
   SETTINGS: '/settings',
 
   // Error pages

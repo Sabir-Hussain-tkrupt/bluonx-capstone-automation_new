@@ -34,13 +34,24 @@ export const API_ENDPOINTS = {
   BID_TEMPLATES: '/bid-templates',
   BID_TEMPLATE: (id: string) => `/bid-templates/${id}`,
 
+  // Qualified Vendors
+  TASK_QUALIFIED_VENDORS: (taskId: string) => `/tasks/${taskId}/qualified-vendors`,
+
   // Bid Packages
   BID_PACKAGES: '/bid-packages',
   BID_PACKAGE: (id: string) => `/bid-packages/${id}`,
+  TASK_BID_PACKAGES: (taskId: string) => `/tasks/${taskId}/bid-packages`,
+  BID_PACKAGE_INVITATIONS: (id: string) => `/bid-packages/${id}/invitations`,
+  BID_PACKAGE_EMAIL_LOG: (id: string) => `/bid-packages/${id}/email-log`,
 
   // Bid Invitations
   BID_INVITATIONS: '/bid-invitations',
   BID_INVITATION: (id: string) => `/bid-invitations/${id}`,
+  BID_INVITATION_RESEND: (id: string) => `/bid-invitations/${id}/resend`,
+  BID_INVITATION_STATUS: (id: string) => `/bid-invitations/${id}/status`,
+
+  // Project Documents
+  PROJECT_DOCUMENTS: (projectId: string) => `/projects/${projectId}/documents`,
 
   // Bid Submissions
   BID_SUBMISSIONS: '/bid-submissions',
