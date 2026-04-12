@@ -269,3 +269,10 @@ def create_email_provider() -> EmailProvider:
         )
 
     return MockEmailProvider()
+
+
+def get_email_service(request) -> EmailService:
+    """FastAPI dependency — creates EmailService with the configured provider and Supabase client."""
+    provider = create_email_provider()
+    db_client = request.app.state.supabase
+    return EmailService(provider=provider, db_client=db_client)

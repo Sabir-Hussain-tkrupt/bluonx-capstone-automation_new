@@ -5,9 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
-
 from app.core.auth import get_current_active_user
-from app.core.config import settings
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import (
     BidPackageCreateRequest,
@@ -33,25 +31,12 @@ from app.services.invitation_tracking_service import (
     get_bid_package_email_log,
     list_invitations,
 )
-from app.services.email_service import EmailService
+from app.services.email_service import EmailService, get_email_service
 from app.services.template_renderer import template_renderer
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _get_email_service(db: Client) -> EmailService:
-    """Instantiate EmailService with the correct provider."""
-    if settings.EMAIL_PROVIDER == "mock":
-        from app.services.email_providers.mock_provider import MockEmailProvider
-
-        provider = MockEmailProvider()
-    else:
-        from app.services.email_providers.ses_provider import SESEmailProvider
-
-        provider = SESEmailProvider()
-    return EmailService(provider=provider, db_client=db)
 
 
 @router.post(
@@ -64,9 +49,9 @@ async def create_bid_package_endpoint(
     request: BidPackageCreateRequest,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
+    email_service: EmailService = Depends(get_email_service),
 ):
     """Create a bid package with invitations and send emails to vendors."""
-    email_service = _get_email_service(db)
     payload = {
         "task_id": str(task_id),
         "bid_template_id": str(request.bid_template_id),
