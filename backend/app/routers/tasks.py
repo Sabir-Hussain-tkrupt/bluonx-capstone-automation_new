@@ -423,3 +423,12 @@ async def get_qualified_vendors(
         if "not found" in msg.lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg) from exc
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg) from exc
+    except Exception as exc:
+        logger.error(
+            "Vendor filtering failed for task %s: [%s] %s",
+            task_id, type(exc).__name__, exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to filter vendors",
+        ) from exc

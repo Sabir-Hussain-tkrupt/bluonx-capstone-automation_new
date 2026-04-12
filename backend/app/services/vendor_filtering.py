@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.models.vendor_filtering import (
@@ -38,14 +39,17 @@ async def filter_qualified_vendors(
     warnings: list[str] = []
 
     # ── 1. Load task ────────────────────────────────────────────────────
-    task_resp = (
-        db.table("tasks")
-        .select("id, name, trade_id, bid_type, budget_estimate, project_id")
-        .eq("id", task_id)
-        .is_("deleted_at", "null")
-        .single()
-        .execute()
-    )
+    try:
+        task_resp = (
+            db.table("tasks")
+            .select("id, name, trade_id, bid_type, budget_estimate, project_id")
+            .eq("id", task_id)
+            .is_("deleted_at", "null")
+            .single()
+            .execute()
+        )
+    except APIError:
+        raise ValueError("Task not found")
     if not task_resp.data:
         raise ValueError("Task not found")
 
@@ -60,14 +64,17 @@ async def filter_qualified_vendors(
     )
 
     # ── 2. Load project ────────────────────────────────────────────────
-    project_resp = (
-        db.table("projects")
-        .select("id, name, latitude, longitude, estimated_end_date")
-        .eq("id", task["project_id"])
-        .is_("deleted_at", "null")
-        .single()
-        .execute()
-    )
+    try:
+        project_resp = (
+            db.table("projects")
+            .select("id, name, latitude, longitude, estimated_end_date")
+            .eq("id", task["project_id"])
+            .is_("deleted_at", "null")
+            .single()
+            .execute()
+        )
+    except APIError:
+        raise ValueError("Project not found")
     if not project_resp.data:
         raise ValueError("Project not found")
 
@@ -86,14 +93,17 @@ async def filter_qualified_vendors(
         insurance_cutoff = date.today()
 
     # ── 3. Load trade name ──────────────────────────────────────────────
-    trade_resp = (
-        db.table("trades")
-        .select("id, name")
-        .eq("id", trade_id)
-        .single()
-        .execute()
-    )
-    trade_name = trade_resp.data["name"] if trade_resp.data else None
+    try:
+        trade_resp = (
+            db.table("trades")
+            .select("id, name")
+            .eq("id", trade_id)
+            .single()
+            .execute()
+        )
+        trade_name = trade_resp.data["name"] if trade_resp.data else None
+    except APIError:
+        trade_name = None
 
     # ── 4. Trade match — fetch vendors with this trade ──────────────────
     vt_resp = (
