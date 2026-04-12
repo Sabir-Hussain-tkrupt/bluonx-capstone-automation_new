@@ -27,6 +27,7 @@ import { BidTemplateListPage } from '@/features/bid-templates/pages/BidTemplateL
 import { BidTemplateDetailPage } from '@/features/bid-templates/pages/BidTemplateDetailPage';
 import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateFormPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { TradesSettingsPage } from '@/features/trades';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
@@ -78,6 +79,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute requiredRole="admin">
               <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.SETTINGS_TRADES}
+          element={
+            <ProtectedRoute requiredRole="admin">
+              <TradesSettingsPage />
             </ProtectedRoute>
           }
         />

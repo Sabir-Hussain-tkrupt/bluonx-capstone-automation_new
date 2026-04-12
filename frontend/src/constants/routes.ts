@@ -28,6 +28,7 @@ export const ROUTES = {
   CREATE_BID_PACKAGE: '/projects/:id/tasks/:taskId/create-bid-package',
   BID_PACKAGE_DETAIL: '/projects/:id/tasks/:taskId/bid-packages/:bidPackageId',
   SETTINGS: '/settings',
+  SETTINGS_TRADES: '/settings/trades',
 
   // Error pages
   UNAUTHORIZED: '/unauthorized',
