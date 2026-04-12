@@ -46,7 +46,7 @@ router = APIRouter()
 )
 async def create_bid_package_endpoint(
     task_id: UUID,
-    request: BidPackageCreateRequest,
+    body: BidPackageCreateRequest,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
     email_service: EmailService = Depends(get_email_service),
@@ -54,15 +54,15 @@ async def create_bid_package_endpoint(
     """Create a bid package with invitations and send emails to vendors."""
     payload = {
         "task_id": str(task_id),
-        "bid_template_id": str(request.bid_template_id),
-        "deadline": request.deadline.isoformat(),
-        "project_document_ids": [str(d) for d in request.project_document_ids],
+        "bid_template_id": str(body.bid_template_id),
+        "deadline": body.deadline.isoformat(),
+        "project_document_ids": [str(d) for d in body.project_document_ids],
         "vendor_selections": [
             {
                 "vendor_id": str(vs.vendor_id),
                 "vendor_contact_id": str(vs.vendor_contact_id),
             }
-            for vs in request.vendor_selections
+            for vs in body.vendor_selections
         ],
     }
 

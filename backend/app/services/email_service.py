@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
+from fastapi import Request
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -271,7 +273,7 @@ def create_email_provider() -> EmailProvider:
     return MockEmailProvider()
 
 
-def get_email_service(request) -> EmailService:
+def get_email_service(request: Request) -> EmailService:
     """FastAPI dependency — creates EmailService with the configured provider and Supabase client."""
     provider = create_email_provider()
     db_client = request.app.state.supabase
