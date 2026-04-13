@@ -201,6 +201,8 @@ CREATE TABLE projects (
                                     CHECK (status IN ('planning', 'active', 'on_hold', 'completed', 'cancelled')),
   start_date          DATE,
   estimated_end_date  DATE,
+  archived_at         TIMESTAMPTZ,
+  archived_by         UUID          REFERENCES users(id) ON DELETE SET NULL,
   created_by          UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
@@ -210,6 +212,8 @@ CREATE TABLE projects (
 COMMENT ON TABLE  projects           IS 'Construction projects. Soft-deleted.';
 COMMENT ON COLUMN projects.latitude  IS 'Geocoded from address. Used to calc distance to vendor locations.';
 COMMENT ON COLUMN projects.longitude IS 'Geocoded from address. Used to calc distance to vendor locations.';
+COMMENT ON COLUMN projects.archived_at IS 'When project was archived. NULL = not archived. Separate from deleted_at (soft delete).';
+COMMENT ON COLUMN projects.archived_by IS 'User who archived the project. NULL when not archived.';
 
 
 -- Project-level documents (civil plans, drawings, specs)
@@ -681,6 +685,7 @@ CREATE INDEX idx_vendors_onboarding                 ON vendors (onboarding_statu
 CREATE INDEX idx_projects_status                    ON projects (status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_projects_created_by                ON projects (created_by);
 CREATE INDEX idx_project_documents_project_id       ON project_documents (project_id);
+CREATE INDEX idx_projects_archived                  ON projects (archived_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_tasks_project_id                   ON tasks (project_id);
 CREATE INDEX idx_tasks_trade_id                     ON tasks (trade_id);
 CREATE INDEX idx_tasks_project_status               ON tasks (project_id, status) WHERE deleted_at IS NULL;
