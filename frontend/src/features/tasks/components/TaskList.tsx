@@ -132,7 +132,7 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
 
   // ─── CRUD handlers ─────────────────────────────────────────────────
   const handleCreate = (formData: Record<string, unknown>) => {
-    createMutation.mutate(formData as Parameters<typeof createMutation.mutate>[0], {
+    createMutation.mutate(formData as unknown as Parameters<typeof createMutation.mutate>[0], {
       onSuccess: () => {
         setShowCreateForm(false);
         toast({ variant: 'success', message: 'Task created.' });
