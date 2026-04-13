@@ -62,14 +62,17 @@ export function ProjectListPage() {
     );
   }, [debounceTimer]);
 
+  const archivedView = statusFilter === 'archived';
+
   const filters: ProjectListFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
-    status: statusFilter || undefined,
+    status: archivedView ? undefined : (statusFilter || undefined),
+    archived: archivedView || undefined,
     sort_by: sortBy,
     sort_dir: sortDir,
     page,
     page_size: pageSize,
-  }), [debouncedSearch, statusFilter, sortBy, sortDir, page, pageSize]);
+  }), [debouncedSearch, statusFilter, archivedView, sortBy, sortDir, page, pageSize]);
 
   const { data, isLoading } = useProjects(filters);
   const createProjectMutation = useCreateProject();
@@ -91,41 +94,48 @@ export function ProjectListPage() {
     navigate(`/projects/${project.id}`);
   };
 
+  const muted = (node: React.ReactNode) =>
+    archivedView ? <span className="text-secondary-500">{node}</span> : node;
+
   const columns: Column<Project>[] = useMemo(() => [
     {
       id: 'name',
       header: 'Project Name',
-      accessor: 'name',
+      accessor: (row: Project) => muted(row.name),
       sortable: true,
     },
     {
       id: 'city',
       header: 'Location',
-      accessor: (row: Project) => [row.city, row.state].filter(Boolean).join(', ') || '\u2014',
+      accessor: (row: Project) => muted([row.city, row.state].filter(Boolean).join(', ') || '\u2014'),
       sortable: true,
     },
     {
       id: 'status',
       header: 'Status',
-      accessor: (row: Project) => (
-        <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} />
-      ),
+      accessor: (row: Project) =>
+        row.archived_at ? (
+          <StatusBadge status="archived" variant="neutral" />
+        ) : (
+          <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} />
+        ),
       sortable: true,
     },
     {
       id: 'budget',
       header: 'Budget',
-      accessor: (row: Project) => formatCurrency(row.budget),
+      accessor: (row: Project) => muted(formatCurrency(row.budget)),
       sortable: true,
       align: 'right' as const,
     },
     {
       id: 'start_date',
       header: 'Start Date',
-      accessor: (row: Project) => formatDate(row.start_date),
+      accessor: (row: Project) => muted(formatDate(row.start_date)),
       sortable: true,
     },
-  ], []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [archivedView]);
 
   return (
     <div className="space-y-6">
@@ -163,6 +173,7 @@ export function ProjectListPage() {
             { value: 'on_hold', label: 'On Hold' },
             { value: 'completed', label: 'Completed' },
             { value: 'cancelled', label: 'Cancelled' },
+            { value: 'archived', label: 'Archived' },
           ]}
           size="sm"
         />

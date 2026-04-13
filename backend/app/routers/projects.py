@@ -166,6 +166,7 @@ async def update_project(
 ):
     """Update a project."""
     existing = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(existing, resource="this project")
 
     update_data = project.model_dump(exclude_unset=True)
     if not update_data:
@@ -245,6 +246,124 @@ async def delete_project(
         )
 
 
+# ── Archive / Unarchive ──────────────────────────────────────────────────
+
+
+_BLOCKING_TASK_STATUSES = ("bidding", "evaluating", "awarded", "in_progress")
+
+
+def _ensure_project_not_archived(project: dict, resource: str = "project") -> None:
+    """Block write operations on archived projects."""
+    if project.get("archived_at") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot modify {resource} on an archived project. Unarchive it first.",
+        )
+
+
+@router.post("/projects/{project_id}/archive", response_model=ProjectResponse)
+async def archive_project(
+    project_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Archive a project (hide from default view; preserves status)."""
+    existing = _get_project_or_404(db, project_id)
+
+    if existing.get("archived_at") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project is already archived.",
+        )
+
+    if existing.get("status") == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active projects cannot be archived.",
+        )
+
+    blocking = (
+        db.table("tasks")
+        .select("id, name, status")
+        .eq("project_id", str(project_id))
+        .in_("status", list(_BLOCKING_TASK_STATUSES))
+        .is_("deleted_at", "null")
+        .execute()
+    )
+
+    if blocking.data:
+        names = ", ".join(
+            f"\"{t['name']}\" ({t['status']})" for t in blocking.data
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot archive: the following tasks are still in progress: "
+                f"{names}. Complete or cancel them first."
+            ),
+        )
+
+    try:
+        response = (
+            db.table("projects")
+            .update({"archived_at": "now()", "archived_by": user["user_id"]})
+            .eq("id", str(project_id))
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Supabase archive failed for projects/%s: %s", project_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
+
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    return response.data[0]
+
+
+@router.post("/projects/{project_id}/unarchive", response_model=ProjectResponse)
+async def unarchive_project(
+    project_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Unarchive a project (restores visibility; status untouched)."""
+    existing = _get_project_or_404(db, project_id)
+
+    if existing.get("archived_at") is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project is not archived.",
+        )
+
+    try:
+        response = (
+            db.table("projects")
+            .update({"archived_at": None, "archived_by": None})
+            .eq("id", str(project_id))
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Supabase unarchive failed for projects/%s: %s", project_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Database rejected the data: {exc.message}",
+        ) from exc
+
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    return response.data[0]
+
+
 PROJECT_BUCKET = "project-documents"
 
 
@@ -287,7 +406,8 @@ async def upload_project_document(
     Accepts multipart/form-data with:
     - file: the document file (PDF, JPEG, PNG, TIFF; max 50MB)
     """
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project, resource="documents")
 
     # Read file bytes
     file_bytes = await file.read()
@@ -370,7 +490,8 @@ async def delete_project_document(
     db: Client = Depends(get_supabase),
 ):
     """Delete a project document from storage and database."""
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project, resource="documents")
 
     # Fetch doc to get file_path
     doc_resp = (

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useTask } from '@/features/tasks/hooks/useTask';
+import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
 import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
 import { TaskForm } from '@/features/tasks/components/TaskForm';
@@ -52,8 +53,11 @@ export function TaskDetailPage() {
   const { toast } = useToast();
 
   const { data: task, isLoading, error } = useTask(projectId!, taskId!);
+  const { data: project } = useProject(projectId!);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId!);
+
+  const isArchived = !!project?.archived_at;
 
   const { data: bidPackages = [], isLoading: bidPackagesLoading } = useBidPackagesForTask(taskId!);
 
@@ -130,11 +134,19 @@ export function TaskDetailPage() {
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button variant="outline" onClick={() => setShowEditForm(true)}>Edit</Button>
-          <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Delete</Button>
-        </div>
+        {!isArchived && (
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={() => setShowEditForm(true)}>Edit</Button>
+            <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Delete</Button>
+          </div>
+        )}
       </div>
+
+      {isArchived && (
+        <Alert variant="info" title="Parent project is archived">
+          Unarchive the project to make changes to this task.
+        </Alert>
+      )}
 
       {/* Task Details */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -176,7 +188,7 @@ export function TaskDetailPage() {
           <div className="p-6">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-secondary-900">Bid Packages</h3>
-              {task.status === 'draft' && (
+              {task.status === 'draft' && !isArchived && (
                 <Button
                   size="sm"
                   onClick={() => navigate(`/projects/${projectId}/tasks/${taskId}/create-bid-package`)}

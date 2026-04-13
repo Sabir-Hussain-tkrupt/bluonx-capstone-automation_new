@@ -26,11 +26,14 @@ export interface Project {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
 }
 
 export interface ProjectListFilters {
   search?: string;
   status?: string;
+  archived?: boolean;
   sort_by?: string;
   sort_dir?: 'asc' | 'desc';
   page?: number;
@@ -65,8 +68,13 @@ export async function fetchProjects(filters?: ProjectListFilters): Promise<Pagin
     query = query.ilike('name', `%${filters.search}%`);
   }
 
-  if (filters?.status) {
-    query = query.eq('status', filters.status);
+  if (filters?.archived) {
+    query = query.not('archived_at', 'is', null);
+  } else {
+    query = query.is('archived_at', null);
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
   }
 
   query = query.order(sortBy, { ascending });

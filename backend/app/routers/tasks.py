@@ -43,7 +43,7 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
     """Verify project exists and is not soft-deleted."""
     resp = (
         db.table("projects")
-        .select("id, name, budget")
+        .select("id, name, budget, archived_at")
         .eq("id", str(project_id))
         .is_("deleted_at", "null")
         .single()
@@ -52,6 +52,15 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
     if not resp.data:
         raise HTTPException(status_code=404, detail="Project not found")
     return resp.data
+
+
+def _ensure_project_not_archived(project: dict) -> None:
+    """Block mutations on a project once it is archived."""
+    if project.get("archived_at") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify tasks on an archived project. Unarchive it first.",
+        )
 
 
 def _get_task_or_404(db: Client, project_id: UUID, task_id: UUID) -> dict:
@@ -232,7 +241,8 @@ async def create_task(
     db: Client = Depends(get_supabase),
 ):
     """Create a new task within a project."""
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
     trade = _validate_trade_for_phase(db, task.trade_id, task.phase)
 
     # Calculate next sort_order
@@ -287,7 +297,8 @@ async def update_task(
     db: Client = Depends(get_supabase),
 ):
     """Update a task."""
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
     existing = _get_task_or_404(db, project_id, task_id)
     # Remove trades join data for comparison
     existing.pop("trades", None)
@@ -354,7 +365,8 @@ async def delete_task(
     db: Client = Depends(get_supabase),
 ):
     """Soft-delete a task. Blocked if active bids/awards/contracts exist."""
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
     _get_task_or_404(db, project_id, task_id)
     _check_deletion_blockers(db, task_id)
 
@@ -381,7 +393,8 @@ async def reorder_tasks(
     db: Client = Depends(get_supabase),
 ):
     """Bulk update sort_order for tasks within a project."""
-    _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
 
     for item in items:
         db.table("tasks").update(

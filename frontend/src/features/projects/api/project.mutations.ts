@@ -46,3 +46,13 @@ export async function updateProject({ id, ...input }: UpdateProjectInput): Promi
 export async function deleteProject(id: string): Promise<void> {
   await api.delete(API_ENDPOINTS.PROJECT(id));
 }
+
+export async function archiveProject(id: string): Promise<Project> {
+  const { data } = await api.post<Project>(`${API_ENDPOINTS.PROJECT(id)}/archive`);
+  return data;
+}
+
+export async function unarchiveProject(id: string): Promise<Project> {
+  const { data } = await api.post<Project>(`${API_ENDPOINTS.PROJECT(id)}/unarchive`);
+  return data;
+}

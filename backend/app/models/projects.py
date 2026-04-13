@@ -66,6 +66,8 @@ class ProjectResponse(BluOnXBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    archived_at: datetime | None = None
+    archived_by: UUID | None = None
 
 
 class ProjectListResponse(BluOnXBase):

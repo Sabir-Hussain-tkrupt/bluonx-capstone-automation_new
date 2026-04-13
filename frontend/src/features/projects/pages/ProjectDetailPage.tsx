@@ -13,6 +13,8 @@ import { TaskList } from '@/features/tasks/components/TaskList';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
 import { useDeleteProject } from '@/features/projects/hooks/useDeleteProject';
+import { useArchiveProject } from '@/features/projects/hooks/useArchiveProject';
+import { useUnarchiveProject } from '@/features/projects/hooks/useUnarchiveProject';
 import {
   useProjectDocumentsList,
   useDeleteProjectDocument,
@@ -57,6 +59,8 @@ export function ProjectDetailPage() {
   const { data: project, isLoading, error } = useProject(id!);
   const updateProjectMutation = useUpdateProject();
   const deleteProjectMutation = useDeleteProject();
+  const archiveProjectMutation = useArchiveProject();
+  const unarchiveProjectMutation = useUnarchiveProject();
   const { data: projectDocuments = [] } = useProjectDocumentsList(id!);
   const deleteDocMutation = useDeleteProjectDocument();
   const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
@@ -64,6 +68,7 @@ export function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
@@ -94,6 +99,37 @@ export function ProjectDetailPage() {
     });
   };
 
+  const handleArchive = () => {
+    archiveProjectMutation.mutate(id!, {
+      onSuccess: () => {
+        setShowArchiveConfirm(false);
+        toast({ variant: 'success', message: 'Project archived.' });
+        navigate('/projects');
+      },
+      onError: (error) => {
+        toast({
+          variant: 'danger',
+          message: (error as { message?: string }).message || 'Failed to archive project.',
+        });
+      },
+    });
+  };
+
+  const handleUnarchive = () => {
+    unarchiveProjectMutation.mutate(id!, {
+      onSuccess: () => toast({ variant: 'success', message: 'Project unarchived.' }),
+      onError: (error) => {
+        toast({
+          variant: 'danger',
+          message: (error as { message?: string }).message || 'Failed to unarchive project.',
+        });
+      },
+    });
+  };
+
+  const isArchived = !!project.archived_at;
+  const canArchive = project.status !== 'active';
+
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
     { id: 'tasks', label: 'Tasks' },
@@ -122,14 +158,46 @@ export function ProjectDetailPage() {
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{project.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={project.status} variant={statusVariantMap[project.status] ?? 'neutral'} />
+              {isArchived && <StatusBadge status="archived" variant="neutral" />}
             </div>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="outline" onClick={() => setShowEditForm(true)}>Edit</Button>
+          {!isArchived && (
+            <>
+              <Button variant="outline" onClick={() => setShowEditForm(true)}>Edit</Button>
+              <span
+                title={!canArchive ? 'Active projects cannot be archived' : undefined}
+                className="inline-flex"
+              >
+                <Button
+                  variant="outline"
+                  disabled={!canArchive}
+                  onClick={() => setShowArchiveConfirm(true)}
+                >
+                  Archive
+                </Button>
+              </span>
+            </>
+          )}
+          {isArchived && (
+            <Button
+              variant="primary"
+              onClick={handleUnarchive}
+              isLoading={unarchiveProjectMutation.isPending}
+            >
+              Unarchive
+            </Button>
+          )}
           <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Delete</Button>
         </div>
       </div>
+
+      {isArchived && (
+        <Alert variant="info" title="This project is archived">
+          Unarchive it to make changes.
+        </Alert>
+      )}
 
       {/* Tabs */}
       <Tabs tabs={tabDefs} activeTab={activeTab} onChange={setActiveTab}>
@@ -164,18 +232,20 @@ export function ProjectDetailPage() {
         )}
 
         {activeTab === 'tasks' && (
-          <TaskList projectId={id!} projectBudget={project.budget} />
+          <TaskList projectId={id!} projectBudget={project.budget} readOnly={isArchived} />
         )}
 
         {activeTab === 'documents' && (
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button size="sm" onClick={() => setShowUploadDoc(true)}>+ Upload Document</Button>
-            </div>
+            {!isArchived && (
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setShowUploadDoc(true)}>+ Upload Document</Button>
+              </div>
+            )}
             <DocumentList
               documents={projectDocuments}
               onDownload={(docId) => downloadDoc(id!, docId)}
-              onDelete={(docId) => {
+              onDelete={isArchived ? undefined : (docId) => {
                 setDeletingDocId(docId);
                 deleteDocMutation.mutate(
                   { projectId: id!, docId },
@@ -237,6 +307,32 @@ export function ProjectDetailPage() {
         <p className="text-sm text-secondary-600">
           Are you sure you want to delete <strong>{project.name}</strong>?
           This action will soft-delete the project and it will no longer appear in lists.
+        </p>
+      </Modal>
+
+      {/* Archive Confirmation */}
+      <Modal
+        isOpen={showArchiveConfirm}
+        onClose={() => setShowArchiveConfirm(false)}
+        title="Archive Project"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowArchiveConfirm(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={handleArchive}
+              isLoading={archiveProjectMutation.isPending}
+            >
+              Archive Project
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-secondary-600">
+          Archive <strong>{project.name}</strong>? This will hide the project from your
+          default view. You can find it later using the Archived filter. The project
+          and all its data will be preserved.
         </p>
       </Modal>
     </div>

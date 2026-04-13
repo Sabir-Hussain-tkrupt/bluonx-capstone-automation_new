@@ -132,6 +132,17 @@ async def create_bid_package_with_invitations(
                 f"Task with status '{task['status']}' cannot have new bid packages",
             )
 
+        # Block when the parent project is archived
+        task_project_id = task.get("project_id")
+        if task_project_id:
+            parent_project = _query_one(db, "projects", task_project_id)
+            if parent_project and parent_project.get("archived_at") is not None:
+                raise BidPackageValidationError(
+                    400,
+                    "Cannot create bid packages for a task on an archived project. "
+                    "Unarchive the project first.",
+                )
+
     # ── 4. Validate deadline (always — payload-level check) ──────────────
     try:
         deadline_dt = datetime.fromisoformat(deadline_str)

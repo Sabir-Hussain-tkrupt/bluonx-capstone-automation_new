@@ -41,9 +41,10 @@ function formatCurrency(value: number | null): string {
 interface TaskListProps {
   projectId: string;
   projectBudget?: number | null;
+  readOnly?: boolean;
 }
 
-export function TaskList({ projectId, projectBudget }: TaskListProps) {
+export function TaskList({ projectId, projectBudget, readOnly = false }: TaskListProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -60,8 +61,8 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
 
   const tasks = data?.items ?? [];
 
-  // DnD is only enabled in default sort_order view (no custom sort/search)
-  const isDragDisabled = false; // Could be extended: set true when sort/filter is active
+  // DnD is disabled when parent project is archived (read-only)
+  const isDragDisabled = readOnly;
 
   // ─── Sensors ────────────────────────────────────────────────────────
   const sensors = useSensors(
@@ -199,7 +200,7 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
             </>
           )}
         </div>
-        <Button onClick={() => setShowCreateForm(true)}>Add Task</Button>
+        {!readOnly && <Button onClick={() => setShowCreateForm(true)}>Add Task</Button>}
       </div>
 
       {isOverBudget && (
@@ -248,6 +249,7 @@ export function TaskList({ projectId, projectBudget }: TaskListProps) {
                         onRowClick={handleRowClick}
                         onEdit={setEditTask}
                         onDelete={setDeleteTarget}
+                        readOnly={readOnly}
                       />
                     ))}
                   </tbody>
