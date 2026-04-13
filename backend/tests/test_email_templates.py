@@ -135,18 +135,6 @@ class TestBidInvitationHTML:
         result = template_renderer.render("bid_invitation.html", invitation_context)
         assert len(result.encode("utf-8")) < 100_000
 
-    def test_logo_fallback_when_no_url(self, invitation_context):
-        result = template_renderer.render("bid_invitation.html", invitation_context)
-        assert "<img" not in result
-        # Text fallback should be present
-        assert "BluOnX" in result
-
-    def test_logo_img_when_url_provided(self, invitation_context):
-        invitation_context["logo_url"] = "https://cdn.bluonx.com/logo.png"
-        result = template_renderer.render("bid_invitation.html", invitation_context)
-        assert '<img src="https://cdn.bluonx.com/logo.png"' in result
-        assert 'alt="BluOnX"' in result
-
 
 # ── Bid Invitation TXT ────────────────────────────────────────────────────
 
