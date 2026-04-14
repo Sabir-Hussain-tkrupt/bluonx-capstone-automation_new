@@ -126,10 +126,15 @@ def _fetch_invitations(
 
 
 def _fetch_documents(db, bid_package_id: UUID) -> list[dict]:
-    """Fetch documents attached to a bid package."""
     resp = (
         db.table("bid_package_documents")
-        .select("*")
+        .select("""
+            id,
+            project_documents (
+                file_name,
+                file_path
+            )
+        """)
         .eq("bid_package_id", str(bid_package_id))
         .execute()
     )
@@ -174,9 +179,11 @@ def _transform_bid_template(row: dict | None) -> dict | None:
 
 
 def _transform_document(row: dict) -> dict:
+    pd = row.get("project_documents") or {}
+
     return {
         "id": row.get("id"),
-        "file_name": row.get("file_name"),
+        "file_name": pd.get("file_name"),
     }
 
 
