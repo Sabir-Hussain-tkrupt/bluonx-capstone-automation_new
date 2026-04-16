@@ -46,7 +46,7 @@
 
 **Multi-step form — 4 steps:**
 
-**Step 1 — Info & Docs:** Pre-filled read-only vendor fields (company, contact name/email/phone). Read-only project context panel (project name, location, task name/description, deadline countdown). **Project Documents card** — read-only list of project docs attached to this bid package, with download links (signed URLs from FastAPI). Documents are placed here intentionally so vendors can review plans/specs/drawings BEFORE deciding to bid and BEFORE entering pricing.
+**Step 1 — Info & Docs:** Pre-filled read-only vendor fields (company, contact name/email/phone). Read-only project context panel (project name, location, task name/description, deadline countdown, and **PM-supplied bid instructions** if present — sourced from `bid_packages.instructions`, optional, displayed in a callout box only when non-empty). **Project Documents card** — read-only list of project docs attached to this bid package, with download links (signed URLs from FastAPI). Documents are placed here intentionally so vendors can review plans/specs/drawings BEFORE deciding to bid and BEFORE entering pricing.
 
 **Step 2 — Pricing:**
 - Lump sum: single "Total Bid Amount" currency input → `bid_submissions.total_amount`
@@ -93,7 +93,7 @@ frontend/src/features/vendor-portal/
 5. Check if `bid_submission` with `status = 'submitted'` exists for this invitation → 409
 6. If `is_used = FALSE`: set `TRUE`, record `used_at`, `ip_address`
 7. Issue vendor JWT (HS256, `VENDOR_JWT_SECRET`, 4h expiry) with `vendor_id`, `vendor_contact_id`, `bid_invitation_id`, `bid_package_id`, `task_id`, `type: "vendor_portal"`
-8. Return JWT + full `bid_context`: vendor info, project/task info, bid template with items, project documents list, existing draft (if any) — everything the form needs in ONE call
+8. Return JWT + full `bid_context`: vendor info, project/task info, **`bid_packages.instructions`** (PM-supplied bid guidance, optional), bid template with items, project documents list, existing draft (if any) — everything the form needs in ONE call
 
 **Backend — Vendor JWT middleware (`get_vendor_context`):** FastAPI dependency for all `/v1/vendor-portal/*` endpoints. Extracts Bearer token, validates signature + expiration, returns `VendorContext` dataclass. Separate from admin JWT middleware.
 
