@@ -76,6 +76,18 @@ export function ReviewStep({ data, task, onSubmit, onBack, isSubmitting }: Revie
         <SummaryCard label="Vendors" value={`${data.vendorSelections.length}`} />
       </div>
 
+      {/* Instructions (if provided) */}
+      {data.instructions.trim() && (
+        <Card>
+          <div className="p-6">
+            <h3 className="mb-2 text-sm font-semibold text-secondary-900">Instructions to Vendors</h3>
+            <p className="whitespace-pre-line rounded-md bg-secondary-50 p-3 text-sm text-secondary-700">
+              {data.instructions.trim()}
+            </p>
+          </div>
+        </Card>
+      )}
+
       {/* Vendor List */}
       <Card>
         <div className="p-6">

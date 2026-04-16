@@ -183,6 +183,31 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
         </div>
       </Card>
 
+      {/* Instructions to Vendors */}
+      <Card>
+        <div className="p-6">
+          <h3 className="mb-1 text-sm font-semibold text-secondary-900">
+            Instructions to Vendors
+            <span className="ml-1 text-xs font-normal text-secondary-400">(optional)</span>
+          </h3>
+          <p className="mb-4 text-xs text-secondary-500">
+            Bid-submission guidance shown to vendors in the portal and invitation email.
+            Examples: &ldquo;unit prices all-inclusive&rdquo;, &ldquo;bid held firm for 30 days&rdquo;.
+          </p>
+          <textarea
+            value={data.instructions}
+            onChange={(e) => onUpdate({ instructions: e.target.value })}
+            rows={3}
+            maxLength={2000}
+            placeholder="Enter any bid-submission instructions for vendors..."
+            className="w-full rounded-lg border border-secondary-300 px-3 py-2 text-sm text-secondary-900 placeholder:text-secondary-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+          />
+          <p className="mt-1 text-right text-xs text-secondary-400">
+            {data.instructions.length} / 2,000
+          </p>
+        </div>
+      </Card>
+
       {/* Project Documents */}
       <Card>
         <div className="p-6">

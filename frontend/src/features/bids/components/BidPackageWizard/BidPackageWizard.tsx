@@ -42,6 +42,7 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
     bidTemplateId: null,
     documentIds: [],
     vendorSelections: [],
+    instructions: '',
   });
 
   const updateData = (partial: Partial<WizardData>) => {
@@ -57,6 +58,7 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
         bid_template_id: wizardData.bidTemplateId,
         project_document_ids: wizardData.documentIds,
         vendor_selections: wizardData.vendorSelections,
+        ...(wizardData.instructions.trim() ? { instructions: wizardData.instructions.trim() } : {}),
       },
       {
         onSuccess: (response) => {

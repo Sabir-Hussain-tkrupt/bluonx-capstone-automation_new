@@ -279,6 +279,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         "round_number": bid_package.get("round_number"),
         "deadline": bid_package.get("deadline"),
         "status": bid_package.get("status"),
+        "instructions": bid_package.get("instructions"),
         "bid_template": _transform_bid_template(bid_package.get("bid_templates")),
         "documents": [_transform_document(row) for row in documents_rows],
         "invitation_summary": summary,

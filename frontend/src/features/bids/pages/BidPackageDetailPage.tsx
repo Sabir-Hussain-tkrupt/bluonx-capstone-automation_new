@@ -214,6 +214,18 @@ export function BidPackageDetailPage() {
         />
       </div>
 
+      {/* Instructions */}
+      {bp.instructions && (
+        <div className="rounded-lg border border-info-200 bg-info-50 p-4">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-info-700">
+            Instructions to Vendors
+          </h3>
+          <p className="whitespace-pre-line text-sm text-info-800">
+            {bp.instructions}
+          </p>
+        </div>
+      )}
+
       {/* Invitations Table */}
       <Card>
         <div className="p-6">

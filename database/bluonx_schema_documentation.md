@@ -219,6 +219,7 @@ Represents a single bidding round for a task. When a PM clicks "Start Bidding," 
 | `bid_template_id` | UUID, FK → bid_templates, **nullable** | Template the PM selected for this bidding round. NULL = lump sum only (no structured line items). Records the point-in-time template choice — all vendors in this package use the same format. ON DELETE RESTRICT (never delete a template used in a bid package). |
 | `round_number` | INTEGER | Auto-set by trigger: `MAX(round_number) + 1` for the task. |
 | `deadline` | TIMESTAMPTZ | Bid submission deadline. Same for all vendors in the package. |
+| `instructions` | TEXT, **nullable** | Optional PM-supplied bid-submission guidance shown to vendors in the portal and invitation email. Distinct from tasks.description (scope of work). May change between rebid rounds. Examples: "include mobilization as separate line item", "bid held firm for 30 days". |
 | `status` | VARCHAR(20) | `open`, `closed`, `evaluating`, `cancelled`. |
 
 **Application-layer rule:** Must not be created for tasks with `bid_type = 'internal'`.
