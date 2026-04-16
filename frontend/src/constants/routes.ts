@@ -32,4 +32,13 @@ export const ROUTES = {
 
   // Error pages
   UNAUTHORIZED: '/unauthorized',
+
+  // ─── Vendor Portal (public, isolated from admin layout) ─────────
+  PORTAL_LANDING: '/bid/:token',
+  PORTAL_FORM: '/bid/form',
+  PORTAL_SUBMITTED: '/bid/submitted/:id',
+  PORTAL_EXPIRED: '/bid/expired',
+  PORTAL_INVALID: '/bid/invalid',
+  PORTAL_CLOSED: '/bid/closed',
+  PORTAL_ALREADY_SUBMITTED: '/bid/already-submitted',
 } as const;

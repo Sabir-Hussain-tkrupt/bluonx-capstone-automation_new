@@ -32,6 +32,20 @@ import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
 
+// Vendor Portal (public, isolated from admin auth/layout)
+import {
+  AlreadySubmittedPage,
+  BidFormPage,
+  BiddingClosedPage,
+  InvalidTokenPage,
+  MagicLinkLandingPage,
+  PortalLayout,
+  SubmissionConfirmationPage,
+  TokenExpiredPage,
+  VendorPortalGuard,
+  VendorPortalProvider,
+} from '@/features/vendor-portal';
+
 export function AppRoutes() {
   return (
     <Routes>
@@ -90,6 +104,25 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
+      </Route>
+
+      {/* Vendor Portal — public, isolated from admin layout/auth */}
+      <Route
+        element={
+          <VendorPortalProvider>
+            <PortalLayout />
+          </VendorPortalProvider>
+        }
+      >
+        <Route path={ROUTES.PORTAL_LANDING} element={<MagicLinkLandingPage />} />
+        <Route element={<VendorPortalGuard />}>
+          <Route path={ROUTES.PORTAL_FORM} element={<BidFormPage />} />
+          <Route path={ROUTES.PORTAL_SUBMITTED} element={<SubmissionConfirmationPage />} />
+        </Route>
+        <Route path={ROUTES.PORTAL_EXPIRED} element={<TokenExpiredPage />} />
+        <Route path={ROUTES.PORTAL_INVALID} element={<InvalidTokenPage />} />
+        <Route path={ROUTES.PORTAL_CLOSED} element={<BiddingClosedPage />} />
+        <Route path={ROUTES.PORTAL_ALREADY_SUBMITTED} element={<AlreadySubmittedPage />} />
       </Route>
 
       {/* Dev-only showcase route */}
