@@ -235,6 +235,9 @@ async def create_bid_package_with_invitations(
         "created_by": str(created_by),
         "status": "open",
     }
+    instructions = payload.get("instructions")
+    if instructions is not None:
+        bp_row["instructions"] = instructions
     bp_resp = db.table("bid_packages").insert(bp_row).execute()
     bp_data = bp_resp.data
     if isinstance(bp_data, list):
@@ -418,6 +421,7 @@ async def create_bid_package_with_invitations(
         "invitations_failed": invitations_failed,
         "failed_vendors": failed_vendors,
         "deadline": deadline_str,
+        "instructions": payload.get("instructions"),
     }
 
 

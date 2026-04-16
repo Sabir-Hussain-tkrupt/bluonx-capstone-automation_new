@@ -27,6 +27,7 @@ class BidPackageCreateRequest(BluOnXBase):
     bid_template_id: UUID
     project_document_ids: list[UUID] = Field(default_factory=list)
     vendor_selections: list[VendorSelection] = Field(..., min_length=1)
+    instructions: str | None = Field(default=None, max_length=2000)
 
 
 class FailedVendor(BluOnXBase):
@@ -45,6 +46,7 @@ class BidPackageCreateResponse(BluOnXBase):
     invitations_failed: int
     failed_vendors: list[FailedVendor]
     deadline: str
+    instructions: str | None = None
 
 
 class ResendInvitationResponse(BluOnXBase):
@@ -104,6 +106,7 @@ class BidPackageDetailResponse(BluOnXBase):
     round_number: int
     deadline: datetime
     status: str
+    instructions: str | None = None
     bid_template: BidTemplateSummary | None = None
     documents: list[BidPackageDocumentItem] = Field(default_factory=list)
     invitation_summary: InvitationSummary

@@ -65,6 +65,8 @@ async def create_bid_package_endpoint(
             for vs in body.vendor_selections
         ],
     }
+    if body.instructions is not None:
+        payload["instructions"] = body.instructions
 
     try:
         result = await create_bid_package_with_invitations(

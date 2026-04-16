@@ -2,7 +2,7 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.2
+-- Version:  2.30
 -- Date:     February 23, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   28
@@ -296,6 +296,7 @@ CREATE TABLE bid_packages (
   task_id       UUID          NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
   round_number  INTEGER       NOT NULL DEFAULT 1,
   deadline      TIMESTAMPTZ   NOT NULL,
+  instructions  TEXT,
   status        VARCHAR(20)   NOT NULL DEFAULT 'open'
                               CHECK (status IN ('open', 'closed', 'evaluating', 'cancelled')),
 
@@ -307,6 +308,7 @@ CREATE TABLE bid_packages (
 
 COMMENT ON TABLE  bid_packages              IS 'A bidding round for a task. Multiple rounds via round_number for rebidding. RULE: must not be created for tasks with bid_type = internal (enforced at application layer).';
 COMMENT ON COLUMN bid_packages.round_number IS 'Auto-set by trigger: round 1 = first attempt, round 2 = rebid, etc.';
+COMMENT ON COLUMN bid_packages.instructions IS 'Optional PM-supplied bid-submission instructions shown to vendors in the bid portal and invitation email. Distinct from tasks.description (scope of work). Examples: include mobilization as separate line item, bid held firm for 30 days, unit prices all-inclusive.';
 
 
 -- Junction: project documents shared with a bid package

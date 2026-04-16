@@ -92,6 +92,7 @@ export interface BidPackageDetail {
   round_number: number;
   deadline: string;
   status: string;
+  instructions: string | null;
   bid_template: BidTemplateRef | null;
   documents: BidDocument[];
   invitation_summary: InvitationSummary;
@@ -110,6 +111,7 @@ export interface CreateBidPackageRequest {
   bid_template_id: string;
   project_document_ids: string[];
   vendor_selections: VendorSelection[];
+  instructions?: string;
 }
 
 export interface FailedVendor {
@@ -124,6 +126,7 @@ export interface CreateBidPackageResponse {
   invitations_failed: number;
   failed_vendors: FailedVendor[];
   deadline: string;
+  instructions?: string | null;
 }
 
 // ─── Resend Invitation (POST /v1/bid-invitations/{id}/resend) ───────
@@ -190,4 +193,5 @@ export interface WizardData {
   bidTemplateId: string | null;
   documentIds: string[];
   vendorSelections: VendorSelection[];
+  instructions: string;
 }
