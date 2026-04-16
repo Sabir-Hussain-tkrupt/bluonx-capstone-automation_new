@@ -38,7 +38,7 @@
 
 ---
 
-### Task 5.1: Design Custom Bid Submission UI (12h)
+### Task 5.1: Design Custom Bid Submission UI (12h) — ✅ COMPLETE
 
 **This is a SEPARATE route tree and layout from the admin dashboard.** Same React+Vite project but different layout (no sidebar), different auth (vendor JWT, not Supabase Auth). Vendors may fill this on a phone from a job site — mobile-first.
 
@@ -46,17 +46,18 @@
 
 **Multi-step form — 4 steps:**
 
-**Step 1 — Company Info:** Pre-filled read-only vendor fields (company, contact name/email/phone). Editable `vendor_notes` textarea (max 2000 chars). Read-only project context panel (project name, location, task name/description, deadline countdown).
+**Step 1 — Info & Docs:** Pre-filled read-only vendor fields (company, contact name/email/phone). Read-only project context panel (project name, location, task name/description, deadline countdown, and **PM-supplied bid instructions** if present — sourced from `bid_packages.instructions`, optional, displayed in a callout box only when non-empty). **Project Documents card** — read-only list of project docs attached to this bid package, with download links (signed URLs from FastAPI). Documents are placed here intentionally so vendors can review plans/specs/drawings BEFORE deciding to bid and BEFORE entering pricing.
 
 **Step 2 — Pricing:**
 - Lump sum: single "Total Bid Amount" currency input → `bid_submissions.total_amount`
 - Structured: table from `bid_template_items` — Description (read-only), Type badge, UoM (read-only), Qty input (unit_price only), Unit Price input (unit_price only), Lump Sum Amount input (lump_sum only), auto-calculated Line Total. Grand total at bottom → `bid_submissions.total_amount`. All amounts required, ≥ 0, total > 0.
+- The bid template is selected by the PM during bid package creation (Phase 4 — Task 4.4). The template ID is stored in `bid_packages.bid_template_id`. Template items (`bid_template_items`) are used ONLY to populate the form structure. The actual vendor input is stored in `bid_submissions` + `bid_line_items` (description, item_type, unit_of_measure, sort_order are copied from the template into `bid_line_items` to decouple submissions from future template edits).
 
-**Step 3 — Documents:** Project docs section (read-only list with download links from bid package). Vendor upload section (drag-and-drop, multiple files, PDF/JPEG/PNG, ≤10MB, immediate upload, progress bar, delete).
+**Step 3 — Notes & Uploads:** Editable `vendor_notes` textarea (max 2000 chars) — labeled "Notes to Owner". Vendor upload section (drag-and-drop, multiple files, PDF/JPEG/PNG, ≤10MB, immediate upload, progress bar, delete). Notes and uploads are grouped together since both are vendor-supplied additions to their bid.
 
-**Step 4 — Review & Submit:** Full summary with "Edit" links per section. "Save Draft" + "Submit Bid" buttons. Confirmation dialog on submit. On success → confirmation page.
+**Step 4 — Review & Submit:** Full summary with "Edit" links per section (Info, Pricing, Notes & Attachments). "Save Draft" + "Submit Bid" buttons. Confirmation dialog on submit (centered vertically on mobile via shared `Modal` `mobileCenter` prop, NOT bottom-sheet). On success → confirmation page.
 
-**Progress stepper:** 4 steps, clickable completed steps, no skip ahead. Horizontal desktop, compact mobile.
+**Progress stepper:** 4 steps labeled "Info & Docs / Pricing / Notes & Uploads / Review". Clickable completed steps, no skip ahead. Horizontal desktop, compact mobile.
 
 **Draft indicator:** "Last saved at {time}", "Unsaved changes" when dirty, amber draft badge.
 
@@ -67,7 +68,7 @@
 **Suggested file structure:**
 ```
 frontend/src/features/vendor-portal/
-├── components/       # PortalLayout, ProgressStepper, each Step component, LineItemsTable, DraftIndicator, BidDeadlineCountdown
+├── components/       # PortalLayout, ProgressStepper, each Step component, LineItemsTable, DraftIndicator, BidDeadlineCountdown, ConfirmSubmitDialog
 ├── hooks/            # useBidSubmission, useBidContext, useAutoSave
 ├── pages/            # MagicLinkLandingPage, BidFormPage, SubmissionConfirmation, error pages
 ├── services/         # portalApi.ts (Axios instance with vendor JWT)
@@ -75,6 +76,8 @@ frontend/src/features/vendor-portal/
 ```
 
 **Vendor JWT handling:** Stored in React state/context. Axios interceptor adds Bearer header. On 401 → redirect to session expired page.
+
+**Implementation status:** Frontend shell is complete with mock data (Summit Earthworks vendor, Phoenix Logistics Park project). All 4 steps render correctly across mobile/tablet/desktop. Real backend wiring happens in Tasks 5.2–5.5. The shared `Modal` component now supports a `mobileCenter` prop for centered mobile dialogs.
 
 ---
 
@@ -90,7 +93,7 @@ frontend/src/features/vendor-portal/
 5. Check if `bid_submission` with `status = 'submitted'` exists for this invitation → 409
 6. If `is_used = FALSE`: set `TRUE`, record `used_at`, `ip_address`
 7. Issue vendor JWT (HS256, `VENDOR_JWT_SECRET`, 4h expiry) with `vendor_id`, `vendor_contact_id`, `bid_invitation_id`, `bid_package_id`, `task_id`, `type: "vendor_portal"`
-8. Return JWT + full `bid_context`: vendor info, project/task info, bid template with items, project documents list, existing draft (if any) — everything the form needs in ONE call
+8. Return JWT + full `bid_context`: vendor info, project/task info, **`bid_packages.instructions`** (PM-supplied bid guidance, optional), bid template with items, project documents list, existing draft (if any) — everything the form needs in ONE call
 
 **Backend — Vendor JWT middleware (`get_vendor_context`):** FastAPI dependency for all `/v1/vendor-portal/*` endpoints. Extracts Bearer token, validates signature + expiration, returns `VendorContext` dataclass. Separate from admin JWT middleware.
 
@@ -120,7 +123,7 @@ frontend/src/features/vendor-portal/
 
 ### Task 5.4: Build Form Validation Logic (6h)
 
-**Client-side (React Hook Form):** Per-step validation. Step 2: all pricing fields required, ≥ 0, total > 0. Step 3: file type/size on drop. Step 4: re-validate all before submit.
+**Client-side (React Hook Form):** Per-step validation. Step 2 (Pricing): all pricing fields required, ≥ 0, total > 0. Step 3 (Notes & Uploads): notes ≤ 2000 chars, file type/size on drop. Step 4: re-validate all before submit.
 
 **Server-side (submit endpoint):** Total > 0, all line items valid, item count matches template, line totals correctly calculated, grand total = sum of lines, notes ≤ 2000, bid package open + deadline not passed. Return 422 with field-level error array on failure.
 

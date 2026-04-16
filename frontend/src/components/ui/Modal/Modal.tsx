@@ -12,6 +12,8 @@ export interface ModalProps {
   closeOnOverlayClick?: boolean;
   /** Additional classes for the modal body container (e.g. 'overflow-visible' for dropdowns) */
   bodyClassName?: string;
+  /** When true, vertically center the modal on mobile instead of the default bottom-sheet */
+  mobileCenter?: boolean;
 }
 
 const sizeStyles: Record<string, string> = {
@@ -30,6 +32,7 @@ export function Modal({
   footer,
   closeOnOverlayClick = true,
   bodyClassName,
+  mobileCenter = false,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
@@ -79,7 +82,10 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+      className={cn(
+        'fixed inset-0 z-50 flex justify-center sm:items-center sm:p-4',
+        mobileCenter ? 'items-center p-4' : 'items-end',
+      )}
       onKeyDown={handleKeyDown}
     >
       {/* Backdrop */}
@@ -97,7 +103,8 @@ export function Modal({
         aria-labelledby="modal-title"
         tabIndex={-1}
         className={cn(
-          'relative z-10 w-full bg-white shadow-xl rounded-t-lg sm:rounded-lg',
+          'relative z-10 w-full bg-white shadow-xl sm:rounded-lg',
+          mobileCenter ? 'rounded-lg' : 'rounded-t-lg',
           'max-h-[90vh] flex flex-col',
           sizeStyles[size],
         )}
