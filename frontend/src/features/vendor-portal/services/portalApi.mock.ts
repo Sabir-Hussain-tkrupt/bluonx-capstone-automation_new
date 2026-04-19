@@ -257,6 +257,9 @@ export const mockPortalApi: PortalApi = {
   // Mock never hits the network, so JWT state is a no-op.
   setVendorJwt: () => {},
   getVendorJwt: () => null,
+  // No 401s in mock mode — handler is accepted but never invoked. Keeping
+  // the contract symmetric avoids type drift between impls.
+  setAuthFailureHandler: () => {},
   validateToken,
   createDraft,
   updateDraft,

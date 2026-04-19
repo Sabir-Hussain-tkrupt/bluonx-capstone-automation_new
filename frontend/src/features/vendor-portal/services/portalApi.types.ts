@@ -25,6 +25,7 @@ export interface DraftPayload {
 export interface PortalApi {
   setVendorJwt: (token: string | null) => void;
   getVendorJwt: () => string | null;
+  setAuthFailureHandler: (fn: (() => void) | null) => void;
   validateToken: (token: string) => Promise<ValidateTokenResponse>;
   createDraft: (payload: DraftPayload) => Promise<BidDraft>;
   updateDraft: (id: string, payload: DraftPayload) => Promise<BidDraft>;

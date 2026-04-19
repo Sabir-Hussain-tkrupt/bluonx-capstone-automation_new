@@ -42,5 +42,10 @@ class Settings(BaseSettings):
     # Portal (vendor-facing URL for magic links)
     PORTAL_BASE_URL: str = "http://localhost:5173"
 
+    # Vendor portal auth (Phase 5) — MUST differ from SUPABASE_JWT_SECRET.
+    # Custom HS256 JWT signed server-side after magic link validation.
+    VENDOR_JWT_SECRET: str
+    VENDOR_JWT_EXPIRY_HOURS: int = 4
+
 
 settings = Settings()

@@ -22,6 +22,8 @@ const impl: PortalApi = USE_MOCK ? mockPortalApi : realPortalApi;
 // chosen impl object and keep the types sharp at each call site.
 export const setVendorJwt: PortalApi['setVendorJwt'] = (token) => impl.setVendorJwt(token);
 export const getVendorJwt: PortalApi['getVendorJwt'] = () => impl.getVendorJwt();
+export const setAuthFailureHandler: PortalApi['setAuthFailureHandler'] = (fn) =>
+  impl.setAuthFailureHandler(fn);
 
 export const validateToken: PortalApi['validateToken'] = (token) => impl.validateToken(token);
 

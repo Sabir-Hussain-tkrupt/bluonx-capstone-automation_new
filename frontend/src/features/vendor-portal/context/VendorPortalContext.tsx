@@ -10,11 +10,17 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
-import { setVendorJwt as setApiJwt } from '../services/portalApi';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/constants/routes';
+import {
+  setAuthFailureHandler,
+  setVendorJwt as setApiJwt,
+} from '../services/portalApi';
 import type { VendorBidContext } from '../types/portal';
 
 interface VendorPortalContextValue {
@@ -29,6 +35,7 @@ const VendorPortalReactContext = createContext<VendorPortalContextValue | null>(
 export function VendorPortalProvider({ children }: { children: ReactNode }) {
   const [jwt, setJwt] = useState<string | null>(null);
   const [bidContext, setBidContext] = useState<VendorBidContext | null>(null);
+  const navigate = useNavigate();
 
   const setSession = useCallback((newJwt: string, newContext: VendorBidContext) => {
     setJwt(newJwt);
@@ -41,6 +48,18 @@ export function VendorPortalProvider({ children }: { children: ReactNode }) {
     setBidContext(null);
     setApiJwt(null);
   }, []);
+
+  // Any authenticated portal call that returns 401 means the vendor JWT
+  // expired or was revoked mid-session. Clearing state + routing to
+  // /bid/expired (where the user can re-click the magic link) lets the
+  // backend remain the source of truth for session validity.
+  useEffect(() => {
+    setAuthFailureHandler(() => {
+      clearSession();
+      navigate(ROUTES.PORTAL_EXPIRED, { replace: true });
+    });
+    return () => setAuthFailureHandler(null);
+  }, [navigate, clearSession]);
 
   const value = useMemo<VendorPortalContextValue>(
     () => ({ jwt, bidContext, setSession, clearSession }),

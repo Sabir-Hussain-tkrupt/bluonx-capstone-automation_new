@@ -28,6 +28,7 @@ from app.routers import (
     tasks,
     trades,
     users,
+    vendor_auth,
     vendors,
     webhooks,
 )
@@ -79,3 +80,4 @@ app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
+app.include_router(vendor_auth.router, prefix=_v1, tags=["Vendor Auth"])
