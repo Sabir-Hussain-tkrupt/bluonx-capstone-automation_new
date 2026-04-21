@@ -173,7 +173,7 @@ export function BidFormPage() {
   // ─── Render ───────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-secondary-900 sm:text-2xl">
             Submit Your Bid
@@ -182,15 +182,14 @@ export function BidFormPage() {
             Round {bidContext.bid_package.round_number} · {bidContext.task.trade_name}
           </p>
         </div>
-        <DraftIndicator
-          status={autoSave.status}
-          lastSavedAt={autoSave.lastSavedAt}
-          dirty={form.state.dirty}
-        />
-      </div>
-
-      <div className="mt-4 sm:hidden">
-        <BidDeadlineCountdown deadline={bidContext.bid_package.deadline} />
+        <div className="flex flex-col items-stretch gap-3 sm:items-end">
+          <BidDeadlineCountdown deadline={bidContext.bid_package.deadline} />
+          <DraftIndicator
+            status={autoSave.status}
+            lastSavedAt={autoSave.lastSavedAt}
+            dirty={form.state.dirty}
+          />
+        </div>
       </div>
 
       <div className="mt-6">
