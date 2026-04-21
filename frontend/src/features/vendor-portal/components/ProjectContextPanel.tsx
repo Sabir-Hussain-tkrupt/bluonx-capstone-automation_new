@@ -22,13 +22,13 @@ export function ProjectContextPanel({
           <dd className="mt-1 text-sm font-semibold text-secondary-900">{project.name}</dd>
           <p className="text-xs text-secondary-500">{project.address}</p>
         </div>
-        <div>
+        {/* <div>
           <dt className="text-xs font-medium tracking-wide text-secondary-500 uppercase">
             Trade
           </dt>
           <dd className="mt-1 text-sm font-semibold text-secondary-900">{task.trade_name}</dd>
           <p className="text-xs text-secondary-500">Round {bidPackage.round_number}</p>
-        </div>
+        </div> */}
         <div className="sm:col-span-2">
           <dt className="text-xs font-medium tracking-wide text-secondary-500 uppercase">
             Task
