@@ -13,6 +13,8 @@ export interface Step4ReviewProps {
   onSaveDraft: () => void;
   onSubmit: () => Promise<void>;
   submitting: boolean;
+  /** When true (deadline expired mid-session), Submit is locked. */
+  disabled?: boolean;
 }
 
 export function Step4Review({
@@ -22,6 +24,7 @@ export function Step4Review({
   onSaveDraft,
   onSubmit,
   submitting,
+  disabled = false,
 }: Step4ReviewProps) {
   const { vendor, project, task, bid_template } = useBidContext();
   const [showConfirm, setShowConfirm] = useState(false);

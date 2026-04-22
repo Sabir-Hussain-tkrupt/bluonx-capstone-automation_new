@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Alert, Button, Card, FileUpload, FormField, useToast } from '@/components/ui';
 import {
+  deleteAttachment,
   uploadAttachment,
 } from '../../services/portalApi';
 import type { BidFormState, FormAttachment } from '../../types/portal';
+import { PortalApiError } from '../../types/portal';
 
 const ACCEPT_TYPES = 'application/pdf,image/jpeg,image/png';
 const MAX_FILE_SIZE_MB = 10;
@@ -23,6 +25,15 @@ export interface Step3DocumentsProps {
   onNext: () => void;
   onBack: () => void;
   onSaveDraft: () => void;
+  /**
+   * Returns a submission id, creating a draft if one doesn't exist yet.
+   * Uploads always belong to a real submission row on the backend.
+   */
+  ensureSubmissionId: () => Promise<string>;
+  /** Called if a write hits 423 DEADLINE_PASSED so BidFormPage can surface the modal. */
+  onDeadlinePassed: () => void;
+  /** When the deadline has already passed, uploads/removals are locked out. */
+  disabled?: boolean;
 }
 
 export function Step3Documents({
@@ -33,6 +44,9 @@ export function Step3Documents({
   onNext,
   onBack,
   onSaveDraft,
+  ensureSubmissionId,
+  onDeadlinePassed,
+  disabled = false,
 }: Step3DocumentsProps) {
   const { toast } = useToast();
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -54,17 +68,62 @@ export function Step3Documents({
 
   async function handleFilesSelected(files: File[]) {
     setUploadError(null);
+    if (disabled) {
+      toast({
+        variant: 'danger',
+        message: 'The bid deadline has passed — uploads are locked.',
+      });
+      return;
+    }
+    let submissionId: string;
+    try {
+      submissionId = await ensureSubmissionId();
+    } catch (err) {
+      if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+        onDeadlinePassed();
+        return;
+      }
+      toast({ variant: 'danger', message: 'Could not start a draft. Please try again.' });
+      return;
+    }
+
     for (const file of files) {
       try {
-        const attachment = await uploadAttachment(file);
+        const attachment = await uploadAttachment(submissionId, file);
         onAddAttachment(attachment);
         toast({
           variant: 'success',
           message: `Uploaded ${file.name}`,
         });
-      } catch {
-        toast({ variant: 'danger', message: `Failed to upload ${file.name}` });
+      } catch (err) {
+        if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+          onDeadlinePassed();
+          return;
+        }
+        const detail =
+          err instanceof PortalApiError ? err.message : `Failed to upload ${file.name}`;
+        toast({ variant: 'danger', message: detail });
       }
+    }
+  }
+
+  async function handleRemove(attachmentId: string) {
+    if (disabled) return;
+    const submissionId = state.submissionId;
+    if (!submissionId) {
+      // No draft yet — attachment must be a local-only remnant; drop it.
+      onRemoveAttachment(attachmentId);
+      return;
+    }
+    try {
+      await deleteAttachment(submissionId, attachmentId);
+      onRemoveAttachment(attachmentId);
+    } catch (err) {
+      if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+        onDeadlinePassed();
+        return;
+      }
+      toast({ variant: 'danger', message: 'Could not remove attachment. Please try again.' });
     }
   }
 
@@ -131,9 +190,10 @@ export function Step3Documents({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onRemoveAttachment(att.id)}
+                  onClick={() => handleRemove(att.id)}
                   aria-label={`Remove ${att.name}`}
-                  className="rounded-md p-1 text-secondary-400 hover:bg-secondary-100 hover:text-danger-600 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+                  disabled={disabled}
+                  className="rounded-md p-1 text-secondary-400 hover:bg-secondary-100 hover:text-danger-600 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                     <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
@@ -145,7 +205,7 @@ export function Step3Documents({
         )}
 
         <p className="mt-3 text-xs text-secondary-500">
-          Attachments are optional. Real uploads to secure storage will be wired up in Task 5.5.
+          Attachments are optional. Files upload directly to secure storage.
         </p>
       </Card>
 

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/components/ui';
+import { Alert, useToast } from '@/components/ui';
 import { BidDeadlineCountdown } from '../components/BidDeadlineCountdown';
+import { DeadlineExpiredModal } from '../components/DeadlineExpiredModal';
 import { DraftIndicator } from '../components/DraftIndicator';
 import { ProgressStepper } from '../components/ProgressStepper';
 import { Step1CompanyInfo } from '../components/steps/Step1CompanyInfo';
@@ -20,7 +21,23 @@ import {
   updateDraft,
   type DraftPayload,
 } from '../services/portalApi';
-import type { StepIndex } from '../types/portal';
+import {
+  PortalApiError,
+  type PortalFieldError,
+  type StepIndex,
+} from '../types/portal';
+
+/**
+ * Maps a server field path to the step that owns it. The validator
+ * returns paths like `line_items[2].unit_price`, `total_amount`, or
+ * `vendor_notes` — we route the user to the first step that can fix
+ * the first error in the list.
+ */
+function stepForField(field: string): StepIndex {
+  if (field.startsWith('vendor_notes')) return 3;
+  if (field.startsWith('line_items') || field.startsWith('total_amount')) return 2;
+  return 2;
+}
 
 export function BidFormPage() {
   const bidContext = useBidContext();
@@ -28,6 +45,12 @@ export function BidFormPage() {
   const { toast } = useToast();
   const form = useBidFormState(bidContext.bid_template);
   const [submitting, setSubmitting] = useState(false);
+  const [deadlinePassed, setDeadlinePassed] = useState(false);
+  const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<PortalFieldError[] | null>(null);
+  // In-flight ensureSubmissionId promise — dedupes concurrent upload-
+  // initiated draft creations from racing the auto-save POST.
+  const creatingDraftRef = useRef<Promise<string> | null>(null);
 
   // Hydrate from existing draft on first mount if backend provided one.
   useEffect(() => {
@@ -36,6 +59,12 @@ export function BidFormPage() {
     }
     // Intentionally run once on mount; context is stable within session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Deadline handling ───────────────────────────────────────────
+  const handleDeadlinePassed = useCallback(() => {
+    setDeadlinePassed(true);
+    setDeadlineModalOpen(true);
   }, []);
 
   // ─── Draft payload builder ────────────────────────────────────────
@@ -58,18 +87,67 @@ export function BidFormPage() {
 
   const saveDraft = useCallback(async () => {
     const payload = buildDraftPayload();
-    if (form.state.submissionId) {
-      await updateDraft(form.state.submissionId, payload);
-    } else {
-      const draft = await createDraft(payload);
-      form.setSubmissionId(draft.id);
+    try {
+      if (form.state.submissionId) {
+        await updateDraft(form.state.submissionId, payload);
+      } else {
+        const draft = await createDraft(payload);
+        form.setSubmissionId(draft.id);
+      }
+      form.markClean();
+    } catch (err) {
+      if (
+        err instanceof PortalApiError &&
+        err.code === 'DRAFT_CONFLICT' &&
+        err.existingSubmissionId
+      ) {
+        // Concurrent POST race: adopt the existing draft id and retry
+        // as PUT against the same payload. This is the documented
+        // recovery path from the backend's UNIQUE(bid_invitation_id).
+        form.setSubmissionId(err.existingSubmissionId);
+        await updateDraft(err.existingSubmissionId, payload);
+        form.markClean();
+        return;
+      }
+      if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+        handleDeadlinePassed();
+        // Swallow so auto-save status settles cleanly; Submit button is
+        // already disabled and the modal has taken over the UX.
+        return;
+      }
+      throw err;
     }
-    form.markClean();
+  }, [buildDraftPayload, form, handleDeadlinePassed]);
+
+  // ─── ensureSubmissionId (for uploads before first save) ──────────
+  const ensureSubmissionId = useCallback(async (): Promise<string> => {
+    if (form.state.submissionId) return form.state.submissionId;
+    if (creatingDraftRef.current) return creatingDraftRef.current;
+    const p = (async () => {
+      const draft = await createDraft(buildDraftPayload());
+      form.setSubmissionId(draft.id);
+      form.markClean();
+      return draft.id;
+    })();
+    creatingDraftRef.current = p;
+    try {
+      return await p;
+    } catch (err) {
+      if (
+        err instanceof PortalApiError &&
+        err.code === 'DRAFT_CONFLICT' &&
+        err.existingSubmissionId
+      ) {
+        form.setSubmissionId(err.existingSubmissionId);
+        return err.existingSubmissionId;
+      }
+      throw err;
+    } finally {
+      creatingDraftRef.current = null;
+    }
   }, [buildDraftPayload, form]);
 
   // ─── Auto-save wire-up ────────────────────────────────────────────
-  // NOTE: Production interval is 2 min (default). For manual verification,
-  // temporarily set intervalMs to e.g. 15_000.
   const autoSave = useAutoSave({
     onSave: saveDraft,
     dirty: form.state.dirty,
@@ -79,10 +157,14 @@ export function BidFormPage() {
     try {
       await autoSave.save();
       toast({ variant: 'success', message: 'Draft saved' });
-    } catch {
+    } catch (err) {
+      if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+        handleDeadlinePassed();
+        return;
+      }
       toast({ variant: 'danger', message: 'Could not save draft. Please try again.' });
     }
-  }, [autoSave, toast]);
+  }, [autoSave, toast, handleDeadlinePassed]);
 
   // ─── Step navigation ──────────────────────────────────────────────
   const goToStep = useCallback(
@@ -132,18 +214,36 @@ export function BidFormPage() {
   }, [bidContext.bid_template.is_lump_sum, form.state.pricing]);
 
   const handleSubmit = useCallback(async () => {
+    if (deadlinePassed) {
+      setDeadlineModalOpen(true);
+      return;
+    }
+    setFieldErrors(null);
     setSubmitting(true);
     try {
-      // Ensure a draft exists first — mirrors real flow where submit
-      // finalizes an existing draft.
+      // Ensure a draft exists and is up-to-date before finalizing.
       let submissionId = form.state.submissionId;
       if (!submissionId) {
-        const draft = await createDraft(buildDraftPayload());
-        form.setSubmissionId(draft.id);
-        submissionId = draft.id;
+        submissionId = await ensureSubmissionId();
       } else if (form.state.dirty) {
-        await updateDraft(submissionId, buildDraftPayload());
-        form.markClean();
+        try {
+          await updateDraft(submissionId, buildDraftPayload());
+          form.markClean();
+        } catch (err) {
+          if (
+            err instanceof PortalApiError &&
+            err.code === 'DRAFT_CONFLICT' &&
+            err.existingSubmissionId
+          ) {
+            // Race-recovery as in saveDraft.
+            form.setSubmissionId(err.existingSubmissionId);
+            await updateDraft(err.existingSubmissionId, buildDraftPayload());
+            form.markClean();
+            submissionId = err.existingSubmissionId;
+          } else {
+            throw err;
+          }
+        }
       }
 
       const result = await submitBid(submissionId);
@@ -153,19 +253,46 @@ export function BidFormPage() {
         state: { result, grandTotal },
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[BidFormPage] submit failed', err);
-      toast({
-        variant: 'danger',
-        message: 'Submission failed. Please try again or contact support.',
-      });
+      if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
+        handleDeadlinePassed();
+      } else if (
+        err instanceof PortalApiError &&
+        err.code === 'VALIDATION_FAILED' &&
+        err.validationErrors &&
+        err.validationErrors.length > 0
+      ) {
+        setFieldErrors(err.validationErrors);
+        const firstStep = stepForField(err.validationErrors[0].field);
+        goToStep(firstStep);
+        toast({
+          variant: 'danger',
+          message: 'Please fix the highlighted issues before submitting.',
+        });
+      } else if (err instanceof PortalApiError && err.code === 'ALREADY_SUBMITTED') {
+        toast({
+          variant: 'danger',
+          message: 'This bid has already been submitted.',
+        });
+      } else {
+        // eslint-disable-next-line no-console
+        console.error('[BidFormPage] submit failed', err);
+        const detail =
+          err instanceof PortalApiError
+            ? err.message
+            : 'Submission failed. Please try again or contact support.';
+        toast({ variant: 'danger', message: detail });
+      }
     } finally {
       setSubmitting(false);
     }
   }, [
     buildDraftPayload,
+    deadlinePassed,
+    ensureSubmissionId,
     form,
+    goToStep,
     grandTotal,
+    handleDeadlinePassed,
     navigate,
     toast,
   ]);
@@ -200,6 +327,20 @@ export function BidFormPage() {
         />
       </div>
 
+      {fieldErrors && fieldErrors.length > 0 && (
+        <div className="mt-6">
+          <Alert variant="danger" title="Please fix the following before submitting">
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {fieldErrors.map((e, idx) => (
+                <li key={`${e.field}-${idx}`}>
+                  <span className="font-medium">{e.field}:</span> {e.message}
+                </li>
+              ))}
+            </ul>
+          </Alert>
+        </div>
+      )}
+
       <div className="mt-6">
         {form.state.step === 1 && (
           <Step1CompanyInfo
@@ -226,6 +367,9 @@ export function BidFormPage() {
             onNext={() => handleNextFromStep(3)}
             onBack={() => handleBackFromStep(3)}
             onSaveDraft={handleManualSave}
+            ensureSubmissionId={ensureSubmissionId}
+            onDeadlinePassed={handleDeadlinePassed}
+            disabled={deadlinePassed}
           />
         )}
         {form.state.step === 4 && (
@@ -236,9 +380,15 @@ export function BidFormPage() {
             onSaveDraft={handleManualSave}
             onSubmit={handleSubmit}
             submitting={submitting}
+            disabled={deadlinePassed}
           />
         )}
       </div>
+
+      <DeadlineExpiredModal
+        open={deadlineModalOpen}
+        onClose={() => setDeadlineModalOpen(false)}
+      />
     </div>
   );
 }

@@ -89,23 +89,45 @@ export interface ValidateTokenResponse {
   bid_context: VendorBidContext;
 }
 
-// ─── Mock-only error codes (mirror real HTTP responses) ─────────────
+// ─── Error codes (mirror real HTTP responses) ───────────────────────
 
 export type PortalApiErrorCode =
   | 'TOKEN_EXPIRED'      // → /bid/expired  (real: 410)
   | 'TOKEN_INVALID'      // → /bid/invalid  (real: 404)
-  | 'BIDDING_CLOSED'     // → /bid/closed   (real: 423)
+  | 'BIDDING_CLOSED'     // → /bid/closed   (real: 423, package.status != open)
   | 'ALREADY_SUBMITTED'  // → /bid/already-submitted (real: 409)
+  | 'DEADLINE_PASSED'    // 423 on a write after deadline during session — shows modal
+  | 'VALIDATION_FAILED'  // 422 on submit with per-field errors
+  | 'DRAFT_CONFLICT'     // 409 on POST /submissions with existing_submission_id
   | 'NETWORK'
   | 'UNKNOWN';
+
+export interface PortalFieldError {
+  field: string;
+  message: string;
+}
 
 export class PortalApiError extends Error {
   code: PortalApiErrorCode;
   status: number;
-  constructor(code: PortalApiErrorCode, message: string, status: number) {
+  /** Populated for VALIDATION_FAILED — per-field server-side errors from submit. */
+  validationErrors?: PortalFieldError[];
+  /** Populated for DRAFT_CONFLICT — the draft id the UI should adopt and PUT against. */
+  existingSubmissionId?: string;
+  constructor(
+    code: PortalApiErrorCode,
+    message: string,
+    status: number,
+    extras: {
+      validationErrors?: PortalFieldError[];
+      existingSubmissionId?: string;
+    } = {},
+  ) {
     super(message);
     this.code = code;
     this.status = status;
+    this.validationErrors = extras.validationErrors;
+    this.existingSubmissionId = extras.existingSubmissionId;
   }
 }
 

@@ -33,9 +33,10 @@ export const updateDraft: PortalApi['updateDraft'] = (id, payload) =>
 
 export const submitBid: PortalApi['submitBid'] = (submissionId) => impl.submitBid(submissionId);
 
-export const uploadAttachment: PortalApi['uploadAttachment'] = (file) =>
-  impl.uploadAttachment(file);
-export const deleteAttachment: PortalApi['deleteAttachment'] = (id) => impl.deleteAttachment(id);
+export const uploadAttachment: PortalApi['uploadAttachment'] = (submissionId, file) =>
+  impl.uploadAttachment(submissionId, file);
+export const deleteAttachment: PortalApi['deleteAttachment'] = (submissionId, attachmentId) =>
+  impl.deleteAttachment(submissionId, attachmentId);
 
 export const downloadProjectDocument: PortalApi['downloadProjectDocument'] = (documentId) =>
   impl.downloadProjectDocument(documentId);
