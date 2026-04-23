@@ -33,7 +33,7 @@ export function Step4Review({
     ? state.pricing.total_amount ?? 0
     : computeGrandTotal(state.pricing.line_items);
 
-  const canSubmit = grandTotal > 0;
+  const canSubmit = grandTotal > 0 && !disabled;
 
   async function handleConfirm() {
     await onSubmit();
@@ -196,11 +196,15 @@ export function Step4Review({
         </div>
       </Card>
 
-      {!canSubmit && (
+      {disabled ? (
+        <Alert variant="danger" title="Bid deadline has passed">
+          Submissions are locked. Your draft has been saved but cannot be submitted.
+        </Alert>
+      ) : grandTotal <= 0 ? (
         <Alert variant="warning" title="Grand total must be greater than zero">
           Go back to the Pricing step and enter valid amounts before submitting.
         </Alert>
-      )}
+      ) : null}
 
       <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:gap-2">
