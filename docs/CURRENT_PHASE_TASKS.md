@@ -157,13 +157,9 @@ Sanitize filenames, handle collisions with suffix.
 
 ### Task 5.7: Create Submission Confirmation Flow (6h)
 
-**Confirmation page:** Success message, confirmation number (`BID-{YEAR}-{4-digit-seq}`), summary, "Download Receipt" button, email notice.
+**Confirmation page:** Success message, summary (vendor company, project name, task name, total bid amount, submission timestamp), email notice. No confirmation number — `bid_submissions.id` is sufficient as a unique reference. No PDF receipt — confirmation email serves as the receipt.
 
-**Confirmation email:** Jinja2 template — greeting, confirmation details, next steps. Send via EmailService, log in `email_log`.
-
-**PDF receipt:** Generate with `reportlab` or `weasyprint`. Store in `bid-attachments` bucket: `{bid_submission_id}/receipt.pdf`. Serve via endpoint.
-
-**Note:** Schema lacks `confirmation_number` column on `bid_submissions`. Generate dynamically or add migration — decide during implementation.
+**Confirmation email:** Jinja2 template — greeting ("Your bid for {task_name} on {project_name} has been received"), submission summary (total amount, submission timestamp, documents uploaded count), general next steps ("You will be notified of the award decision" — no deadline mention). Send via EmailService, log in `email_log`.
 
 ---
 
