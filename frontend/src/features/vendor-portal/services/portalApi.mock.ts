@@ -224,7 +224,12 @@ async function submitBid(submissionId: string): Promise<SubmitBidResult> {
 }
 
 // ─── Attachment mocks (pure local state) ────────────────────────────
-async function uploadAttachment(file: File): Promise<FormAttachment> {
+// Signatures mirror the real backend: both take a submissionId so the UI
+// code paths are identical in demo mode and prod.
+async function uploadAttachment(
+  submissionId: string,
+  file: File,
+): Promise<FormAttachment> {
   await delay(400);
   const attachment: FormAttachment = {
     id: uid('att'),
@@ -234,14 +239,17 @@ async function uploadAttachment(file: File): Promise<FormAttachment> {
     uploadedAt: new Date().toISOString(),
   };
   // eslint-disable-next-line no-console
-  console.log('[portalApi:mock] uploadAttachment →', attachment.id, file.name);
+  console.log('[portalApi:mock] uploadAttachment →', submissionId, attachment.id, file.name);
   return attachment;
 }
 
-async function deleteAttachment(id: string): Promise<void> {
+async function deleteAttachment(
+  submissionId: string,
+  attachmentId: string,
+): Promise<void> {
   await delay(150);
   // eslint-disable-next-line no-console
-  console.log('[portalApi:mock] deleteAttachment →', id);
+  console.log('[portalApi:mock] deleteAttachment →', submissionId, attachmentId);
 }
 
 // ─── Project document download stub ─────────────────────────────────

@@ -108,3 +108,95 @@ class VendorBidContextModel(BluOnXBase):
 class ValidateTokenResponse(BluOnXBase):
     jwt: str
     bid_context: VendorBidContextModel
+
+
+# ── Request: draft create / update ───────────────────────────────────────
+
+
+class DraftLineItemInput(BluOnXBase):
+    """One line of vendor-entered pricing, keyed by template item."""
+
+    template_item_id: UUID
+    quantity: Decimal | None = Field(default=None, ge=0)
+    unit_price: Decimal | None = Field(default=None, ge=0)
+    lump_sum_amount: Decimal | None = Field(default=None, ge=0)
+
+
+class DraftPayload(BluOnXBase):
+    """Body for POST /submissions and PUT /submissions/{id}.
+
+    `attachment_ids` mirrors the frontend DraftPayload shape but the backend
+    ignores it on write — attachments are owned exclusively by the
+    upload/delete/list endpoints. Keeping the field here avoids a frontend
+    type change and documents the contract.
+    """
+
+    vendor_notes: str = Field(default="", max_length=2000)
+    total_amount: Decimal | None = Field(default=None, ge=0)
+    line_items: list[DraftLineItemInput] = Field(default_factory=list)
+    attachment_ids: list[UUID] = Field(default_factory=list)
+
+
+# ── Submit response ──────────────────────────────────────────────────────
+
+
+class SubmitBidResponse(BluOnXBase):
+    id: UUID
+    confirmation_number: str  # BID-{YYYY}-{NNNN}; display-only until Task 5.7
+    submitted_at: datetime
+
+
+# ── Submission detail (GET /submissions/{id}) ────────────────────────────
+
+
+class SubmissionLineItemResponse(BluOnXBase):
+    id: UUID
+    description: str
+    item_type: Literal["lump_sum", "unit_price"]
+    quantity: Decimal | None = None
+    unit_of_measure: str | None = None
+    unit_price: Decimal | None = None
+    lump_sum_amount: Decimal | None = None
+    line_total: Decimal
+    sort_order: int
+
+
+class AttachmentResponse(BluOnXBase):
+    id: UUID
+    file_name: str
+    file_size: int
+    file_type: str | None = None
+    uploaded_at: datetime
+
+
+class SubmissionResponse(BluOnXBase):
+    id: UUID
+    status: Literal["draft", "submitted", "under_review", "accepted", "rejected"]
+    is_draft: bool
+    total_amount: Decimal | None = None
+    vendor_notes: str
+    submitted_at: datetime | None = None
+    updated_at: datetime
+    line_items: list[SubmissionLineItemResponse]
+    attachments: list[AttachmentResponse]
+
+
+# ── Validation error surface (422 on submit) ─────────────────────────────
+
+
+class FieldError(BluOnXBase):
+    field: str  # e.g. "line_items[2].unit_price" or "total_amount"
+    message: str
+
+
+class ValidationErrorResponse(BluOnXBase):
+    detail: str = "Submission failed validation"
+    errors: list[FieldError]
+
+
+# ── Signed URL response (project doc download) ──────────────────────────
+
+
+class SignedUrlResponse(BluOnXBase):
+    url: str
+    expires_in: int

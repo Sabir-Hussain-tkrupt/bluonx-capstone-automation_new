@@ -1,14 +1,9 @@
 /**
  * Real implementation of the vendor portal API.
  *
- * Phase 5 wiring ships incrementally:
- *   - Task 5.2 (this file): validateToken, request/response interceptors
- *   - Task 5.3: createDraft / updateDraft / submitBid / downloadProjectDocument
- *   - Task 5.5: uploadAttachment / deleteAttachment
- *
- * Methods not yet wired throw `Not implemented yet — Task 5.X` so that an
- * accidental call in dev surfaces immediately rather than returning
- * undefined and corrupting downstream state.
+ * Wired incrementally:
+ *   - Task 5.2: validateToken + request/response interceptors
+ *   - Task 5.3–5.6 (this file): draft CRUD, submit, attachments, downloads
  *
  * JWT state lives here because the real Axios request interceptor is the
  * only consumer that actually needs it. The mock implementation keeps a
@@ -19,9 +14,15 @@
  */
 
 import axios, { type AxiosError } from 'axios';
-import type { ValidateTokenResponse } from '../types/portal';
+import type {
+  BidDraft,
+  FormAttachment,
+  PortalFieldError,
+  SubmitBidResult,
+  ValidateTokenResponse,
+} from '../types/portal';
 import { PortalApiError, type PortalApiErrorCode } from '../types/portal';
-import type { PortalApi } from './portalApi.types';
+import type { DraftPayload, PortalApi } from './portalApi.types';
 
 // ─── Axios instance ─────────────────────────────────────────────────
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -72,9 +73,42 @@ realAxios.interceptors.response.use(
 );
 
 // ─── Error mapping ──────────────────────────────────────────────────
-// Translates a raw Axios error into the `PortalApiError` the UI already
-// handles (see MagicLinkLandingPage). Status → code mapping is the
-// single source of truth for the validate-token flow.
+// Translates a raw Axios error into the `PortalApiError` the UI handles.
+// Status → code mapping is the single source of truth across the whole
+// portal API surface.
+interface ErrorBody {
+  detail?: string | { detail?: string; errors?: PortalFieldError[]; existing_submission_id?: string };
+  errors?: PortalFieldError[];
+  existing_submission_id?: string;
+}
+
+function extractDetailString(body: ErrorBody | undefined, fallback: string): string {
+  if (!body) return fallback;
+  if (typeof body.detail === 'string') return body.detail;
+  if (body.detail && typeof body.detail === 'object' && typeof body.detail.detail === 'string') {
+    return body.detail.detail;
+  }
+  return fallback;
+}
+
+function extractFieldErrors(body: ErrorBody | undefined): PortalFieldError[] | undefined {
+  if (!body) return undefined;
+  if (Array.isArray(body.errors)) return body.errors;
+  if (body.detail && typeof body.detail === 'object' && Array.isArray(body.detail.errors)) {
+    return body.detail.errors;
+  }
+  return undefined;
+}
+
+function extractExistingSubmissionId(body: ErrorBody | undefined): string | undefined {
+  if (!body) return undefined;
+  if (typeof body.existing_submission_id === 'string') return body.existing_submission_id;
+  if (body.detail && typeof body.detail === 'object' && typeof body.detail.existing_submission_id === 'string') {
+    return body.detail.existing_submission_id;
+  }
+  return undefined;
+}
+
 function mapAxiosErrorToPortalError(err: unknown): PortalApiError {
   if (!axios.isAxiosError(err)) {
     return new PortalApiError('UNKNOWN', 'Unexpected error', 0);
@@ -83,30 +117,46 @@ function mapAxiosErrorToPortalError(err: unknown): PortalApiError {
     return new PortalApiError('NETWORK', 'Network error — please try again.', 0);
   }
   const status = err.response.status;
-  const detail =
-    (err.response.data as { detail?: string } | undefined)?.detail ?? err.message;
+  const body = err.response.data as ErrorBody | undefined;
+  const detailMsg = extractDetailString(body, err.message);
+  const fieldErrors = extractFieldErrors(body);
+  const existingId = extractExistingSubmissionId(body);
 
   const code: PortalApiErrorCode = (() => {
     switch (status) {
       case 404:
         return 'TOKEN_INVALID';
       case 409:
+        // Distinguish concurrent-POST race (has existing_submission_id +
+        // draft/submit distinction in detail) from the auth-time
+        // already-submitted case (no id body, used by /validate-token).
+        if (existingId) return 'DRAFT_CONFLICT';
         return 'ALREADY_SUBMITTED';
       case 410:
         return 'TOKEN_EXPIRED';
-      case 423:
+      case 422:
+        if (fieldErrors && fieldErrors.length > 0) return 'VALIDATION_FAILED';
+        return 'UNKNOWN';
+      case 423: {
+        // Package-closed vs. deadline-passed share status but differ in
+        // detail. Keep the copy surfaces separate so the modal vs.
+        // landing-page flows pick the right one.
+        const detail = detailMsg.toLowerCase();
+        if (detail.includes('deadline')) return 'DEADLINE_PASSED';
         return 'BIDDING_CLOSED';
-      // Rate-limited. From the UX perspective the bid link simply can't
-      // be validated right now — showing "invalid" is the safest default
-      // and matches the existing PortalApiErrorCode union.
+      }
       case 429:
+        // Rate-limited token validation path — same UX as invalid link.
         return 'TOKEN_INVALID';
       default:
         return 'UNKNOWN';
     }
   })();
 
-  return new PortalApiError(code, detail, status);
+  return new PortalApiError(code, detailMsg, status, {
+    validationErrors: fieldErrors,
+    existingSubmissionId: existingId,
+  });
 }
 
 // ─── validateToken (POST /vendor-auth/validate-token) ───────────────
@@ -122,9 +172,99 @@ async function validateToken(token: string): Promise<ValidateTokenResponse> {
   }
 }
 
-// ─── Throwing stubs — filled in by Tasks 5.3–5.5 ────────────────────
-function notImplemented(task: string): never {
-  throw new Error(`Not implemented yet — ${task}`);
+// ─── Draft CRUD (Tasks 5.3 / 5.6) ───────────────────────────────────
+async function createDraft(payload: DraftPayload): Promise<BidDraft> {
+  try {
+    const { data } = await realAxios.post<BidDraft>('/vendor-portal/submissions', payload);
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+async function updateDraft(id: string, payload: DraftPayload): Promise<BidDraft> {
+  try {
+    const { data } = await realAxios.put<BidDraft>(
+      `/vendor-portal/submissions/${id}`,
+      payload,
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+// ─── Submit (Task 5.4) ──────────────────────────────────────────────
+async function submitBid(submissionId: string): Promise<SubmitBidResult> {
+  try {
+    const { data } = await realAxios.post<SubmitBidResult>(
+      `/vendor-portal/submissions/${submissionId}/submit`,
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+// ─── Attachments (Task 5.5) ─────────────────────────────────────────
+interface BackendAttachmentResponse {
+  id: string;
+  file_name: string;
+  file_size: number;
+  file_type: string | null;
+  uploaded_at: string;
+}
+
+async function uploadAttachment(
+  submissionId: string,
+  file: File,
+): Promise<FormAttachment> {
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const { data } = await realAxios.post<BackendAttachmentResponse>(
+      `/vendor-portal/submissions/${submissionId}/attachments`,
+      fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    // The UI's FormAttachment keeps the File object for icon rendering.
+    // Preserve the one the user dropped so the listing looks identical
+    // to the Task 5.1 behaviour.
+    return {
+      id: data.id,
+      file,
+      name: data.file_name,
+      size: data.file_size,
+      uploadedAt: data.uploaded_at,
+    };
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+async function deleteAttachment(
+  submissionId: string,
+  attachmentId: string,
+): Promise<void> {
+  try {
+    await realAxios.delete(
+      `/vendor-portal/submissions/${submissionId}/attachments/${attachmentId}`,
+    );
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+// ─── Project document download (Task 5.3) ───────────────────────────
+async function downloadProjectDocument(documentId: string): Promise<string> {
+  try {
+    const { data } = await realAxios.get<{ url: string; expires_in: number }>(
+      `/vendor-portal/documents/${documentId}/download`,
+    );
+    return data.url;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
 }
 
 export const realPortalApi: PortalApi = {
@@ -132,10 +272,10 @@ export const realPortalApi: PortalApi = {
   getVendorJwt,
   setAuthFailureHandler,
   validateToken,
-  createDraft: async () => notImplemented('Task 5.3'),
-  updateDraft: async () => notImplemented('Task 5.3'),
-  submitBid: async () => notImplemented('Task 5.4'),
-  uploadAttachment: async () => notImplemented('Task 5.5'),
-  deleteAttachment: async () => notImplemented('Task 5.5'),
-  downloadProjectDocument: async () => notImplemented('Task 5.3'),
+  createDraft,
+  updateDraft,
+  submitBid,
+  uploadAttachment,
+  deleteAttachment,
+  downloadProjectDocument,
 };

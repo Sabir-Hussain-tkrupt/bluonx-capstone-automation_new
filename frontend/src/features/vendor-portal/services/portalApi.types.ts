@@ -30,7 +30,7 @@ export interface PortalApi {
   createDraft: (payload: DraftPayload) => Promise<BidDraft>;
   updateDraft: (id: string, payload: DraftPayload) => Promise<BidDraft>;
   submitBid: (submissionId: string) => Promise<SubmitBidResult>;
-  uploadAttachment: (file: File) => Promise<FormAttachment>;
-  deleteAttachment: (id: string) => Promise<void>;
+  uploadAttachment: (submissionId: string, file: File) => Promise<FormAttachment>;
+  deleteAttachment: (submissionId: string, attachmentId: string) => Promise<void>;
   downloadProjectDocument: (documentId: string) => Promise<string>;
 }
