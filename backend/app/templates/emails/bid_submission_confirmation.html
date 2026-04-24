@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Bid Received — {{ project_name }}{% endblock %}
+
+{% block preheader %}Your bid for {{ task_name }} on {{ project_name }} has been received by BluOnX.{% endblock %}
+
+{% block content %}
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ vendor_contact_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      Your bid for <strong>{{ task_name }}</strong> on the
+      <strong>{{ project_name }}</strong> project has been received.
+      Thank you for your submission — this email serves as your receipt.
+    </td>
+  </tr>
+</table>
+
+<!-- Submission Summary Card -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px; padding:20px;" class="detail-card">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:12px; border-bottom:1px solid #e0e0e0;">
+            Submission Summary
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Company:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ vendor_company_name }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Project:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ project_name }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Scope:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ task_name }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Total Bid Amount:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:18px; color:#1a73e8; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ total_amount_formatted }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Submitted At:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ submitted_at_formatted }}
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Documents Uploaded:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  {{ attachment_count }} file{{ "s" if attachment_count != 1 }}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- What happens next -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="background-color:#f4f8ff; border:1px solid #d0e0fb; border-radius:6px; padding:20px;" class="detail-card">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:10px;">
+            What happens next
+          </td>
+        </tr>
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6;">
+            You will be notified of the award decision. No action is required from you at this time.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Contact Section -->
+{% if pm_name and pm_email %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; padding-bottom:24px; border-top:1px solid #eeeeee; padding-top:20px;">
+      Questions about this submission? Contact <strong>{{ pm_name }}</strong> at
+      <a href="mailto:{{ pm_email }}" style="color:#1a73e8; text-decoration:none;">{{ pm_email }}</a>.
+    </td>
+  </tr>
+</table>
+{% endif %}
+{% endblock %}

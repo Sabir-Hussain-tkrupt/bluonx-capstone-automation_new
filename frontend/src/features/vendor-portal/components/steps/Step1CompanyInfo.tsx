@@ -23,11 +23,13 @@ export function Step1CompanyInfo({
 
   async function handleDownload(documentId: string, fileName: string) {
     try {
-      await downloadProjectDocument(documentId);
-      toast({
-        variant: 'info',
-        message: `Download started: ${fileName} (mock — real signed URL in Task 5.3)`,
-      });
+      const url = await downloadProjectDocument(documentId);
+      // Signed URLs from FastAPI expire in ~1h. Opening in a new tab
+      // lets the browser fetch the blob directly from Supabase Storage
+      // without leaving the bid form. `noopener,noreferrer` prevents
+      // the opened tab from getting a window.opener back to the portal.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      toast({ variant: 'info', message: `Opening ${fileName}…` });
     } catch {
       toast({ variant: 'danger', message: 'Could not start download.' });
     }

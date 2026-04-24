@@ -1,0 +1,32 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+Dear {{ vendor_contact_name }},
+
+Your bid for {{ task_name }} on the {{ project_name }} project has been received. Thank you for your submission — this email serves as your receipt.
+
+SUBMISSION SUMMARY
+----------------------------------------------------------------
+Company:            {{ vendor_company_name }}
+Project:            {{ project_name }}
+Scope:              {{ task_name }}
+Total Bid Amount:   {{ total_amount_formatted }}
+Submitted At:       {{ submitted_at_formatted }}
+Documents Uploaded: {{ attachment_count }} file{{ "s" if attachment_count != 1 }}
+
+WHAT HAPPENS NEXT
+----------------------------------------------------------------
+You will be notified of the award decision. No action is required
+from you at this time.
+
+{% if pm_name and pm_email %}
+QUESTIONS?
+----------------------------------------------------------------
+Contact {{ pm_name }} at {{ pm_email }} if you have any questions
+about this submission.
+
+{% endif %}
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

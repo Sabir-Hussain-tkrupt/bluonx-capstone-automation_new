@@ -23,6 +23,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -535,6 +536,99 @@ def fetch_attachments(db, bid_submission_id: str) -> list[AttachmentResponse]:
             )
         )
     return out
+
+
+def _format_currency(amount: Decimal | float | str | None) -> str:
+    """USD formatting for email receipts. Falls back to '—' for null totals."""
+    if amount is None:
+        return "—"
+    try:
+        value = Decimal(str(amount))
+    except (ArithmeticError, ValueError):
+        return str(amount)
+    # locale-agnostic USD; the portal is US-only in MVP per PROJECT_PLAN
+    return f"${value:,.2f}"
+
+
+def _format_submitted_at(dt: datetime) -> str:
+    """Human-readable UTC timestamp for the email receipt."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.strftime("%B %d, %Y at %I:%M %p UTC")
+
+
+async def send_submission_confirmation_email(
+    *,
+    email_service: Any,
+    template_renderer: Any,
+    submission_id: UUID,
+    submitted_at: datetime,
+    total_amount: Decimal | float | str | None,
+    attachment_count: int,
+    context: dict,
+) -> bool:
+    """Render and send the bid-submission receipt email. Best-effort.
+
+    Returns True iff the provider reported 'sent'. The caller should
+    persist the bid regardless — a failed send is an ops issue (retry
+    from the email_log), not a vendor-facing failure. We swallow
+    exceptions here so a misconfigured provider can never reject a
+    committed submission.
+    """
+    to_email = (context.get("vendor_email") or "").strip()
+    if not to_email:
+        logger.warning(
+            "Submission %s has no vendor contact email; skipping confirmation send",
+            submission_id,
+        )
+        return False
+
+    render_ctx = {
+        "vendor_contact_name": context.get("vendor_contact_name") or "",
+        "vendor_company_name": context.get("vendor_company_name") or "",
+        "project_name": context.get("project_name") or "",
+        "task_name": context.get("task_name") or "",
+        "total_amount_formatted": _format_currency(total_amount),
+        "submitted_at_formatted": _format_submitted_at(submitted_at),
+        "attachment_count": attachment_count,
+        "pm_name": context.get("pm_name"),
+        "pm_email": context.get("pm_email"),
+    }
+
+    try:
+        html_body = template_renderer.render(
+            "bid_submission_confirmation.html", render_ctx
+        )
+        text_body = template_renderer.render_text(
+            "bid_submission_confirmation.txt", render_ctx
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to render confirmation email for submission %s", submission_id
+        )
+        return False
+
+    subject = (
+        f"Bid Received: {render_ctx['task_name']} — {render_ctx['project_name']}"
+    )
+    try:
+        result = await email_service.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_body,
+            plain_text_body=text_body,
+            email_type="general",
+            recipient_type="vendor_contact",
+            reference_type="bid_submissions",
+            reference_id=str(submission_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Confirmation email send raised for submission %s", submission_id
+        )
+        return False
+
+    return getattr(result, "status", None) == "sent"
 
 
 def resolve_unique_filename(

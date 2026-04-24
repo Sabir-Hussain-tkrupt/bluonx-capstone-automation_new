@@ -171,6 +171,25 @@ export interface BidFormState {
 
 export interface SubmitBidResult {
   id: string;
-  confirmation_number: string;
   submitted_at: string;
+  /**
+   * Fields returned by the real backend (Task 5.7). Optional at the type
+   * level so `portalApi.mock.ts` — a permanent demo/E2E fixture — can
+   * keep its existing payload shape without modification. In real mode
+   * these are always populated.
+   */
+  total_amount?: number | string | null;
+  vendor_email?: string;
+  vendor_company_name?: string;
+  project_name?: string;
+  task_name?: string;
+  attachment_count?: number;
+  confirmation_email_sent?: boolean;
+  /**
+   * Legacy display field retained purely for mock compatibility.
+   * The real backend no longer issues confirmation numbers
+   * (`bid_submissions.id` is the stable reference). The confirmation
+   * page does NOT render this value.
+   */
+  confirmation_number?: string;
 }

@@ -1,5 +1,6 @@
 /**
- * VendorPortalContext — holds the mock vendor JWT and full bid context.
+ * VendorPortalContext — holds the vendor JWT and full bid context for
+ * the active portal session (real or mocked, selected by VITE_DEMO_MODE).
  *
  * Scope: ONLY mounted under the /bid/* route subtree (see
  * frontend/src/routes/index.tsx). The admin dashboard never
