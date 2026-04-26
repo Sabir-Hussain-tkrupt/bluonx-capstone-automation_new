@@ -21,6 +21,17 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
       {/* Desktop table */}
       <div className="hidden overflow-x-auto rounded-lg border border-secondary-200 md:block">
         <table className="min-w-full divide-y divide-secondary-200 text-sm">
+          {/* Explicit column widths prevent input cells from being squeezed */}
+          <colgroup>
+            <col className="w-10" />     {/* # */}
+            <col />                       {/* Description — fills remaining space */}
+            <col className="w-28" />     {/* Type */}
+            <col className="w-14" />     {/* UoM */}
+            <col className="w-32" />     {/* Qty */}
+            <col className="w-36" />     {/* Unit Price ($) */}
+            <col className="w-36" />     {/* Lump Sum ($) */}
+            <col className="w-32" />     {/* Line Total */}
+          </colgroup>
           <thead className="bg-secondary-50">
             <tr className="text-left text-xs font-semibold tracking-wide text-secondary-600 uppercase">
               <th className="px-4 py-3">#</th>
@@ -28,8 +39,8 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
               <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">UoM</th>
               <th className="px-4 py-3 text-right">Qty</th>
-              <th className="px-4 py-3 text-right">Unit Price</th>
-              <th className="px-4 py-3 text-right">Lump Sum</th>
+              <th className="px-4 py-3 text-right">Unit Price ($)</th>
+              <th className="px-4 py-3 text-right">Lump Sum ($)</th>
               <th className="px-4 py-3 text-right">Line Total</th>
             </tr>
           </thead>
@@ -52,11 +63,12 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                     {item.unit_of_measure ?? '—'}
                   </td>
                   <td className="px-4 py-3">
+                    {/* No leftAddon in table — column header already gives context */}
                     <TextInput
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step="0.01"
+                      step={100}
                       aria-label={`Quantity for ${item.description}`}
                       value={item.quantity ?? ''}
                       onChange={(e) =>
@@ -74,7 +86,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step="0.01"
+                      step={100}
                       aria-label={`Unit price for ${item.description}`}
                       value={item.unit_price ?? ''}
                       onChange={(e) =>
@@ -84,7 +96,6 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       }
                       disabled={isLump}
                       size="sm"
-                      leftAddon={<span>$</span>}
                       className="text-right"
                     />
                   </td>
@@ -93,7 +104,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step="0.01"
+                      step={1000}
                       aria-label={`Lump sum for ${item.description}`}
                       value={item.lump_sum_amount ?? ''}
                       onChange={(e) =>
@@ -103,7 +114,6 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       }
                       disabled={!isLump}
                       size="sm"
-                      leftAddon={<span>$</span>}
                       className="text-right"
                     />
                   </td>

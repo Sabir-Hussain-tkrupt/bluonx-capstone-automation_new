@@ -299,7 +299,7 @@ export function BidFormPage() {
 
   // ─── Render ───────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-secondary-900 sm:text-2xl">
