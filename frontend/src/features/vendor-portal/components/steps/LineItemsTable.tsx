@@ -68,7 +68,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step={100}
+                      step={1}
                       aria-label={`Quantity for ${item.description}`}
                       value={item.quantity ?? ''}
                       onChange={(e) =>
@@ -86,7 +86,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step={100}
+                      step={1000}
                       aria-label={`Unit price for ${item.description}`}
                       value={item.unit_price ?? ''}
                       onChange={(e) =>
