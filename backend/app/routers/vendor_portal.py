@@ -45,6 +45,8 @@ from app.models.vendor_portal import (
     SubmitBidResponse,
     VendorBidContextModel,
 )
+from app.services.email_service import EmailService, get_email_service
+from app.services.template_renderer import template_renderer
 from app.services.vendor_portal_service import (
     assert_package_open_and_before_deadline,
     build_bid_context,
@@ -55,6 +57,7 @@ from app.services.vendor_portal_service import (
     fetch_template_metadata,
     load_draft_response,
     resolve_unique_filename,
+    send_submission_confirmation_email,
 )
 from app.services.vendor_portal_submit_validator import validate_for_submit
 
@@ -325,15 +328,19 @@ async def submit_bid(
     submission_id: UUID,
     ctx: VendorContext = Depends(get_vendor_context),
     db: Client = Depends(get_supabase),
+    email_service: EmailService = Depends(get_email_service),
 ) -> SubmitBidResponse:
-    """Finalize a draft: run validation, set status='submitted'.
+    """Finalize a draft: run validation, set status='submitted', send receipt.
 
     The trigger `fn_sync_bid_invitation_on_submission` auto-syncs
     bid_invitations.status and responded_at — we do not touch that table
     here.
 
-    Confirmation email + PDF receipt are deferred to Task 5.7; TODOs mark
-    where they plug in.
+    Confirmation email is best-effort: a provider failure after the DB
+    update still returns 200. The bid is committed, and the response's
+    `confirmation_email_sent` flag tells the UI whether to soften the
+    "email has been sent" copy. Re-sending is an ops concern, not a
+    vendor-workflow concern.
     """
     sub = _fetch_owned_submission(db, ctx, submission_id)
     _assert_draft(sub)
@@ -391,16 +398,38 @@ async def submit_bid(
             detail="Failed to finalize submission",
         )
 
-    confirmation_number = _generate_confirmation_number(db, submitted_at.year)
+    # The total_amount returned to the client / logged in the email must
+    # come from the persisted submission, not the pre-submit snapshot —
+    # the validator may have recomputed it.
+    committed = update_resp.data[0]
+    committed_total = committed.get("total_amount")
 
-    # TODO(Task 5.7): send confirmation email via EmailService + log in email_log.
-    # TODO(Task 5.7): generate PDF receipt with reportlab/weasyprint, upload to
-    #   bid-attachments/{submission_id}/receipt.pdf, expose via separate endpoint.
+    # Gather context for the response + email. One focused read instead of
+    # rebuilding the full bid-context object (which also hydrates the
+    # template and project documents we don't need here).
+    email_ctx = _fetch_submission_email_context(db, submission_id)
+    attachment_count = _count_attachments(db, submission_id)
+
+    email_sent = await send_submission_confirmation_email(
+        email_service=email_service,
+        template_renderer=template_renderer,
+        submission_id=submission_id,
+        submitted_at=submitted_at,
+        total_amount=committed_total,
+        attachment_count=attachment_count,
+        context=email_ctx,
+    )
 
     return SubmitBidResponse(
         id=submission_id,
-        confirmation_number=confirmation_number,
         submitted_at=submitted_at,
+        total_amount=committed_total,
+        vendor_email=email_ctx["vendor_email"],
+        vendor_company_name=email_ctx["vendor_company_name"],
+        project_name=email_ctx["project_name"],
+        task_name=email_ctx["task_name"],
+        attachment_count=attachment_count,
+        confirmation_email_sent=email_sent,
     )
 
 
@@ -617,23 +646,81 @@ async def _fetch_template_id_for_invitation(
     return template_id
 
 
-def _generate_confirmation_number(db: Client, year: int) -> str:
-    """BID-{YYYY}-{seq:04d}, where seq = count of same-year submitted bids + 1.
+def _fetch_submission_email_context(db: Client, submission_id: UUID) -> dict:
+    """One joined read → all fields the confirmation email + response need.
 
-    Display-only for now — the schema has no `confirmation_number` column.
-    A small race window exists if two vendors finalize in the same second;
-    acceptable while this value is not persisted or used for lookup.
-
-    TODO(Task 5.7): persist to a new column (and ideally a Postgres
-    sequence) so the number is stable and looking-up friendly.
+    Deliberately narrower than build_bid_context: skips template items,
+    project documents, and the existing-draft hydrate (none are useful
+    post-submit, and those fetches are not free).
     """
-    jan_first = f"{year}-01-01T00:00:00+00:00"
     resp = (
         db.table("bid_submissions")
-        .select("id", count="exact")
-        .eq("status", "submitted")
-        .gte("submitted_at", jan_first)
+        .select(
+            "id,"
+            " bid_invitations!inner("
+            "   vendor_contacts(full_name, email),"
+            "   vendors(company_name),"
+            "   bid_packages!inner("
+            "     created_by,"
+            "     tasks!inner("
+            "       name,"
+            "       projects(name)"
+            "     )"
+            "   )"
+            " )"
+        )
+        .eq("id", str(submission_id))
+        .single()
         .execute()
     )
-    count = getattr(resp, "count", None) or 0
-    return f"BID-{year}-{(count + 1):04d}"
+    if not resp.data:
+        # Unreachable: caller just updated this row. Defensive 404.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found",
+        )
+    inv = resp.data["bid_invitations"]
+    contact = inv.get("vendor_contacts") or {}
+    vendor = inv.get("vendors") or {}
+    pkg = inv["bid_packages"]
+    task = pkg["tasks"]
+    project = task.get("projects") or {}
+
+    # PM = bid_packages.created_by. Separate fetch keeps the join above
+    # simple (single-FK ambiguity on public.users otherwise) and the PM
+    # lookup is optional — a missing user doesn't fail the email.
+    pm_name: str | None = None
+    pm_email: str | None = None
+    pm_id = pkg.get("created_by")
+    if pm_id:
+        pm_resp = (
+            db.table("users")
+            .select("full_name, email")
+            .eq("id", str(pm_id))
+            .limit(1)
+            .execute()
+        )
+        pm_rows = pm_resp.data or []
+        if pm_rows:
+            pm_name = pm_rows[0].get("full_name")
+            pm_email = pm_rows[0].get("email")
+
+    return {
+        "vendor_contact_name": contact.get("full_name") or "",
+        "vendor_email": contact.get("email") or "",
+        "vendor_company_name": vendor.get("company_name") or "",
+        "project_name": project.get("name") or "",
+        "task_name": task.get("name") or "",
+        "pm_name": pm_name,
+        "pm_email": pm_email,
+    }
+
+
+def _count_attachments(db: Client, submission_id: UUID) -> int:
+    resp = (
+        db.table("bid_attachments")
+        .select("id", count="exact")
+        .eq("bid_submission_id", str(submission_id))
+        .execute()
+    )
+    return getattr(resp, "count", None) or 0

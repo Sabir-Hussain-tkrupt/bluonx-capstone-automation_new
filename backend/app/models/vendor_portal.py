@@ -141,9 +141,24 @@ class DraftPayload(BluOnXBase):
 
 
 class SubmitBidResponse(BluOnXBase):
+    """Returned by POST /submissions/{id}/submit.
+
+    Carries everything the confirmation page needs to render without a
+    follow-up fetch: authoritative total + timestamp, plus the context
+    fields needed for the "sent to {vendor_email}" notice. The email
+    may fail to send even when the bid is committed — `confirmation_email_sent`
+    reflects the actual provider result so the UI can soften the notice.
+    """
+
     id: UUID
-    confirmation_number: str  # BID-{YYYY}-{NNNN}; display-only until Task 5.7
     submitted_at: datetime
+    total_amount: Decimal | None = None
+    vendor_email: str
+    vendor_company_name: str
+    project_name: str
+    task_name: str
+    attachment_count: int
+    confirmation_email_sent: bool
 
 
 # ── Submission detail (GET /submissions/{id}) ────────────────────────────
