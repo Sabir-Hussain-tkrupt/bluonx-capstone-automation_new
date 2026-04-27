@@ -4,7 +4,6 @@
  * Used with the `api` Axios instance from @/lib/api,
  * which has baseURL = VITE_API_BASE_URL/api/v1.
  *
- * Backend is not built yet (Task 2.6). These establish the convention.
  */
 export const API_ENDPOINTS = {
   // Vendors
