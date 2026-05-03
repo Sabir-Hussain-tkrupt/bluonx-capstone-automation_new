@@ -46,6 +46,16 @@ class InvalidStatusError(InvitationTrackingError):
         super().__init__(400, detail)
 
 
+class TerminalStatusError(InvitationTrackingError):
+    """The invitation's current status is terminal (e.g. submitted) and
+    cannot be transitioned by PM action."""
+
+    def __init__(
+        self, detail: str = "Cannot change status of a submitted invitation"
+    ) -> None:
+        super().__init__(409, detail)
+
+
 # ── Constants ──────────────────────────────────────────────────────────────
 
 _ALL_STATUSES = ("sent", "opened", "submitted", "declined", "expired", "no_response")
@@ -317,8 +327,15 @@ async def update_invitation_status(
         .single()
         .execute()
     )
-    if _unwrap_one(existing.data) is None:
+    existing_row = _unwrap_one(existing.data)
+    if existing_row is None:
         raise InvitationNotFoundError()
+
+    # Submitted invitations are terminal: a real bid_submission backs them,
+    # so any PM-driven downgrade would put the invitation in conflict with
+    # its own submission history.
+    if existing_row.get("status") == "submitted":
+        raise TerminalStatusError()
 
     updated_resp = (
         db.table("bid_invitations")

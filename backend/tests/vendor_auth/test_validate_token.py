@@ -158,6 +158,60 @@ async def test_first_click_marks_token_used_with_timestamp_and_ip(
     assert "198.51.100.42" in str(row["ip_address"])
 
 
+# ── Invitation 'opened' transition ─────────────────────────────────────
+
+
+async def test_first_click_transitions_invitation_to_opened_and_stamps_opened_at(
+    db, vendor_client, valid_token_setup
+):
+    refs = valid_token_setup
+    resp = await vendor_client.post(VALIDATE_PATH, json={"token": refs.raw_token})
+    assert resp.status_code == 200
+
+    row = (
+        db.table("bid_invitations")
+        .select("status, opened_at")
+        .eq("id", refs.bid_invitation_id)
+        .single()
+        .execute()
+        .data
+    )
+    assert row["status"] == "opened"
+    assert row["opened_at"] is not None
+
+
+async def test_reclick_does_not_advance_status_or_overwrite_opened_at(
+    db, vendor_client, valid_token_setup
+):
+    refs = valid_token_setup
+
+    first = await vendor_client.post(VALIDATE_PATH, json={"token": refs.raw_token})
+    assert first.status_code == 200
+    after_first = (
+        db.table("bid_invitations")
+        .select("status, opened_at")
+        .eq("id", refs.bid_invitation_id)
+        .single()
+        .execute()
+        .data
+    )
+    assert after_first["status"] == "opened"
+    assert after_first["opened_at"] is not None
+
+    second = await vendor_client.post(VALIDATE_PATH, json={"token": refs.raw_token})
+    assert second.status_code == 200
+    after_second = (
+        db.table("bid_invitations")
+        .select("status, opened_at")
+        .eq("id", refs.bid_invitation_id)
+        .single()
+        .execute()
+        .data
+    )
+    assert after_second["status"] == "opened"
+    assert after_second["opened_at"] == after_first["opened_at"]
+
+
 # ── Rate limiting ──────────────────────────────────────────────────────
 
 

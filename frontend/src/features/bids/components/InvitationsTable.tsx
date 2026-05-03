@@ -25,7 +25,6 @@ interface InvitationsTableProps {
   isLoading: boolean;
   onResend: (invitationId: string) => void;
   onMarkDeclined: (invitationId: string) => void;
-  onMarkNoResponse: (invitationId: string) => void;
   resendingId: string | null;
   updatingId: string | null;
 }
@@ -35,7 +34,6 @@ export function InvitationsTable({
   isLoading,
   onResend,
   onMarkDeclined,
-  onMarkNoResponse,
   resendingId,
   updatingId,
 }: InvitationsTableProps) {
@@ -103,26 +101,15 @@ export function InvitationsTable({
             </Button>
           )}
           {canMarkStatus(row.status) && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onMarkDeclined(row.id)}
-                isLoading={updatingId === row.id}
-                disabled={!!resendingId || !!updatingId}
-              >
-                Mark Declined
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onMarkNoResponse(row.id)}
-                isLoading={updatingId === row.id}
-                disabled={!!resendingId || !!updatingId}
-              >
-                No Response
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onMarkDeclined(row.id)}
+              isLoading={updatingId === row.id}
+              disabled={!!resendingId || !!updatingId}
+            >
+              Mark Declined
+            </Button>
           )}
         </div>
       ),

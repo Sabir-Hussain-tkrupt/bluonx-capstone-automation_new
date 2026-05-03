@@ -100,7 +100,7 @@ async def validate_magic_link_token(
     invitation_resp = (
         db.table("bid_invitations")
         .select(
-            "id, vendor_id, vendor_contact_id, bid_package_id,"
+            "id, vendor_id, vendor_contact_id, bid_package_id, status, opened_at,"
             " bid_packages(id, status, task_id)"
         )
         .eq("id", token_row["bid_invitation_id"])
@@ -158,7 +158,22 @@ async def validate_magic_link_token(
             # from entering the portal. Log and continue.
             logger.warning("Failed to mark magic link token used: %s", e)
 
-    # 6. Issue JWT + assemble context.
+    # 6. Advance invitation 'sent' → 'opened' on first view. Idempotent —
+    #    re-entries (status already opened/submitted/etc.) leave the row
+    #    untouched so opened_at preserves the original first-view timestamp.
+    if invitation.get("status") == "sent":
+        update_payload = {"status": "opened"}
+        if invitation.get("opened_at") is None:
+            update_payload["opened_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            db.table("bid_invitations").update(update_payload).eq(
+                "id", invitation["id"]
+            ).execute()
+        except Exception as e:
+            # Non-fatal: failing to stamp the open should not block entry.
+            logger.warning("Failed to mark invitation opened: %s", e)
+
+    # 7. Issue JWT + assemble context.
     ctx = VendorContext(
         vendor_id=invitation["vendor_id"],
         vendor_contact_id=invitation["vendor_contact_id"],

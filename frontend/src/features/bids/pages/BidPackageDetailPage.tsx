@@ -89,7 +89,7 @@ export function BidPackageDetailPage() {
     });
   };
 
-  const handleMarkStatus = (invitationId: string, status: 'declined' | 'no_response') => {
+  const handleMarkStatus = (invitationId: string, status: 'declined') => {
     setUpdatingId(invitationId);
     statusMutation.mutate(
       { invitationId, status },
@@ -209,7 +209,7 @@ export function BidPackageDetailPage() {
         />
         <SummaryCard
           label="Declined / Expired"
-          value={summary.declined + summary.expired + summary.no_response}
+          value={summary.declined + summary.expired}
           color="text-secondary-500"
         />
       </div>
@@ -235,7 +235,6 @@ export function BidPackageDetailPage() {
             isLoading={false}
             onResend={handleResend}
             onMarkDeclined={(id) => handleMarkStatus(id, 'declined')}
-            onMarkNoResponse={(id) => handleMarkStatus(id, 'no_response')}
             resendingId={resendingId}
             updatingId={updatingId}
           />
