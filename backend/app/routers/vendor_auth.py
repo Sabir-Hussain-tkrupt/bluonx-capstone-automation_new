@@ -75,7 +75,7 @@ async def validate_magic_link_token(
     # 1. Token exists?
     token_resp = (
         db.table("magic_link_tokens")
-        .select("id, bid_invitation_id, expires_at, is_used")
+        .select("id, bid_invitation_id, expires_at, is_used, revoked_at")
         .eq("token_hash", token_hash)
         .limit(1)
         .execute()
@@ -88,7 +88,19 @@ async def validate_magic_link_token(
         )
     token_row = token_rows[0]
 
-    # 2. Token still valid?
+    # 2a. Token revoked? Resend Bid Link hard-revokes all prior tokens.
+    # Runs before the is_used audit-write so a revoked token is never
+    # treated as resumable, regardless of its is_used state.
+    if token_row.get("revoked_at") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=(
+                "This bid link has been revoked. "
+                "Please use the most recent link sent to your email."
+            ),
+        )
+
+    # 2b. Token still valid?
     if _parse_expires_at(token_row["expires_at"]) <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_410_GONE,

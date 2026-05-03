@@ -129,9 +129,9 @@ export interface CreateBidPackageResponse {
   instructions?: string | null;
 }
 
-// ─── Resend Invitation (POST /v1/bid-invitations/{id}/resend) ───────
+// ─── Resend Bid Link (POST /v1/bid-invitations/{id}/resend-link) ────
 
-export interface ResendInvitationResponse {
+export interface ResendBidLinkResponse {
   invitation_id: string;
   vendor_id: string;
   new_token_generated: boolean;

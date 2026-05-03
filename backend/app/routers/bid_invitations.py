@@ -11,7 +11,7 @@ from app.core.supabase_client import get_supabase
 from app.models.bid_packages import (
     InvitationStatusUpdateRequest,
     InvitationUpdatedResponse,
-    ResendInvitationResponse,
+    ResendBidLinkResponse,
 )
 from app.models.bids import (
     BidInvitationCreate,
@@ -20,7 +20,7 @@ from app.models.bids import (
 )
 from app.services.bid_package_service import (
     BidPackageValidationError,
-    resend_invitation,
+    resend_bid_link,
 )
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
@@ -35,20 +35,23 @@ router = APIRouter()
 
 
 @router.post(
-    "/bid-invitations/{invitation_id}/resend",
-    response_model=ResendInvitationResponse,
+    "/bid-invitations/{invitation_id}/resend-link",
+    response_model=ResendBidLinkResponse,
+    summary="Resend Bid Link",
 )
-async def resend_invitation_endpoint(
+async def resend_bid_link_endpoint(
     invitation_id: UUID,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
     email_service: EmailService = Depends(get_email_service),
 ):
-    """Resend a bid invitation email with a new magic link token."""
+    """Resend the bid link: hard-revoke all prior magic link tokens for
+    this invitation, mint a new one, and email it to the vendor contact."""
 
     try:
-        result = await resend_invitation(
+        result = await resend_bid_link(
             invitation_id=invitation_id,
+            current_user_id=UUID(user["user_id"]),
             db=db,
             email_service=email_service,
             template_renderer=template_renderer,

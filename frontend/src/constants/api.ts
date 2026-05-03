@@ -46,7 +46,7 @@ export const API_ENDPOINTS = {
   // Bid Invitations
   BID_INVITATIONS: '/bid-invitations',
   BID_INVITATION: (id: string) => `/bid-invitations/${id}`,
-  BID_INVITATION_RESEND: (id: string) => `/bid-invitations/${id}/resend`,
+  BID_INVITATION_RESEND_LINK: (id: string) => `/bid-invitations/${id}/resend-link`,
   BID_INVITATION_STATUS: (id: string) => `/bid-invitations/${id}/status`,
 
   // Project Documents

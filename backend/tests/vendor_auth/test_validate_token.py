@@ -9,6 +9,8 @@ gate to keep the assertions unambiguous.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import jwt
 import pytest
 
@@ -210,6 +212,41 @@ async def test_reclick_does_not_advance_status_or_overwrite_opened_at(
     )
     assert after_second["status"] == "opened"
     assert after_second["opened_at"] == after_first["opened_at"]
+
+
+# ── Revocation gate (introduced with Resend Bid Link) ──────────────────
+
+
+@pytest.mark.parametrize("token_is_used", [True, False])
+async def test_validate_token_rejects_revoked_token(
+    db, vendor_client, seed, admin_user_id, token_is_used
+):
+    """A token with revoked_at IS NOT NULL must return 410 regardless of
+    its is_used state. This is the core gate added by the Resend Bid Link
+    bug fix — revocation, not just consumption, is what bounds a token."""
+    refs = seed(token_is_used=token_is_used)
+
+    db.table("magic_link_tokens").update(
+        {
+            "revoked_at": datetime.now(timezone.utc).isoformat(),
+            "revoked_by": admin_user_id,
+        }
+    ).eq("id", refs.magic_link_token_id).execute()
+
+    resp = await vendor_client.post(VALIDATE_PATH, json={"token": refs.raw_token})
+    assert resp.status_code == 410
+
+
+async def test_validate_token_accepts_used_but_not_revoked_token(
+    vendor_client, seed
+):
+    """Re-click-to-resume must keep working: is_used=TRUE alone (with
+    revoked_at NULL and a future expiry) still yields a 200 + JWT."""
+    refs = seed(token_is_used=True)
+    resp = await vendor_client.post(VALIDATE_PATH, json={"token": refs.raw_token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body.get("jwt"), str) and body["jwt"].count(".") == 2
 
 
 # ── Rate limiting ──────────────────────────────────────────────────────

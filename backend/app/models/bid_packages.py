@@ -49,8 +49,8 @@ class BidPackageCreateResponse(BluOnXBase):
     instructions: str | None = None
 
 
-class ResendInvitationResponse(BluOnXBase):
-    """Response body for POST /v1/bid-invitations/{invitation_id}/resend."""
+class ResendBidLinkResponse(BluOnXBase):
+    """Response body for POST /v1/bid-invitations/{invitation_id}/resend-link."""
 
     invitation_id: str
     vendor_id: str
