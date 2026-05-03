@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.30
--- Date:     February 23, 2026
+-- Version:  2.40
+-- Date:     May 01, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   28
 -- Engine:   PostgreSQL via Supabase
@@ -355,11 +355,15 @@ CREATE TABLE magic_link_tokens (
   used_at             TIMESTAMPTZ,
   is_used             BOOLEAN       NOT NULL DEFAULT FALSE,
   ip_address          INET,
+  revoked_at          TIMESTAMPTZ,
+  revoked_by          UUID          REFERENCES users(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE  magic_link_tokens            IS 'Secure single-use tokens for vendor bid portal auth. Hashed, never stored raw.';
 COMMENT ON COLUMN magic_link_tokens.token_hash IS 'SHA-256 hash of the actual token. Raw token is emailed, never stored.';
+COMMENT ON COLUMN magic_link_tokens.revoked_at IS 'When this token was hard-revoked (e.g., via Resend Bid Link). NULL = live. Validator rejects revoked tokens with 410.';
+COMMENT ON COLUMN magic_link_tokens.revoked_by IS 'User who revoked this token. NULL when not revoked or when the revoking user is later deleted.';
 
 
 -- Bid submissions: vendor's actual bid response
@@ -703,7 +707,7 @@ CREATE INDEX idx_bid_invitations_vendor_id          ON bid_invitations (vendor_i
 CREATE INDEX idx_bid_invitations_status             ON bid_invitations (bid_package_id, status);
 CREATE INDEX idx_magic_link_tokens_invitation_id    ON magic_link_tokens (bid_invitation_id);
 CREATE INDEX idx_magic_link_tokens_active           ON magic_link_tokens (expires_at, is_used)
-                                                    WHERE is_used = FALSE;
+                                                    WHERE is_used = FALSE AND revoked_at IS NULL;
 CREATE INDEX idx_bid_submissions_invitation_id      ON bid_submissions (bid_invitation_id);
 CREATE INDEX idx_bid_submissions_vendor_id          ON bid_submissions (vendor_id);
 CREATE INDEX idx_bid_submissions_status             ON bid_submissions (status);
