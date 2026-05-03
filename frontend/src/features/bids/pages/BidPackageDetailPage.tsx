@@ -71,6 +71,7 @@ export function BidPackageDetailPage() {
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [declineConfirmId, setDeclineConfirmId] = useState<string | null>(null);
 
   const handleResendBidLink = (invitationId: string) => {
     setResendingId(invitationId);
@@ -89,22 +90,22 @@ export function BidPackageDetailPage() {
     });
   };
 
-  const handleMarkStatus = (invitationId: string, status: 'declined') => {
+  const handleConfirmDecline = () => {
+    if (!declineConfirmId) return;
+    const invitationId = declineConfirmId;
+    setDeclineConfirmId(null);
     setUpdatingId(invitationId);
     statusMutation.mutate(
-      { invitationId, status },
+      { invitationId, status: 'declined' },
       {
         onSuccess: () => {
-          toast({
-            variant: 'success',
-            message: `Invitation marked as ${status.replace('_', ' ')}.`,
-          });
+          toast({ variant: 'success', message: 'Invitation marked as declined.' });
           setUpdatingId(null);
         },
         onError: (err) => {
           toast({
             variant: 'danger',
-            message: (err as { message?: string })?.message || 'Failed to update status.',
+            message: (err as { message?: string })?.message || 'Failed to mark declined.',
           });
           setUpdatingId(null);
         },
@@ -234,7 +235,7 @@ export function BidPackageDetailPage() {
             invitations={bp.invitations}
             isLoading={false}
             onResendBidLink={handleResendBidLink}
-            onMarkDeclined={(id) => handleMarkStatus(id, 'declined')}
+            onMarkDeclined={setDeclineConfirmId}
             resendingId={resendingId}
             updatingId={updatingId}
           />
@@ -298,6 +299,29 @@ export function BidPackageDetailPage() {
           )}
         </div>
       </Card>
+
+      {/* Decline Confirmation Modal */}
+      <Modal
+        isOpen={!!declineConfirmId}
+        onClose={() => setDeclineConfirmId(null)}
+        title="Mark as Declined"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeclineConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDecline}>
+              Mark Declined
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-secondary-600">
+          Mark this vendor as declined? Their magic link will be revoked and they will no longer
+          be able to access the bid portal. This cannot be undone.
+        </p>
+      </Modal>
 
       {/* Cancel Confirmation Modal */}
       <Modal
