@@ -17,6 +17,7 @@ import pytest
 from app.services.invitation_tracking_service import (
     InvalidStatusError,
     InvitationNotFoundError,
+    TerminalStatusError,
     update_invitation_status,
 )
 
@@ -133,6 +134,27 @@ class TestNonexistentInvitation:
                 new_status="declined",
                 db=client,
             )
+
+
+class TestRejectsTransitionFromSubmitted:
+    """Submitted is terminal — any PM-requested transition returns 409."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("new_status", ["declined", "expired", "no_response"])
+    async def test_rejects_when_current_status_is_submitted(
+        self, base_invitation, new_status
+    ):
+        submitted = {**base_invitation, "status": "submitted"}
+        client = _client_with_invitation(submitted)
+
+        with pytest.raises(TerminalStatusError) as exc_info:
+            await update_invitation_status(
+                invitation_id=INVITATION_IDS["sent"],
+                new_status=new_status,
+                db=client,
+            )
+
+        assert exc_info.value.status_code == 409
 
 
 class TestResponseContainsUpdatedInvitation:
