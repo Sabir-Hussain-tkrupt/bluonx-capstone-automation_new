@@ -428,23 +428,24 @@ async def create_bid_package_with_invitations(
 # ── Resend invitation ───────────────────────────────────────────────────
 
 
-async def resend_invitation(
+async def resend_bid_link(
     *,
     invitation_id: UUID,
+    current_user_id: UUID,
     db,
     email_service,
     template_renderer,
 ) -> dict:
-    """Resend an invitation email with a new magic link token.
+    """Resend a bid link: hard-revoke prior tokens, mint a new one, email it.
 
-    Invalidates all previous tokens, generates a new one, renders and
-    sends the email, and updates sent_at.
-
-    Returns:
-        Dict with invitation_id, vendor_id, new_token_generated, email_status.
+    Each prior token is stamped with `revoked_at = NOW()` and
+    `revoked_by = current_user_id` (in addition to the legacy `is_used`
+    flag) so the validate-token endpoint rejects them with 410. The new
+    token row is inserted with `revoked_at` left NULL.
 
     Raises:
-        BidPackageValidationError: On validation failure.
+        BidPackageValidationError: 404 if the invitation, bid package, or
+            vendor_contact lookup is empty; 400 if the package is not open.
     """
     from app.core.config import settings
 
@@ -462,16 +463,33 @@ async def resend_invitation(
     if bid_package.get("status") != "open":
         raise BidPackageValidationError(
             400,
-            f"Cannot resend invitation for bid package with status "
+            f"Cannot resend bid link for bid package with status "
             f"'{bid_package['status']}' (must be 'open')",
         )
 
-    # ── 3. Invalidate old tokens ─────────────────────────────────────────
-    db.table("magic_link_tokens").update({"is_used": True}).eq(
-        "bid_invitation_id", str(invitation_id)
-    ).execute()
+    # ── 3. Fetch contact BEFORE any writes — fail loud if missing ────────
+    # Doing the contact lookup before token writes means a deleted contact
+    # can't leave a half-revoked / half-issued token state behind.
+    contact_id = invitation.get("vendor_contact_id")
+    contact = _query_one(db, "vendor_contacts", contact_id) if contact_id else None
+    if not contact:
+        raise BidPackageValidationError(
+            404, "Vendor contact not found for this invitation"
+        )
+    contact_email = contact.get("email", "")
+    contact_name = contact.get("full_name", "")
 
-    # ── 4. Generate new token ────────────────────────────────────────────
+    # ── 4. Hard-revoke all prior tokens for this invitation ──────────────
+    now_iso = datetime.now(timezone.utc).isoformat()
+    db.table("magic_link_tokens").update(
+        {
+            "is_used": True,
+            "revoked_at": now_iso,
+            "revoked_by": str(current_user_id),
+        }
+    ).eq("bid_invitation_id", str(invitation_id)).execute()
+
+    # ── 5. Generate new (live, non-revoked) token ────────────────────────
     raw_token, token_hash = _generate_magic_link_token()
     deadline_str = bid_package.get("deadline", "")
 
@@ -481,32 +499,80 @@ async def resend_invitation(
         "token_hash": token_hash,
         "expires_at": deadline_str,
         "is_used": False,
+        "revoked_at": None,
     }
     db.table("magic_link_tokens").insert(token_row).execute()
 
-    # ── 5. Fetch contact for email ───────────────────────────────────────
-    contact_id = invitation.get("vendor_contact_id")
-    contact = _query_one(db, "vendor_contacts", contact_id) if contact_id else None
-    contact_email = contact.get("email", "") if isinstance(contact, dict) else ""
-    contact_name = contact.get("full_name", "") if isinstance(contact, dict) else ""
+    # ── 6. Fetch remaining context for email (task, project, vendor, template, PM, docs)
+    task_id = bid_package.get("task_id")
+    task = _query_one(db, "tasks", task_id) if task_id else None
+    task_name = task.get("name", "") if isinstance(task, dict) else ""
+    task_description = task.get("description", "") if isinstance(task, dict) else ""
 
-    # ── 6. Build context and render email ────────────────────────────────
+    project_id = task.get("project_id") if isinstance(task, dict) else None
+    project = _query_one(db, "projects", project_id) if project_id else None
+    project_name = project.get("name", "") if isinstance(project, dict) else ""
+    project_description = project.get("description", "") if isinstance(project, dict) else ""
+    project_location = ""
+    if isinstance(project, dict):
+        city = project.get("city", "") or ""
+        state = project.get("state", "") or ""
+        parts = [p for p in [city, state] if p]
+        project_location = ", ".join(parts) if parts else ""
+
+    vendor_id = invitation.get("vendor_id")
+    vendor = _query_one(db, "vendors", vendor_id) if vendor_id else None
+    company_name = vendor.get("company_name", "") if isinstance(vendor, dict) else ""
+
+    bid_template_id = bid_package.get("bid_template_id")
+    bid_template = _query_one(db, "bid_templates", bid_template_id) if bid_template_id else None
+    is_lump_sum = bid_template.get("is_lump_sum", True) if isinstance(bid_template, dict) else True
+    bid_format = "Lump Sum" if is_lump_sum else "Line-Item Breakdown"
+
+    pm_user_id = bid_package.get("created_by")
+    pm_user = _query_one(db, "users", pm_user_id) if pm_user_id else None
+    pm_name = pm_user.get("full_name", "") if isinstance(pm_user, dict) else ""
+    pm_email = pm_user.get("email", "") if isinstance(pm_user, dict) else ""
+
+    bp_docs_resp = (
+        db.table("bid_package_documents")
+        .select("project_document_id")
+        .eq("bid_package_id", str(bid_package_id))
+        .execute()
+    )
+    document_names: list[str] = []
+    for row in (bp_docs_resp.data or []):
+        doc = _query_one(db, "project_documents", row["project_document_id"])
+        if isinstance(doc, dict):
+            document_names.append(doc.get("file_name", ""))
+
+    # ── 7. Build context and render email ────────────────────────────────
     magic_link_url = f"{settings.PORTAL_BASE_URL}/bid/{raw_token}"
 
     context = {
         "vendor_contact_name": contact_name,
-        "magic_link_url": magic_link_url,
+        "vendor_company_name": company_name,
+        "project_name": project_name,
+        "project_location": project_location,
+        "project_description": project_description,
+        "task_name": task_name,
+        "task_description": task_description,
         "deadline": _format_deadline(deadline_str),
         "bid_deadline": _format_deadline(deadline_str),
+        "bid_format": bid_format,
+        "document_names": document_names,
+        "magic_link_url": magic_link_url,
+        "pm_name": pm_name,
+        "pm_email": pm_email,
     }
 
     html_body = template_renderer.render("bid_invitation.html", context)
     plain_text_body = template_renderer.render_text("bid_invitation.txt", context)
 
-    # ── 7. Send email ────────────────────────────────────────────────────
+    # ── 8. Send email ────────────────────────────────────────────────────
     email_result = await email_service.send_email(
         to_email=contact_email,
-        subject="Bid Invitation (Resent)",
+        subject="Bid Link (Resent)",
         html_body=html_body,
         plain_text_body=plain_text_body,
         email_type="bid_invitation",
@@ -515,12 +581,11 @@ async def resend_invitation(
         reference_id=str(invitation_id),
     )
 
-    # ── 8. Update invitation sent_at ─────────────────────────────────────
-    db.table("bid_invitations").update({
-        "sent_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", str(invitation_id)).execute()
+    # ── 9. Refresh sent_at only — status / opened_at stay intact ─────────
+    db.table("bid_invitations").update(
+        {"sent_at": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", str(invitation_id)).execute()
 
-    # ── 9. Return result ─────────────────────────────────────────────────
     return {
         "invitation_id": str(invitation_id),
         "vendor_id": invitation.get("vendor_id", ""),

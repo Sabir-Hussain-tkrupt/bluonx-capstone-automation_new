@@ -23,7 +23,7 @@ const canMarkStatus = (status: InvitationStatus) =>
 interface InvitationsTableProps {
   invitations: BidInvitation[];
   isLoading: boolean;
-  onResend: (invitationId: string) => void;
+  onResendBidLink: (invitationId: string) => void;
   onMarkDeclined: (invitationId: string) => void;
   resendingId: string | null;
   updatingId: string | null;
@@ -32,7 +32,7 @@ interface InvitationsTableProps {
 export function InvitationsTable({
   invitations,
   isLoading,
-  onResend,
+  onResendBidLink,
   onMarkDeclined,
   resendingId,
   updatingId,
@@ -93,11 +93,11 @@ export function InvitationsTable({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onResend(row.id)}
+              onClick={() => onResendBidLink(row.id)}
               isLoading={resendingId === row.id}
               disabled={!!resendingId || !!updatingId}
             >
-              Resend
+              Resend Bid Link
             </Button>
           )}
           {canMarkStatus(row.status) && (

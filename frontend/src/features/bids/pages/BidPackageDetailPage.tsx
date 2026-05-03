@@ -9,7 +9,7 @@ import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
 import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
-import { useResendInvitation } from '@/features/bids/hooks/useResendInvitation';
+import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
@@ -65,24 +65,24 @@ export function BidPackageDetailPage() {
   );
 
   // Mutations
-  const resendMutation = useResendInvitation(bidPackageId!);
+  const resendBidLinkMutation = useResendBidLink(bidPackageId!);
   const statusMutation = useUpdateInvitationStatus(bidPackageId!);
 
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-  const handleResend = (invitationId: string) => {
+  const handleResendBidLink = (invitationId: string) => {
     setResendingId(invitationId);
-    resendMutation.mutate(invitationId, {
+    resendBidLinkMutation.mutate(invitationId, {
       onSuccess: () => {
-        toast({ variant: 'success', message: 'Invitation resent.' });
+        toast({ variant: 'success', message: 'Bid link resent.' });
         setResendingId(null);
       },
       onError: (err) => {
         toast({
           variant: 'danger',
-          message: (err as { message?: string })?.message || 'Failed to resend.',
+          message: (err as { message?: string })?.message || 'Failed to resend bid link.',
         });
         setResendingId(null);
       },
@@ -233,7 +233,7 @@ export function BidPackageDetailPage() {
           <InvitationsTable
             invitations={bp.invitations}
             isLoading={false}
-            onResend={handleResend}
+            onResendBidLink={handleResendBidLink}
             onMarkDeclined={(id) => handleMarkStatus(id, 'declined')}
             resendingId={resendingId}
             updatingId={updatingId}

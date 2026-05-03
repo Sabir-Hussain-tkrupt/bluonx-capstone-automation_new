@@ -3,7 +3,7 @@ import { API_ENDPOINTS } from '@/constants/api';
 import type {
   CreateBidPackageRequest,
   CreateBidPackageResponse,
-  ResendInvitationResponse,
+  ResendBidLinkResponse,
   UpdateInvitationStatusRequest,
 } from '@/features/bids/types';
 
@@ -18,9 +18,9 @@ export async function createBidPackage(
   return data;
 }
 
-export async function resendInvitation(invitationId: string): Promise<ResendInvitationResponse> {
-  const { data } = await api.post<ResendInvitationResponse>(
-    API_ENDPOINTS.BID_INVITATION_RESEND(invitationId),
+export async function resendBidLink(invitationId: string): Promise<ResendBidLinkResponse> {
+  const { data } = await api.post<ResendBidLinkResponse>(
+    API_ENDPOINTS.BID_INVITATION_RESEND_LINK(invitationId),
   );
   return data;
 }
