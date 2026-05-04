@@ -1,6 +1,6 @@
 # Current Phase Tasks — BluOnX Development Operations Platform
 
-**Last Updated:** April 15, 2026
+**Last Updated:** May 1, 2026
 
 ---
 
@@ -8,206 +8,237 @@
 ## Phase 2: Frontend Foundation, Backend API & Auth (100h) — ✅ COMPLETE
 ## Phase 3: Core Entity Management (76h) — ✅ COMPLETE
 ## Phase 4: Bid Invitation System (50h) — ✅ COMPLETE
+## Phase 5: Bid Collection — Custom Secure Forms (60h) — ✅ COMPLETE
 
-**Deferred from Phase 1 (see `docs/DEFERRED.md`):**
+**Deferred (see `docs/DEFERRED.md`):**
 - Task 1.8 — Dev/staging environment separation
 - Task 1.9 — AWS infrastructure setup (pending client credentials)
 
 ---
 
-## Phase 5: Bid Collection — Custom Secure Forms (60h) — 🔄 IN PROGRESS
+## Phase 6: Real-Time Dashboard & Visibility (~30h) — 🔄 IN PROGRESS
 
-**Goal:** Build the vendor-facing bid submission portal. Vendors click a magic link from their invitation email (Phase 4), authenticate via token → JWT, and submit their bid through a multi-step form. Form structure comes from the bid template selected during bid package creation. Vendors can save drafts, upload documents, and receive a submission confirmation with PDF receipt.
+**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, and visual breakdowns of in-flight bids — while cleaning up the Phase 4/5 lifecycle gaps that block the visibility work from being meaningful.
 
-**Tables written:** `bid_submissions`, `bid_line_items`, `bid_attachments`, `magic_link_tokens` (update `is_used`/`used_at`), `bid_invitations` (status sync via existing trigger)
+**Tables read:** `bid_packages`, `bid_invitations`, `bid_submissions`, `bid_line_items`, `tasks`, `projects`, `vendors`, `magic_link_tokens`
 
-**Tables read:** `bid_packages`, `bid_package_documents`, `bid_invitations`, `magic_link_tokens`, `bid_templates`, `bid_template_items`, `vendors`, `vendor_contacts`, `projects`, `project_documents`, `tasks`, `trades`
+**Tables written:** `bid_invitations` (status transitions for `opened` and `expired`)
 
-### Key Domain Rules for Phase 5
+### Architecture Context (carry forward from prior phases)
 
-- **Vendors NEVER access Supabase directly.** All vendor interactions go through FastAPI exclusively. The portal does NOT use the Supabase JS client. RLS has no anon policies.
-- **Magic link auth flow:** Vendor clicks URL → FastAPI validates token hash → issues short-lived vendor JWT (2–4 hours) → vendor uses JWT for all portal API calls. If JWT expires, vendor clicks magic link again and resumes from draft.
-- **Token lifecycle (from Phase 4):** Raw token in URL, SHA-256 hash stored in `magic_link_tokens`. `expires_at` matches `bid_packages.deadline` (NOT fixed 24-48h). `is_used` tracks first click but token remains valid for re-entry until deadline passes or bid package cancelled.
-- **One submission per invitation:** `bid_submissions.bid_invitation_id` has UNIQUE constraint.
-- **Draft auto-save:** Submissions start as drafts (`is_draft = TRUE`). Auto-save every 2 min. On final submit: `is_draft = FALSE`, `status = 'submitted'`, `submitted_at = NOW()`. Trigger `fn_sync_bid_invitation_on_submission` auto-updates invitation status.
-- **Template determines form:** `is_lump_sum = TRUE` → single total field. `is_lump_sum = FALSE` → pre-populated line items from `bid_template_items`.
-- **File uploads:** `bid-attachments` bucket, path `{bid_submission_id}/{filename}`. FastAPI service_role. PDF/JPEG/PNG, max 10MB.
-- **Denormalized consistency:** `bid_submissions.vendor_id` enforced by trigger — must match `bid_invitations.vendor_id`. API resolves from invitation, never trusts client.
-- **No Supabase Auth for vendors.** Vendor JWT is custom (PyJWT), NOT Supabase JWT. Contains: `vendor_id`, `bid_invitation_id`, `bid_package_id`, `vendor_contact_id`, `task_id`, `exp`. Signed with `VENDOR_JWT_SECRET` (separate from Supabase secret).
-- **Synthetic submissions** (`is_direct_assign = TRUE`) are Phase 9. Phase 5 only handles competitive bids.
+- **Refresh model — intentional, no changes.** Reads use the existing global QueryClient defaults: `staleTime: 2min`, `refetchOnWindowFocus: true`, `refetchOnMount: true`, `refetchOnReconnect: 'always'`. Mutations invalidate query keys in `onSuccess`. **No polling (`refetchInterval`) and no Supabase Realtime subscriptions are added in Phase 6.** The existing `useRealtimeSubscription` and `useRealtimeQueryInvalidation` hooks remain in the codebase but unused — they are intentional dormant infrastructure for post-MVP if needed.
+- **Why no real-time?** The current event-driven refresh (focus + interaction + invalidation) covers the actual PM workflow for a small (≤10) team with low write frequency. Bid submissions arrive over days, not seconds. Adding polling or WebSockets would be net-negative — extra load and complexity for no perceived UX gain.
+- **Reads:** Continue using Supabase JS client with RLS for authenticated dashboard reads. Writes via FastAPI (service_role).
+- **Routing:** All new pages live under the existing admin layout and are wrapped by the standard `ProtectedRoute`. No new role-based gating in Phase 6 — both `admin` and `project_manager` see the same dashboard and bid package list.
+- **Charts library:** Recharts. To be added to `frontend/package.json` in Task 6.4. Declarative JSX-based, SVG output, plays well with TailwindCSS theme tokens.
 
----
+### Key Domain Rules for Phase 6
 
-### Task 5.1: Design Custom Bid Submission UI (12h) — ✅ COMPLETE
-
-**This is a SEPARATE route tree and layout from the admin dashboard.** Same React+Vite project but different layout (no sidebar), different auth (vendor JWT, not Supabase Auth). Vendors may fill this on a phone from a job site — mobile-first.
-
-**Portal layout:** Clean header (BluOnX logo + project name + vendor name), progress stepper, footer ("Powered by BluOnX"). No sidebar. Mobile-first 320px+.
-
-**Multi-step form — 4 steps:**
-
-**Step 1 — Info & Docs:** Pre-filled read-only vendor fields (company, contact name/email/phone). Read-only project context panel (project name, location, task name/description, deadline countdown, and **PM-supplied bid instructions** if present — sourced from `bid_packages.instructions`, optional, displayed in a callout box only when non-empty). **Project Documents card** — read-only list of project docs attached to this bid package, with download links (signed URLs from FastAPI). Documents are placed here intentionally so vendors can review plans/specs/drawings BEFORE deciding to bid and BEFORE entering pricing.
-
-**Step 2 — Pricing:**
-- Lump sum: single "Total Bid Amount" currency input → `bid_submissions.total_amount`
-- Structured: table from `bid_template_items` — Description (read-only), Type badge, UoM (read-only), Qty input (unit_price only), Unit Price input (unit_price only), Lump Sum Amount input (lump_sum only), auto-calculated Line Total. Grand total at bottom → `bid_submissions.total_amount`. All amounts required, ≥ 0, total > 0.
-- The bid template is selected by the PM during bid package creation (Phase 4 — Task 4.4). The template ID is stored in `bid_packages.bid_template_id`. Template items (`bid_template_items`) are used ONLY to populate the form structure. The actual vendor input is stored in `bid_submissions` + `bid_line_items` (description, item_type, unit_of_measure, sort_order are copied from the template into `bid_line_items` to decouple submissions from future template edits).
-
-**Step 3 — Notes & Uploads:** Editable `vendor_notes` textarea (max 2000 chars) — labeled "Notes to Owner". Vendor upload section (drag-and-drop, multiple files, PDF/JPEG/PNG, ≤10MB, immediate upload, progress bar, delete). Notes and uploads are grouped together since both are vendor-supplied additions to their bid.
-
-**Step 4 — Review & Submit:** Full summary with "Edit" links per section (Info, Pricing, Notes & Attachments). "Save Draft" + "Submit Bid" buttons. Confirmation dialog on submit (centered vertically on mobile via shared `Modal` `mobileCenter` prop, NOT bottom-sheet). On success → confirmation page.
-
-**Progress stepper:** 4 steps labeled "Info & Docs / Pricing / Notes & Uploads / Review". Clickable completed steps, no skip ahead. Horizontal desktop, compact mobile.
-
-**Draft indicator:** "Last saved at {time}", "Unsaved changes" when dirty, amber draft badge.
-
-**Auto-save:** `useAutoSave` hook — 2-min interval, saves if dirty, updates lastSavedAt. Also saves on page blur.
-
-**State management:** useReducer for form state across steps. On load: if draft exists in bid_context, pre-populate. Validate current step before allowing next.
-
-**Suggested file structure:**
-```
-frontend/src/features/vendor-portal/
-├── components/       # PortalLayout, ProgressStepper, each Step component, LineItemsTable, DraftIndicator, BidDeadlineCountdown, ConfirmSubmitDialog
-├── hooks/            # useBidSubmission, useBidContext, useAutoSave
-├── pages/            # MagicLinkLandingPage, BidFormPage, SubmissionConfirmation, error pages
-├── services/         # portalApi.ts (Axios instance with vendor JWT)
-└── types/            # portal.ts
-```
-
-**Vendor JWT handling:** Stored in React state/context. Axios interceptor adds Bearer header. On 401 → redirect to session expired page.
-
-**Implementation status:** Frontend shell is complete with mock data (Summit Earthworks vendor, Phoenix Logistics Park project). All 4 steps render correctly across mobile/tablet/desktop. Real backend wiring happens in Tasks 5.2–5.5. The shared `Modal` component now supports a `mobileCenter` prop for centered mobile dialogs.
+- **Bid invitation status lifecycle is finalized in Task 0.** After Task 0, the active states are: `sent` → `opened` → `submitted` (or `declined` / `expired`). `no_response` remains in the schema and API for backward compat but is removed from the UI. PMs can still manually mark `declined`. `opened` is set automatically when a vendor first validates their magic link. `expired` is set lazily when a PM views a bid package whose deadline has passed.
+- **No completeness checker.** Phase 5's multi-step form prevents incomplete submissions by design — vendors cannot reach the Submit step without filling required pricing and step validation. By the time `bid_submissions.status = 'submitted'`, the bid is complete by construction. There is no missing-pieces state to detect.
+- **No timeline / activity feed.** Phase 10 will introduce notifications (`notifications` table, already in schema), which will naturally power any "what happened recently" UI. Building a separate Activity feed in Phase 6 would duplicate that work.
+- **Direct assign and internal tasks are out of scope** for Phase 6 dashboards. Phase 6 visibility focuses on `competitive` bids (the only flow currently producing live data).
 
 ---
 
-### Task 5.2: Build Magic Link Authentication System (12h)
+### Task 6.1: Wire Up Real Dashboard Counts (~3–4h)
 
-**Frontend — Landing Page (`/bid/{token}`):** Show spinner, call validate endpoint, on success store JWT + redirect to form. Handle error states: 410 expired, 404 invalid, 409 already submitted, 423 bid closed.
+**Current state:** `frontend/src/features/dashboard/pages/DashboardPage.tsx` exists as a stub. It shows 4 stat cards — "Active Projects" and "Active Vendors" are wired via Supabase count queries; "Open Tasks" and "Pending Bids" are hardcoded to `--`. Three quick-nav cards link to Vendors, Projects, and Settings.
 
-**Backend — `POST /v1/vendor-auth/validate-token`:**
-1. SHA-256 hash the raw token from request body
-2. Look up in `magic_link_tokens` → 404 if not found
-3. Check `expires_at > NOW()` → 410 if expired
-4. Check `bid_packages.status = 'open'` → 423 if cancelled/closed
-5. Check if `bid_submission` with `status = 'submitted'` exists for this invitation → 409
-6. If `is_used = FALSE`: set `TRUE`, record `used_at`, `ip_address`
-7. Issue vendor JWT (HS256, `VENDOR_JWT_SECRET`, 4h expiry) with `vendor_id`, `vendor_contact_id`, `bid_invitation_id`, `bid_package_id`, `task_id`, `type: "vendor_portal"`
-8. Return JWT + full `bid_context`: vendor info, project/task info, **`bid_packages.instructions`** (PM-supplied bid guidance, optional), bid template with items, project documents list, existing draft (if any) — everything the form needs in ONE call
+**Goal:** Make every stat card show real data. Add one more card if the cleanup makes it natural.
 
-**Backend — Vendor JWT middleware (`get_vendor_context`):** FastAPI dependency for all `/v1/vendor-portal/*` endpoints. Extracts Bearer token, validates signature + expiration, returns `VendorContext` dataclass. Separate from admin JWT middleware.
+**Sub-tasks:**
 
-**Rate limiting:** 10 req/IP/min on token validation. IP logged in `magic_link_tokens`.
+- **Open Tasks count.** A task is "open" if `tasks.deleted_at IS NULL` AND `tasks.status` is one of `bidding`, `evaluating`, or `awarded` (i.e., active work, not `draft`, `completed`, or `cancelled`). Use a Supabase `count` query, same pattern as the existing two cards.
+- **Pending Bids count.** A bid package is "pending" if `bid_packages.status = 'open'`. Count distinct bid packages, not invitations. (Alternative interpretation: count bid packages with at least one invitation in `sent` or `opened` state. Go with the simpler `status = 'open'` reading for v1.)
+- **Optional fourth metric: "Awards This Month."** Count of `awards` rows where `awarded_at >= start_of_current_month` and `status` in (`pending_acceptance`, `accepted`). Adds a forward-looking signal without much work. Include if it slots cleanly; skip if the layout fights it.
+- **Loading and empty states.** Each card shows a skeleton while loading; shows `0` (not `--`) when data resolves to zero. The hardcoded `--` placeholders go away.
+- **No clickability changes** — these are display-only stat cards. The quick-nav cards below already handle navigation.
 
----
-
-### Task 5.3: Implement Form Backend API (8h)
-
-**Base path:** `/v1/vendor-portal` — all endpoints use vendor JWT middleware.
-
-1. **`GET /v1/vendor-portal/bid-context`** — Re-fetch bid context (same shape as token validation response).
-
-2. **`POST /v1/vendor-portal/submissions`** — Create draft. Resolve `vendor_id` from JWT (never from body). Check bid package open + deadline. 409 if submission already exists. Create `bid_submissions` (`is_draft=TRUE`) + `bid_line_items`.
-
-3. **`PUT /v1/vendor-portal/submissions/{id}`** — Update draft. Validate belongs to vendor, `is_draft=TRUE`, deadline not passed. Update fields. Replace all line items (delete + re-insert).
-
-4. **`POST /v1/vendor-portal/submissions/{id}/submit`** — Finalize. Run validation (Task 5.4). Set `is_draft=FALSE`, `status='submitted'`, `submitted_at=NOW()`. Send confirmation email + generate PDF. Return confirmation.
-
-5. **`GET /v1/vendor-portal/submissions/{id}`** — Get submission details.
-
-6. **`GET /v1/vendor-portal/documents/{project_document_id}/download`** — Signed URL for project doc. Validate doc is part of this bid package.
-
-**Error patterns:** 401 invalid JWT, 409 conflict, 422 validation, 423 deadline passed/closed.
+**Sub-task notes:**
+- All four counts run as parallel `useQuery` calls; React Query handles independent loading states naturally.
+- Use the existing `staleTime: 2min` default. Do not add `refetchInterval`. Stat cards refresh on tab focus, which is the right cadence.
 
 ---
 
-### Task 5.4: Build Form Validation Logic (6h)
+### Task 6.2: "My Active Projects" Card on Dashboard (~4–5h)
 
-**Client-side (React Hook Form):** Per-step validation. Step 2 (Pricing): all pricing fields required, ≥ 0, total > 0. Step 3 (Notes & Uploads): notes ≤ 2000 chars, file type/size on drop. Step 4: re-validate all before submit.
+**Goal:** Give PMs a real landing surface. Below the stat cards, add a card showing each active project the team is currently running, with a one-line status summary. This replaces the abstract numbers with something a PM can act on.
 
-**Server-side (submit endpoint):** Total > 0, all line items valid, item count matches template, line totals correctly calculated, grand total = sum of lines, notes ≤ 2000, bid package open + deadline not passed. Return 422 with field-level error array on failure.
+**Card layout:**
 
-**Template pre-population:** Description, item_type, unit_of_measure, sort_order copied from template INTO `bid_line_items`. Decouples submission from future template edits.
+- Section header: "Active Projects" with a "View all" link → navigates to the existing projects list page.
+- For each project where `projects.deleted_at IS NULL` AND `projects.archived_at IS NULL` AND `projects.status = 'active'`:
+  - Project name (clickable → project detail page)
+  - Subtitle: `{city}, {state}` if available, otherwise blank
+  - Right-aligned summary chips: count of tasks in each state, e.g., `3 bidding · 2 evaluating · 1 awarded`. Skip chips with zero counts.
+  - Project budget on the far right (if set), formatted as currency.
+- Empty state: friendly message — "No active projects yet" with a "Create Project" call-to-action button (links to existing project creation flow).
+- Limit to first 5 projects (sorted by `updated_at DESC`); "View all" handles overflow.
 
----
+**Data fetching:**
 
-### Task 5.5: Implement File Upload for Vendors (6h)
+- One Supabase query joining `projects` and `tasks` to compute the per-project task-status counts in a single round trip. If grouping in Supabase is awkward, two queries (projects, then tasks-by-project) and group client-side is also fine.
+- Reuse the existing `useProjects` hook pattern if it cleanly extends; otherwise create a focused `useDashboardActiveProjects` hook in `frontend/src/features/dashboard/hooks/`.
+- Same QueryClient defaults — no polling.
 
-**`POST /v1/vendor-portal/submissions/{id}/attachments`** — Upload. Vendor JWT auth. Validate draft state, MIME (PDF/JPEG/PNG), size ≤ 10MB. Upload to `bid-attachments` bucket: `{bid_submission_id}/{filename}`. Create `bid_attachments` row.
+**Mobile:** Project rows stack vertically; status chips wrap below the project name on narrow screens.
 
-**`DELETE /v1/vendor-portal/submissions/{id}/attachments/{attachment_id}`** — Remove. Validate draft. Delete from storage + DB.
-
-**`GET /v1/vendor-portal/submissions/{id}/attachments`** — List.
-
-Sanitize filenames, handle collisions with suffix.
-
----
-
-### Task 5.6: Build Draft Save Functionality (6h)
-
-**Auto-save (frontend):** `useAutoSave` hook — 2-min interval, saves if dirty. Save on page blur. Retry on failure.
-
-**Draft flow:** First save → POST creates draft → subsequent saves → PUT updates. Returning vendor: `existing_draft` in bid_context pre-populates form, all saves use PUT.
-
-**Deadline during session:** Next save gets 423 → modal "Deadline passed." Disable submit.
-
-**Race condition:** Concurrent POST returns 409 with existing draft ID → switch to PUT.
+**Out of scope:**
+- Per-project deadline countdowns (potentially noisy)
+- Per-project award totals or burn-rate calculations (Phase 8/post-MVP territory)
+- Filter / sort controls — the projects list page already has those
 
 ---
 
-### Task 5.7: Create Submission Confirmation Flow (6h)
+### Task 6.3: Bid Package List View (~6–8h)
 
-**Confirmation page:** Success message, summary (vendor company, project name, task name, total bid amount, submission timestamp), email notice. No confirmation number — `bid_submissions.id` is sufficient as a unique reference. No PDF receipt — confirmation email serves as the receipt.
+**Goal:** Bid packages currently exist only as nested children of tasks — the only way to find them is to navigate Project → Task → Bid Packages section. As bids accumulate across multiple projects, PMs need a cross-task overview to see all in-flight bidding work in one place.
 
-**Confirmation email:** Jinja2 template — greeting ("Your bid for {task_name} on {project_name} has been received"), submission summary (total amount, submission timestamp, documents uploaded count), general next steps ("You will be notified of the award decision" — no deadline mention). Send via EmailService, log in `email_log`.
+**New page:** `/bid-packages` (route already-conceivable; sidebar nav addition needed)
+
+**Page layout:**
+
+- Header: "Bid Packages"
+- Filter bar:
+  - Status filter (chips or dropdown): All / Open / Closed / Evaluating / Cancelled
+  - Project filter (dropdown of active projects)
+  - Sort: Deadline (default ascending), Created Date, Project Name
+- Main table (one row per bid package):
+  - Project name (clickable → project detail)
+  - Task name (clickable → task detail)
+  - Round number (badge — `R1`, `R2`, etc.)
+  - Deadline (with countdown — "in 3 days", "passed 2 days ago"). Reuse the existing countdown pattern from `BidPackageDetailPage`.
+  - Status badge
+  - Submission progress: `{submitted_count} / {total_invitations}` with a small inline bar
+  - Created Date (sortable)
+  - Click row → navigates to `BidPackageDetailPage`
+
+**Data fetching:**
+
+- New endpoint: `GET /v1/bid-packages` with query params for `status`, `project_id`, `sort_by`, `sort_order`. Returns bid packages with denormalized project/task names and submission counts (compute counts in SQL — don't push that to the client).
+- Or, if the team prefers staying in Supabase JS client land: a view or RPC that returns the same denormalized shape. FastAPI is the more consistent choice given Phase 4's pattern.
+- Use a single hook `useBidPackagesList(filters)` with React Query.
+
+**Sidebar navigation:**
+
+- Add a new top-level nav item: "Bids" (or "Bid Packages") with an appropriate icon. Position it between "Projects" and "Vendors" or similar — wherever it fits the existing visual flow.
+
+**Empty / loading states:**
+
+- Skeleton rows while loading
+- Empty state when no bid packages exist: "No bid packages yet. Start bidding on a task to create one." with a link back to projects.
+- Empty state with active filters: "No bid packages match these filters" with a "Clear filters" button.
+
+**Mobile:**
+
+- Table becomes a card list — each card shows project/task as the heading, with deadline + status + progress as bullets below.
+- Filter bar collapses into a single "Filters" button that opens a sheet/drawer.
+
+**Out of scope:**
+- Bulk actions on bid packages (cancel multiple, etc.) — not needed
+- Inline detail expansion — clicking the row goes to the detail page, that's enough
 
 ---
 
-### Task 5.8: Implement Vendor Portal Routing (4h)
+### Task 6.4: Charts on Bid Package Detail Page (~6–8h)
 
-**Routes:**
-```
-/bid/:token              → MagicLinkLandingPage (validate + redirect)
-/bid/form                → BidFormPage (requires vendor JWT)
-/bid/submitted/:id       → SubmissionConfirmation
-/bid/expired             → TokenExpiredPage
-/bid/invalid             → InvalidTokenPage
-/bid/closed              → BiddingClosedPage
-/bid/already-submitted   → AlreadySubmittedPage
-```
+**Goal:** Add two visual breakdowns to the existing Bid Package Detail Page. The summary cards already show counts; charts add comparative shape.
 
-**`VendorPortalGuard`:** Checks vendor JWT in context → redirects to `/bid/expired` if missing. Wraps `/bid/form` and `/bid/submitted/*`.
+**Library:** Recharts. Add to `frontend/package.json`. No global config needed.
 
-Portal routes use `PortalLayout`, admin routes use existing dashboard layout. Both coexist, differentiated by route prefix. Portal routes are PUBLIC (no Supabase auth).
+**Chart 1: Submission Status Pie**
+
+- Placement: Right column or top-of-page panel on the bid package detail layout — wherever fits cleanly alongside the existing four summary cards. Could replace one of the cards if the design works better that way.
+- Data: same `invitation_summary` object already returned by `GET /v1/bid-packages/{id}` — no new endpoint. Slices: `sent`, `opened`, `submitted`, `declined`, `expired`. Skip `no_response` (now UI-suppressed per Task 0).
+- Color tokens: reuse the same palette already used by the `StatusBadge` component to keep visual consistency. Sent = blue, opened = yellow, submitted = green, declined = red, expired = gray.
+- Tooltip on hover: status name + count + percentage.
+- Empty state: if all counts are zero (shouldn't happen post-invitation-send), show a placeholder rather than an empty pie.
+
+**Chart 2: Bid Amount Comparison Bar**
+
+- Placement: New section below the invitations table, titled "Bid Amounts" or "Submitted Bids."
+- Data: pull `bid_submissions` rows for this bid package where `status = 'submitted'`. Need a new endpoint or extend the existing detail response to include submitted bid totals. Recommend extending the detail response — keeps the page on one fetch.
+- Chart shape: horizontal bar chart, one bar per submitted bid, labeled with vendor company name. X-axis is `total_amount` formatted as currency.
+- If `tasks.budget_estimate` is set, draw a vertical reference line at that value labeled "Budget Estimate."
+- Sort bars by amount ascending (lowest bid at top — visually leads the eye to the likely winner).
+- Empty state: if no bids submitted yet, show a message: "No bids submitted yet. Bar chart will appear once vendors submit bids."
+
+**Chart placement and responsive behavior:**
+
+- Desktop: pie chart in the upper-right of the page (next to or replacing the summary cards row), bar chart full-width below the invitations table.
+- Mobile: both charts stack vertically full-width. Pie chart fixed aspect ratio; bar chart scrolls horizontally if vendor names are long.
+
+**Sub-task notes:**
+- Pull this work in only after Task 0 is complete. Otherwise the pie chart is permanently a two-slice chart (sent + submitted only).
+- Do not generalize charts into a shared "Chart" component yet. Keep them feature-local in `frontend/src/features/bids/components/`. Generalize only if Task 6.5 polish reveals overlap.
+
+**Out of scope:**
+- Score-comparison radar chart (Phase 8 — proper bid comparison)
+- Submission timeline chart (added value unclear; status badges + timestamps in the table already convey this)
+- Export to image / PDF (Phase 8 / post-MVP)
 
 ---
 
-## Phase 5 Acceptance Criteria
+### Task 6.5: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
 
-- [ ] Magic link validates token, issues vendor JWT, handles expired/invalid/submitted/closed
-- [ ] Re-entry works: vendor clicks magic link again after JWT expiry, resumes from draft
-- [ ] Vendor JWT separate from Supabase JWT, dedicated secret, rate-limited
-- [ ] Multi-step form works on mobile 320px+, tablet, desktop
-- [ ] Step 2 renders lump sum OR structured line items from bid template
-- [ ] Line totals and grand total auto-calculate
-- [ ] File uploads validate type/size, upload immediately, show progress
-- [ ] Auto-save every 2 min, manual save, draft indicator
-- [ ] Returning vendor resumes from draft
-- [ ] Submit requires confirmation, submitted bid locked (409 on updates)
-- [ ] Invitation status auto-updated via trigger
-- [ ] Confirmation page + email + PDF receipt
-- [ ] Portal layout professional, distinct from admin
-- [ ] All vendor calls through FastAPI, zero direct Supabase
-- [ ] Server-side validation on submit, consistency trigger passes
-- [ ] Deadline expiration during session gracefully handled
+**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
+
+**Sub-tasks:**
+
+- **Loading skeletons** for: dashboard stat cards (Task 6.1), Active Projects card (Task 6.2), bid packages list page (Task 6.3), both charts (Task 6.4). Reuse the existing skeleton primitives if they exist; create minimal new ones if needed.
+- **Empty states** for the same surfaces, with consistent voice and call-to-action style. Match the tone of existing empty states in the projects/vendors lists.
+- **Mobile pass.** Walk through dashboard, bid packages list, bid package detail (with charts) on a phone-width viewport. Adjust layout where things break.
+- **Responsive table → card transformations.** Bid packages list specifically — verify the card view on mobile is clean.
+- **Loading transitions.** No layout-shift between skeleton and real content. No flash-of-zero before the count loads.
+
+**Out of scope:**
+- Animations beyond the existing default transitions
+- Dark mode (not in MVP)
+- Accessibility audit (Phase 12 territory)
+
+---
+
+## Phase 6 Acceptance Criteria
+
+- [ ] Magic link validation transitions `sent` → `opened` exactly once
+- [ ] Lazy `expired` transition applied when PM views a past-deadline bid package
+- [ ] "Mark No Response" no longer in the invitations table UI
+- [ ] `responded_at` populated when marking declined
+- [ ] `PUT /status` rejects overwrites of `submitted` invitations (409)
+- [ ] Resend rejects past-deadline attempts (400)
+- [ ] Dashboard stat cards all show real data, no `--` placeholders
+- [ ] Active Projects card on dashboard, sorted by recent activity, empty state handled
+- [ ] Bid Package list page accessible from sidebar, filters and sort working
+- [ ] Submission status pie chart displays on bid package detail with correct colors
+- [ ] Bid amount comparison bar chart displays once submissions exist; budget reference line if set
+- [ ] All new surfaces have skeletons and empty states
+- [ ] Mobile layout verified for dashboard, bid packages list, bid package detail with charts
+- [ ] No `refetchInterval` added; refresh model unchanged from prior phases
+- [ ] No Realtime subscriptions added; existing dormant hooks remain untouched
+- [ ] Recharts added to `package.json`; no other charting library introduced
+
+---
+
+## What Phase 6 Intentionally Does NOT Include
+
+- **No polling / `refetchInterval`.** The existing `staleTime + refetchOnWindowFocus + mutation invalidation` model is the right design for ≤10 PMs and low-frequency writes. Adding polling would be net-negative.
+- **No Supabase Realtime subscriptions.** Existing hooks (`useRealtimeSubscription`, `useRealtimeQueryInvalidation`) remain in the codebase as dormant infrastructure for post-MVP. No tables added to `supabase_realtime` publication in this phase.
+- **No completeness checker.** The Phase 5 form prevents incomplete submissions structurally — there's no incomplete state to detect post-submission.
+- **No timeline / activity feed component.** Phase 10's notifications system will provide cross-project event visibility. Building a parallel activity feed now would duplicate that work.
+- **No score-comparison radar chart.** Phase 8 (Bid Comparison & Scoring) owns that work.
+- **No CSV / PDF exports.** Phase 8 / post-MVP.
+- **No fix for the resend token invalidation bug.** Documented in `docs/DEFERRED.md`. Out of scope for Phase 6.
 
 ---
 
 ## Next Phase Preview
 
-**Phase 6: Real-Time Dashboard (60h)** — Supabase Realtime, live bid status, charts, completeness checker.
-**Phase 7: Reminder & Alert System (44h)** — n8n bid reminders (T-7/T-3/T-0), doc expiration monitoring.
-**Phase 8: Bid Comparison & Scoring (40h)** — Normalization, weighted scoring, comparison UI.
+**Phase 7: Reminder & Alert System (44h)** — n8n workflows for bid reminders (T-7, T-3, T-0), document expiration monitoring (T-30, T-7), tiered email templates, escalation alerts.
+
+**Phase 8: Bid Comparison & Scoring (40h)** — Bid normalization across pricing formats, weighted scoring algorithm (50/5/20/10/15), side-by-side comparison UI with the Recharts foundation from Phase 6.
+
+**Phase 9: Award Decision & Contract Generation (40h)** — Pre-award validation, DocuSign integration, award/decline notifications, direct assign synthetic submission flow.
 
 ---
 
@@ -215,5 +246,7 @@ Portal routes use `PortalLayout`, admin routes use existing dashboard layout. Bo
 
 - Full project plan: `docs/PROJECT_PLAN.pdf` (v2.1, 12 phases, ~718h)
 - Database schema: `database/bluonx_complete_schema_v2_2.sql`
+- RLS policies: `database/rls_policies.sql`
+- Storage policies: `database/storage_rls_policies.sql`
 - Handoff document: `docs/BluOnX_Context_Handoff.md`
 - Deferred tasks: `docs/DEFERRED.md`
