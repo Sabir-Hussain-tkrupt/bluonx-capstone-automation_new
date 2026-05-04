@@ -78,6 +78,7 @@ async def update_invitation_status_endpoint(
         return await update_invitation_status(
             invitation_id=invitation_id,
             new_status=payload.status,
+            current_user_id=UUID(user["user_id"]),
             db=db,
         )
     except InvitationTrackingError as exc:

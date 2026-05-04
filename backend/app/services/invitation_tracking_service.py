@@ -310,10 +310,15 @@ async def list_invitations(
 
 
 async def update_invitation_status(
-    *, invitation_id: UUID, new_status: str, db
+    *, invitation_id: UUID, new_status: str, current_user_id: UUID | None = None, db
 ) -> dict:
     """Update invitation status. Only declined/expired/no_response are
-    PM-settable. Other values → 400."""
+    PM-settable. Other values → 400.
+
+    On a successful transition, all magic_link_tokens for this invitation are
+    hard-revoked (is_used=True, revoked_at=NOW(), revoked_by=current_user_id)
+    so the vendor can no longer enter the portal via an old link.
+    """
     if new_status not in _PM_SETTABLE_STATUSES:
         raise InvalidStatusError(
             f"Status '{new_status}' cannot be set by PM. "
@@ -346,6 +351,20 @@ async def update_invitation_status(
     row = _unwrap_one(updated_resp.data)
     if row is None:
         raise InvitationNotFoundError()
+
+    # Hard-revoke all magic-link tokens for this invitation so the vendor
+    # cannot re-enter the portal via a stale link.
+    revoke_payload: dict = {
+        "is_used": True,
+        "revoked_at": _now_iso(),
+        "revoked_by": str(current_user_id) if current_user_id else None,
+    }
+    (
+        db.table("magic_link_tokens")
+        .update(revoke_payload)
+        .eq("bid_invitation_id", str(invitation_id))
+        .execute()
+    )
 
     # Tests assert 'updated_at' in result — guarantee it even if mock
     # didn't propagate the payload.
