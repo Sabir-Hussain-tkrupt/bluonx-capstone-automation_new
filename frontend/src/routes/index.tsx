@@ -22,6 +22,7 @@ import { TaskDetailPage } from '@/features/projects/pages/TaskDetailPage';
 import { BidManagementPage } from '@/features/bids/pages/BidManagementPage';
 import { BidPackageCreatePage } from '@/features/bids/pages/BidPackageCreatePage';
 import { BidPackageDetailPage } from '@/features/bids/pages/BidPackageDetailPage';
+import { BidPackageListPage } from '@/features/bids/pages/BidPackageListPage';
 import { AwardPage } from '@/features/contracts/pages/AwardPage';
 import { BidTemplateListPage } from '@/features/bid-templates/pages/BidTemplateListPage';
 import { BidTemplateDetailPage } from '@/features/bid-templates/pages/BidTemplateDetailPage';
@@ -84,6 +85,7 @@ export function AppRoutes() {
         <Route path={ROUTES.BID_PACKAGE_DETAIL} element={<BidPackageDetailPage />} />
         <Route path={ROUTES.BID_MANAGEMENT} element={<BidManagementPage />} />
         <Route path={ROUTES.AWARD} element={<AwardPage />} />
+        <Route path={ROUTES.BID_PACKAGES} element={<BidPackageListPage />} />
         <Route path={ROUTES.BID_TEMPLATES} element={<BidTemplateListPage />} />
         <Route path={ROUTES.BID_TEMPLATE_NEW} element={<BidTemplateFormPage />} />
         <Route path={ROUTES.BID_TEMPLATE_DETAIL} element={<BidTemplateDetailPage />} />

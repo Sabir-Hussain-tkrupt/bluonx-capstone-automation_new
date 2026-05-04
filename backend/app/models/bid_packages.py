@@ -158,3 +158,28 @@ class EmailLogResponse(BluOnXBase):
     """Response for GET /v1/bid-packages/{bid_package_id}/email-log."""
 
     items: list[EmailLogItem]
+
+
+# ── Task 6.2: Cross-project bid package list ─────────────────────────────
+
+
+class BidPackageListItem(BluOnXBase):
+    """A single row in the cross-project bid package list view."""
+
+    id: UUID
+    task_id: UUID
+    task_name: str
+    project_id: UUID
+    project_name: str
+    round_number: int
+    deadline: datetime
+    status: str
+    total_invitations: int
+    submitted_count: int
+    created_at: datetime
+
+
+class BidPackageListResponse(BluOnXBase):
+    """Response for GET /v1/bid-packages."""
+
+    items: list[BidPackageListItem]

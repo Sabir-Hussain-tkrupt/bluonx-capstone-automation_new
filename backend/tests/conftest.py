@@ -9,18 +9,26 @@ import os
 
 import httpx
 import pytest
+from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
-# Ensure the backend .env is loaded before importing app modules
-os.environ.setdefault("DOTENV_PATH", os.path.join(os.path.dirname(__file__), "..", ".env"))
+# Load backend/.env into os.environ before anything else so that
+# os.getenv(...) below picks up TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD.
+# pydantic-settings reads .env into the Settings class only — it does
+# not populate os.environ.
+_BACKEND_ENV = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(_BACKEND_ENV)
 
 from app.main import app  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 
 # ── Test user credentials (pre-created in Supabase) ─────────────────────
-TEST_ADMIN_EMAIL = "admin@bluonx.dev"
-TEST_ADMIN_PASSWORD = "TestPassword123!"
+TEST_ADMIN_EMAIL = os.getenv("TEST_ADMIN_EMAIL")
+TEST_ADMIN_PASSWORD = os.getenv("TEST_ADMIN_PASSWORD")
+assert TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD, (
+    "TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set in backend/.env"
+)
 
 
 @pytest.fixture(scope="session")
