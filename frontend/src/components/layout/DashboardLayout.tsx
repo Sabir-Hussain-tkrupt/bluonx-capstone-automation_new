@@ -61,6 +61,13 @@ export function DashboardLayout() {
             icon: <NavIcon d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />,
           },
           {
+            id: 'bids',
+            label: 'Bids',
+            href: ROUTES.BID_PACKAGES,
+            // Document-stack icon: front sheet with a back sheet peeking out.
+            icon: <NavIcon d="M5 4a2 2 0 012-2h6a2 2 0 012 2v1H5V4zm-2 4a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm3 2a1 1 0 100 2h6a1 1 0 100-2H6zm0 4a1 1 0 100 2h4a1 1 0 100-2H6z" />,
+          },
+          {
             id: 'bid-templates',
             label: 'Bid Templates',
             href: ROUTES.BID_TEMPLATES,

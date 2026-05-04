@@ -18,11 +18,10 @@
 
 ## Phase 6: Real-Time Dashboard & Visibility (~30h) — 🔄 IN PROGRESS
 
-**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, and visual breakdowns of in-flight bids — while cleaning up the Phase 4/5 lifecycle gaps that block the visibility work from being meaningful.
+**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, and visual breakdowns of in-flight bids.
 
 **Tables read:** `bid_packages`, `bid_invitations`, `bid_submissions`, `bid_line_items`, `tasks`, `projects`, `vendors`, `magic_link_tokens`
 
-**Tables written:** `bid_invitations` (status transitions for `opened` and `expired`)
 
 ### Architecture Context (carry forward from prior phases)
 
@@ -32,14 +31,6 @@
 - **Routing:** All new pages live under the existing admin layout and are wrapped by the standard `ProtectedRoute`. No new role-based gating in Phase 6 — both `admin` and `project_manager` see the same dashboard and bid package list.
 - **Charts library:** Recharts. To be added to `frontend/package.json` in Task 6.4. Declarative JSX-based, SVG output, plays well with TailwindCSS theme tokens.
 
-### Key Domain Rules for Phase 6
-
-- **Bid invitation status lifecycle is finalized in Task 0.** After Task 0, the active states are: `sent` → `opened` → `submitted` (or `declined` / `expired`). `no_response` remains in the schema and API for backward compat but is removed from the UI. PMs can still manually mark `declined`. `opened` is set automatically when a vendor first validates their magic link. `expired` is set lazily when a PM views a bid package whose deadline has passed.
-- **No completeness checker.** Phase 5's multi-step form prevents incomplete submissions by design — vendors cannot reach the Submit step without filling required pricing and step validation. By the time `bid_submissions.status = 'submitted'`, the bid is complete by construction. There is no missing-pieces state to detect.
-- **No timeline / activity feed.** Phase 10 will introduce notifications (`notifications` table, already in schema), which will naturally power any "what happened recently" UI. Building a separate Activity feed in Phase 6 would duplicate that work.
-- **Direct assign and internal tasks are out of scope** for Phase 6 dashboards. Phase 6 visibility focuses on `competitive` bids (the only flow currently producing live data).
-
----
 
 ### Task 6.1: Wire Up Real Dashboard Counts (~3–4h)
 
@@ -61,37 +52,7 @@
 
 ---
 
-### Task 6.2: "My Active Projects" Card on Dashboard (~4–5h)
-
-**Goal:** Give PMs a real landing surface. Below the stat cards, add a card showing each active project the team is currently running, with a one-line status summary. This replaces the abstract numbers with something a PM can act on.
-
-**Card layout:**
-
-- Section header: "Active Projects" with a "View all" link → navigates to the existing projects list page.
-- For each project where `projects.deleted_at IS NULL` AND `projects.archived_at IS NULL` AND `projects.status = 'active'`:
-  - Project name (clickable → project detail page)
-  - Subtitle: `{city}, {state}` if available, otherwise blank
-  - Right-aligned summary chips: count of tasks in each state, e.g., `3 bidding · 2 evaluating · 1 awarded`. Skip chips with zero counts.
-  - Project budget on the far right (if set), formatted as currency.
-- Empty state: friendly message — "No active projects yet" with a "Create Project" call-to-action button (links to existing project creation flow).
-- Limit to first 5 projects (sorted by `updated_at DESC`); "View all" handles overflow.
-
-**Data fetching:**
-
-- One Supabase query joining `projects` and `tasks` to compute the per-project task-status counts in a single round trip. If grouping in Supabase is awkward, two queries (projects, then tasks-by-project) and group client-side is also fine.
-- Reuse the existing `useProjects` hook pattern if it cleanly extends; otherwise create a focused `useDashboardActiveProjects` hook in `frontend/src/features/dashboard/hooks/`.
-- Same QueryClient defaults — no polling.
-
-**Mobile:** Project rows stack vertically; status chips wrap below the project name on narrow screens.
-
-**Out of scope:**
-- Per-project deadline countdowns (potentially noisy)
-- Per-project award totals or burn-rate calculations (Phase 8/post-MVP territory)
-- Filter / sort controls — the projects list page already has those
-
----
-
-### Task 6.3: Bid Package List View (~6–8h)
+### Task 6.2: Bid Package List View (~6–8h)
 
 **Goal:** Bid packages currently exist only as nested children of tasks — the only way to find them is to navigate Project → Task → Bid Packages section. As bids accumulate across multiple projects, PMs need a cross-task overview to see all in-flight bidding work in one place.
 
@@ -141,7 +102,7 @@
 
 ---
 
-### Task 6.4: Charts on Bid Package Detail Page (~6–8h)
+### Task 6.3: Charts on Bid Package Detail Page (~6–8h)
 
 **Goal:** Add two visual breakdowns to the existing Bid Package Detail Page. The summary cards already show counts; charts add comparative shape.
 
@@ -180,7 +141,7 @@
 
 ---
 
-### Task 6.5: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
+### Task 6.4: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
 
 **Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
 

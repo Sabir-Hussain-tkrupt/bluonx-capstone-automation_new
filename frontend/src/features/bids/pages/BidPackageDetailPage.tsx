@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -11,39 +11,10 @@ import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
 import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
+import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { cn } from '@/utils/cn';
-
-function useCountdown(deadline: string) {
-  const [remaining, setRemaining] = useState('');
-  const [isPassed, setIsPassed] = useState(false);
-
-  useEffect(() => {
-    const calc = () => {
-      const diff = new Date(deadline).getTime() - Date.now();
-      if (diff <= 0) {
-        setRemaining('Deadline passed');
-        setIsPassed(true);
-        return;
-      }
-      setIsPassed(false);
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const parts: string[] = [];
-      if (days > 0) parts.push(`${days}d`);
-      if (hours > 0) parts.push(`${hours}h`);
-      if (days === 0) parts.push(`${mins}m`);
-      setRemaining(`${parts.join(' ')} remaining`);
-    };
-    calc();
-    const interval = setInterval(calc, 60_000);
-    return () => clearInterval(interval);
-  }, [deadline]);
-
-  return { remaining, isPassed };
-}
 
 export function BidPackageDetailPage() {
   const { id: projectId, taskId, bidPackageId } = useParams<{

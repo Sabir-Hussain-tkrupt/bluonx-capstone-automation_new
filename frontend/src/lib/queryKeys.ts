@@ -86,7 +86,7 @@ export const queryKeys = {
   bidPackages: {
     all: ['bid_packages'] as const,
     lists: () => [...queryKeys.bidPackages.all, 'list'] as const,
-    list: (filters?: { taskId?: string }) =>
+    list: (filters?: Record<string, unknown>) =>
       filters
         ? ([...queryKeys.bidPackages.lists(), filters] as const)
         : queryKeys.bidPackages.lists(),

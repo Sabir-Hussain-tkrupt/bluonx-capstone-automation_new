@@ -11,6 +11,7 @@ from app.models.bid_packages import (
     BidPackageCreateRequest,
     BidPackageCreateResponse,
     BidPackageDetailResponse,
+    BidPackageListResponse,
     EmailLogResponse,
     InvitationListResponse,
 )
@@ -24,6 +25,10 @@ from app.models.bids import (
 from app.services.bid_package_service import (
     BidPackageValidationError,
     create_bid_package_with_invitations,
+)
+from app.services.bid_package_list_service import (
+    BidPackageListValidationError,
+    list_bid_packages as list_bid_packages_service,
 )
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
@@ -83,15 +88,28 @@ async def create_bid_package_endpoint(
     return result
 
 
-@router.get("/bid-packages", response_model=list[BidPackageResponse])
+@router.get("/bid-packages", response_model=BidPackageListResponse)
 async def list_bid_packages(
-    task_id: UUID | None = None,
+    status: str | None = None,
+    project_id: UUID | None = None,
+    sort_by: str = "deadline",
+    sort_order: str = "asc",
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """List bid packages, optionally filtered by task_id."""
-    # TODO: Implement in later phase
-    return []
+    """Cross-project bid package list with denormalized project / task names
+    and SQL-computed invitation counts."""
+    try:
+        items = await list_bid_packages_service(
+            db=db,
+            status=status,
+            project_id=project_id,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except BidPackageListValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {"items": items}
 
 
 @router.get(
