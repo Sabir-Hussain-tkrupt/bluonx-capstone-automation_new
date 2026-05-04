@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import { supabase } from '@/lib/supabase';
+import { useDashboardCounts } from '@/features/dashboard/hooks/useDashboardCounts';
 
 function VendorsIcon() {
   return (
@@ -58,12 +59,21 @@ const QUICK_NAV_CARDS: QuickNavCard[] = [
   },
 ];
 
-/** Stat card placeholder — will be populated with real data in later phases. */
-function StatPlaceholder({ label, value }: { label: string; value: string }) {
+interface StatPlaceholderProps {
+  label: string;
+  value: string;
+  isLoading?: boolean;
+}
+
+function StatPlaceholder({ label, value, isLoading = false }: StatPlaceholderProps) {
   return (
     <div className="rounded-lg border border-secondary-200 bg-white p-5 shadow-sm">
       <p className="text-sm font-medium text-secondary-500">{label}</p>
-      <p className="mt-2 text-3xl font-bold text-secondary-900">{value}</p>
+      {isLoading ? (
+        <div className="mt-2 h-9 w-16 animate-pulse rounded bg-secondary-200" aria-hidden="true" />
+      ) : (
+        <p className="mt-2 text-3xl font-bold text-secondary-900">{value}</p>
+      )}
     </div>
   );
 }
@@ -97,6 +107,8 @@ export function DashboardPage() {
     },
   });
 
+  const { openTaskCount, pendingBidCount, isLoading: countsLoading } = useDashboardCounts();
+
   const currentDate = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
@@ -125,8 +137,16 @@ export function DashboardPage() {
       {/* Summary stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatPlaceholder label="Active Projects" value={activeProjectCount != null ? String(activeProjectCount) : '--'} />
-        <StatPlaceholder label="Open Tasks" value="--" />
-        <StatPlaceholder label="Pending Bids" value="--" />
+        <StatPlaceholder
+          label="Open Tasks"
+          value={openTaskCount != null ? String(openTaskCount) : '0'}
+          isLoading={countsLoading && openTaskCount == null}
+        />
+        <StatPlaceholder
+          label="Pending Bids"
+          value={pendingBidCount != null ? String(pendingBidCount) : '0'}
+          isLoading={countsLoading && pendingBidCount == null}
+        />
         <StatPlaceholder label="Active Vendors" value={activeVendorCount != null ? String(activeVendorCount) : '--'} />
       </div>
 

@@ -167,4 +167,10 @@ export const queryKeys = {
         ? ([...queryKeys.notifications.lists(), filters] as const)
         : queryKeys.notifications.lists(),
   },
+
+  dashboard: {
+    all: ['dashboard'] as const,
+    openTaskCount: () => [...queryKeys.dashboard.all, 'openTaskCount'] as const,
+    pendingBidCount: () => [...queryKeys.dashboard.all, 'pendingBidCount'] as const,
+  },
 } as const;
