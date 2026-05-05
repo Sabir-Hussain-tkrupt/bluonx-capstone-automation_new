@@ -131,7 +131,7 @@ export function BidPackageDetailPage() {
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              Round {bp.round_number} &mdash; {bp.task_name}
+              {bp.task_name} (Round {bp.round_number})
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={bp.status} />

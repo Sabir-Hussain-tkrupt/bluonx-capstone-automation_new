@@ -43,7 +43,7 @@ export function TaskListPage() {
           </svg>
         </button>
         <h1 className="text-xl font-semibold text-secondary-900 sm:text-2xl">
-          {project.name} — Tasks
+          Tasks: {project.name}
         </h1>
       </div>
       <TaskList projectId={id!} projectBudget={project.budget} />
