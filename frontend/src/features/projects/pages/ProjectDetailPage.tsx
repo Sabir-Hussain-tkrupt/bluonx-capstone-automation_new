@@ -23,6 +23,7 @@ import {
 import { ProjectForm } from '@/features/projects/components/ProjectForm';
 import { ProjectDocumentUpload } from '@/features/projects/components/ProjectDocumentUpload';
 import type { StatusVariant } from '@/components/ui/types';
+import { formatCurrency } from '@/lib/format';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -39,11 +40,6 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
       <dd className="text-right text-secondary-900">{value || '\u2014'}</dd>
     </div>
   );
-}
-
-function formatCurrency(value: number | null): string {
-  if (value == null) return '\u2014';
-  return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function formatDate(value: string | null): string {

@@ -128,6 +128,74 @@ class TestNonexistentBidPackage:
             )
 
 
+class TestSubmittedBids:
+    """Response includes submitted_bids: a list of {vendor_company_name, total_amount},
+    sorted ascending by total_amount."""
+
+    @pytest.mark.asyncio
+    async def test_returns_submitted_bids_field(self, mock_supabase):
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID,
+            db=mock_supabase,
+        )
+
+        assert "submitted_bids" in result
+        submitted = result["submitted_bids"]
+        assert isinstance(submitted, list)
+        assert len(submitted) == 2
+        # Sorted ascending by total_amount: Bedrock (41200) before Apex (47500)
+        assert submitted[0]["vendor_company_name"] == "Bedrock Civil"
+        assert float(submitted[0]["total_amount"]) == 41200.00
+        assert submitted[1]["vendor_company_name"] == "Apex Grading"
+        assert float(submitted[1]["total_amount"]) == 47500.00
+
+    @pytest.mark.asyncio
+    async def test_submitted_bids_empty_when_no_submissions(
+        self,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+    ):
+        client = MagicMock()
+
+        def table_side_effect(name):
+            if name == "bid_packages":
+                return build_chain(data=[sample_bid_package_open])
+            if name == "bid_invitations":
+                return build_chain(data=sample_invitations_mixed_statuses)
+            if name == "email_log":
+                return build_chain(data=sample_email_log_rows)
+            if name == "bid_package_documents":
+                return build_chain(data=sample_bid_package_documents)
+            if name == "bid_submissions":
+                return build_chain(data=[])
+            return build_chain(data=[])
+
+        client.table.side_effect = table_side_effect
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID,
+            db=client,
+        )
+        assert result["submitted_bids"] == []
+
+    @pytest.mark.asyncio
+    async def test_submitted_bid_shape(self, mock_supabase):
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID,
+            db=mock_supabase,
+        )
+
+        for item in result["submitted_bids"]:
+            assert set(item.keys()) == {"vendor_company_name", "total_amount"}
+            assert isinstance(item["vendor_company_name"], str)
+            # total_amount may be Decimal/float/None — allow numeric or None
+            assert item["total_amount"] is None or isinstance(
+                item["total_amount"], (int, float)
+            )
+
+
 class TestLazyExpiration:
     """When deadline has passed, sent/opened invitations auto-expire
     and bid_package.status flips from 'open' to 'closed'."""

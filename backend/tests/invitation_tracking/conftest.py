@@ -204,6 +204,16 @@ def sample_bid_package_documents() -> list[dict]:
 
 
 @pytest.fixture()
+def sample_bid_submissions() -> list[dict]:
+    """Two submitted bids; ordering is intentionally not pre-sorted so
+    the service-layer sort can be exercised."""
+    return [
+        {"total_amount": 47500.00, "vendors": {"company_name": "Apex Grading"}},
+        {"total_amount": 41200.00, "vendors": {"company_name": "Bedrock Civil"}},
+    ]
+
+
+@pytest.fixture()
 def sample_email_log_rows() -> list[dict]:
     """Three email_log rows referencing invitations in the package."""
     now = datetime.now(timezone.utc)
@@ -292,6 +302,7 @@ def mock_supabase(
     sample_invitations_mixed_statuses,
     sample_email_log_rows,
     sample_bid_package_documents,
+    sample_bid_submissions,
     updates_captured,
 ) -> MagicMock:
     """
@@ -312,6 +323,8 @@ def mock_supabase(
             chain = build_chain(data=sample_email_log_rows)
         elif name == "bid_package_documents":
             chain = build_chain(data=sample_bid_package_documents)
+        elif name == "bid_submissions":
+            chain = build_chain(data=sample_bid_submissions)
         else:
             chain = build_chain(data=[])
 

@@ -14,6 +14,8 @@ import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvita
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
+import { SubmissionStatusPie } from '@/features/bids/components/SubmissionStatusPie';
+import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
 import { cn } from '@/utils/cn';
 
 export function BidPackageDetailPage() {
@@ -186,6 +188,13 @@ export function BidPackageDetailPage() {
         />
       </div>
 
+      {/* Submission Status Pie */}
+      {summary.total > 0 && (
+        <div className="mx-auto max-w-xl">
+          <SubmissionStatusPie summary={summary} />
+        </div>
+      )}
+
       {/* Instructions */}
       {bp.instructions && (
         <div className="rounded-lg border border-info-200 bg-info-50 p-4">
@@ -212,6 +221,11 @@ export function BidPackageDetailPage() {
           />
         </div>
       </Card>
+
+      {/* Bid Amount Comparison */}
+      {bp.submitted_bids && bp.submitted_bids.length > 0 && (
+        <BidAmountBarChart submittedBids={bp.submitted_bids} />
+      )}
 
       {/* Documents */}
       {bp.documents.length > 0 && (
