@@ -72,6 +72,20 @@ def check_credentials(region: str) -> bool:
             logger.info("  Access: PRODUCTION (can send to any address)")
         else:
             logger.warning("  Access: SANDBOX (can only send to verified addresses)")
+        
+    
+        details = account.get("Details", {})
+        review = details.get("ReviewDetails", {})
+        logger.info("  Review status: %s | Case ID: %s",
+                    review.get("Status", "NONE"),
+                    review.get("CaseId", "—"))
+
+        # Also log account ID so we know which account the keys belong to
+        sts = boto3.client("sts", region_name=region)
+        identity = sts.get_caller_identity()
+        logger.info("  AWS Account ID: %s", identity.get("Account"))
+        logger.info("  IAM User/Role:  %s", identity.get("Arn"))
+
         return True
     except Exception as e:
         logger.error("AWS credential check failed: %s", e)
