@@ -6,6 +6,7 @@ and invitation sending (Task 4.4).
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import Field
@@ -98,6 +99,13 @@ class BidPackageDocumentItem(BluOnXBase):
     file_name: str | None = None
 
 
+class SubmittedBid(BluOnXBase):
+    """A submitted bid (vendor company name + total amount) for chart display."""
+
+    vendor_company_name: str
+    total_amount: Decimal | None = None
+
+
 class BidPackageDetailResponse(BluOnXBase):
     """Response for GET /v1/bid-packages/{bid_package_id}."""
 
@@ -111,6 +119,7 @@ class BidPackageDetailResponse(BluOnXBase):
     documents: list[BidPackageDocumentItem] = Field(default_factory=list)
     invitation_summary: InvitationSummary
     invitations: list[InvitationItem] = Field(default_factory=list)
+    submitted_bids: list[SubmittedBid] = Field(default_factory=list)
 
 
 class InvitationListResponse(BluOnXBase):

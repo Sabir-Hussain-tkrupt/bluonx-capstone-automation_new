@@ -102,48 +102,53 @@
 
 ---
 
-### Task 6.3: Charts on Bid Package Detail Page (~6–8h)
+### Task 6.3: Charts on Bid Package Detail (~6–7h)
 
-**Goal:** Add two visual breakdowns to the existing Bid Package Detail Page. The summary cards already show counts; charts add comparative shape.
+**Goal:** Add two charts to the bid package detail page — a small status pie centered below the stat cards row, and a full bid amount comparison bar chart between the invitations table and email log.
 
-**Library:** Recharts. Add to `frontend/package.json`. No global config needed.
+**Library:** Recharts. Add to `frontend/package.json`.
 
-**Chart 1: Submission Status Pie**
+**Chart 1: Submission Status Pie (small, below stat cards)**
 
-- Placement: Right column or top-of-page panel on the bid package detail layout — wherever fits cleanly alongside the existing four summary cards. Could replace one of the cards if the design works better that way.
-- Data: same `invitation_summary` object already returned by `GET /v1/bid-packages/{id}` — no new endpoint. Slices: `sent`, `opened`, `submitted`, `declined`, `expired`. Skip `no_response` (now UI-suppressed per Task 0).
-- Color tokens: reuse the same palette already used by the `StatusBadge` component to keep visual consistency. Sent = blue, opened = yellow, submitted = green, declined = red, expired = gray.
-- Tooltip on hover: status name + count + percentage.
-- Empty state: if all counts are zero (shouldn't happen post-invitation-send), show a placeholder rather than an empty pie.
+- Placement: new row directly below the 4 stat cards, above the Instructions banner. Centered, compact width (roughly the size of two stat cards).
+- Acts as a quiet visual accent at small invitation counts (5–10 vendors), becomes the primary scanning tool at larger counts (20+ vendors).
+- Slices: sent, opened, submitted, declined, expired. Skip empty slices.
+- Reuse the same color palette as the StatusBadge component (sent = blue, opened = yellow, submitted = green, declined = red, expired = gray).
+- Tooltip: status name + count + percentage.
+- Always rendered when invitations exist. Hidden only if zero invitations (edge case — bid package with no vendors invited yet).
 
-**Chart 2: Bid Amount Comparison Bar**
+**Chart 2: Bid Amount Comparison Bar (full section)**
 
-- Placement: New section below the invitations table, titled "Bid Amounts" or "Submitted Bids."
-- Data: pull `bid_submissions` rows for this bid package where `status = 'submitted'`. Need a new endpoint or extend the existing detail response to include submitted bid totals. Recommend extending the detail response — keeps the page on one fetch.
-- Chart shape: horizontal bar chart, one bar per submitted bid, labeled with vendor company name. X-axis is `total_amount` formatted as currency.
-- If `tasks.budget_estimate` is set, draw a vertical reference line at that value labeled "Budget Estimate."
-- Sort bars by amount ascending (lowest bid at top — visually leads the eye to the likely winner).
-- Empty state: if no bids submitted yet, show a message: "No bids submitted yet. Bar chart will appear once vendors submit bids."
+- Placement: new section between Invitations table and Email Log, titled "Submitted Bid Amounts."
+- Conditionally rendered: only when `submitted_count >= 1`. Section fully hidden when zero submitted.
+- Email Log remains the last collapsible section.
 
-**Chart placement and responsive behavior:**
+**Bar chart shape:**
+- Horizontal bars, one per submitted bid, labeled with vendor company name.
+- X-axis: `total_amount` formatted as currency.
+- Sort ascending — lowest bid at top.
+- If `tasks.budget_estimate` is set, vertical dashed reference line labeled "Budget Estimate"; bars exceeding it rendered in a warning color.
+- Tooltip: vendor name + formatted amount.
 
-- Desktop: pie chart in the upper-right of the page (next to or replacing the summary cards row), bar chart full-width below the invitations table.
-- Mobile: both charts stack vertically full-width. Pie chart fixed aspect ratio; bar chart scrolls horizontally if vendor names are long.
+**Data fetching:**
+- Pie: uses the existing `invitation_summary` already returned by `GET /v1/bid-packages/{id}`. No backend change.
+- Bar: extend the same endpoint response with `submitted_bids` array (vendor company name + total_amount). Single fetch.
 
-**Sub-task notes:**
-- Pull this work in only after Task 0 is complete. Otherwise the pie chart is permanently a two-slice chart (sent + submitted only).
-- Do not generalize charts into a shared "Chart" component yet. Keep them feature-local in `frontend/src/features/bids/components/`. Generalize only if Task 6.5 polish reveals overlap.
+**Mobile:**
+- Stat cards row stacks to 2-column or single-column.
+- Pie chart full-width below the cards.
+- Bar chart full-width; X-axis ticks may truncate.
 
 **Out of scope:**
-- Score-comparison radar chart (Phase 8 — proper bid comparison)
-- Submission timeline chart (added value unclear; status badges + timestamps in the table already convey this)
-- Export to image / PDF (Phase 8 / post-MVP)
+- Score-comparison radar (Phase 8)
+- Submission timeline chart
+- Export to image / PDF
 
 ---
 
 ### Task 6.4: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
 
-**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
+**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.3.
 
 **Sub-tasks:**
 

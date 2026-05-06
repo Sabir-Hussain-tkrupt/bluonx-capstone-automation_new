@@ -135,6 +135,33 @@ def _fetch_invitations(
     return _unwrap_list(resp.data)
 
 
+def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
+    """Fetch submitted bid_submissions with vendor company_name for this package.
+
+    A submission belongs to the package via bid_invitations.bid_package_id;
+    we filter by bid_invitations.status == 'submitted' so only sealed bids appear.
+    """
+    resp = (
+        db.table("bid_submissions")
+        .select(
+            "total_amount, bid_invitations!inner(bid_package_id, status), vendors(company_name)"
+        )
+        .eq("bid_invitations.bid_package_id", str(bid_package_id))
+        .eq("bid_invitations.status", "submitted")
+        .execute()
+    )
+    return _unwrap_list(resp.data)
+
+
+def _transform_submitted_bid(row: dict) -> dict:
+    """Flatten the embedded vendor join."""
+    vendor = row.get("vendors") or {}
+    return {
+        "vendor_company_name": vendor.get("company_name") or "—",
+        "total_amount": row.get("total_amount"),
+    }
+
+
 def _fetch_documents(db, bid_package_id: UUID) -> list[dict]:
     resp = (
         db.table("bid_package_documents")
@@ -280,6 +307,12 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     invitations = [_transform_invitation(row) for row in invitations_rows]
     summary = _build_summary(invitations)
 
+    submitted_bids_rows = _fetch_submitted_bids(db, bid_package_id)
+    submitted_bids = [_transform_submitted_bid(r) for r in submitted_bids_rows]
+    submitted_bids.sort(
+        key=lambda s: (s["total_amount"] is None, s["total_amount"] or 0)
+    )
+
     tasks_join = bid_package.get("tasks") or {}
     task_name = tasks_join.get("name") if isinstance(tasks_join, dict) else None
 
@@ -294,6 +327,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         "documents": [_transform_document(row) for row in documents_rows],
         "invitation_summary": summary,
         "invitations": invitations,
+        "submitted_bids": submitted_bids,
     }
 
 

@@ -86,6 +86,11 @@ export interface BidInvitation {
   responded_at: string | null;
 }
 
+export interface SubmittedBid {
+  vendor_company_name: string;
+  total_amount: number | null;
+}
+
 export interface BidPackageDetail {
   id: string;
   task_name: string | null;
@@ -97,6 +102,7 @@ export interface BidPackageDetail {
   documents: BidDocument[];
   invitation_summary: InvitationSummary;
   invitations: BidInvitation[];
+  submitted_bids: SubmittedBid[];
 }
 
 // ─── Create Bid Package (POST /v1/tasks/{id}/bid-packages) ──────────
