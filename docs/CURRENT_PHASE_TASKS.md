@@ -148,7 +148,7 @@
 
 ### Task 6.4: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
 
-**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
+**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.3.
 
 **Sub-tasks:**
 
