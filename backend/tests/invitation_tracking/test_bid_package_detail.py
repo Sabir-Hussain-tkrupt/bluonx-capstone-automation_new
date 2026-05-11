@@ -21,6 +21,7 @@ from app.services.invitation_tracking_service import (
 
 from .conftest import (
     BID_PACKAGE_ID,
+    BID_SUBMISSION_IDS,
     INVITATION_IDS,
     NONEXISTENT_BID_PACKAGE_ID,
     build_chain,
@@ -90,6 +91,7 @@ class TestInvitationsArray:
             assert "sent_at" in inv
             assert "opened_at" in inv
             assert "responded_at" in inv
+            assert "bid_submission_id" in inv
 
     @pytest.mark.asyncio
     async def test_invitation_vendor_fields_populated(self, mock_supabase):
@@ -106,6 +108,11 @@ class TestInvitationsArray:
         assert submitted["vendor_contact_email"] == "submitted@example.com"
         assert submitted["opened_at"] is not None
         assert submitted["responded_at"] is not None
+        assert submitted["bid_submission_id"] == str(BID_SUBMISSION_IDS["submitted"])
+
+        # Non-submitted rows have null bid_submission_id
+        sent = next(i for i in result["invitations"] if i["status"] == "sent")
+        assert sent["bid_submission_id"] is None
 
 
 class TestNonexistentBidPackage:

@@ -219,6 +219,46 @@ class BidAttachmentResponse(BluOnXBase):
     uploaded_at: datetime
 
 
+# ── PM single bid detail view (Task 6.2) ────────────────────────────────
+
+
+class PMBidLineItemResponse(BluOnXBase):
+    id: UUID
+    description: str
+    item_type: Literal["lump_sum", "unit_price"]
+    quantity: Decimal | None = None
+    unit_of_measure: str | None = None
+    unit_price: Decimal | None = None
+    lump_sum_amount: Decimal | None = None
+    line_total: Decimal
+    sort_order: int
+
+
+class PMBidAttachmentResponse(BluOnXBase):
+    id: UUID
+    file_name: str
+    file_size: int
+    file_type: str | None = None
+    uploaded_at: datetime
+    download_url: str
+    download_url_expires_in: int
+
+
+class PMBidSubmissionDetailResponse(BluOnXBase):
+    id: UUID
+    bid_invitation_id: UUID
+    status: str
+    is_direct_assign: bool
+    total_amount: Decimal | None = None
+    vendor_notes: str | None = None
+    submitted_at: datetime | None = None
+    vendor_company_name: str | None = None
+    vendor_contact_name: str | None = None
+    vendor_contact_email: str | None = None
+    line_items: list[PMBidLineItemResponse]
+    attachments: list[PMBidAttachmentResponse]
+
+
 # ── bid_scores ───────────────────────────────────────────────────────────
 
 

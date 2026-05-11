@@ -86,6 +86,7 @@ class InvitationItem(BluOnXBase):
     sent_at: datetime | None = None
     opened_at: datetime | None = None
     responded_at: datetime | None = None
+    bid_submission_id: UUID | None = None
 
 
 class BidTemplateSummary(BluOnXBase):

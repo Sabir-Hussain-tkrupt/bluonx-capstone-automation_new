@@ -32,6 +32,7 @@ INVITATION_IDS = {status: uuid4() for status in INVITATION_STATUSES}
 
 VENDOR_IDS = {status: uuid4() for status in INVITATION_STATUSES}
 VENDOR_CONTACT_IDS = {status: uuid4() for status in INVITATION_STATUSES}
+BID_SUBMISSION_IDS = {status: uuid4() for status in INVITATION_STATUSES}
 
 DOC_IDS = [uuid4() for _ in range(2)]
 EMAIL_LOG_IDS = [uuid4() for _ in range(3)]
@@ -150,6 +151,10 @@ def _make_invitation(status: str, sent_minutes_ago: int = 120) -> dict:
     if status in ("submitted", "declined"):
         responded_at = (now - timedelta(minutes=sent_minutes_ago - 20)).isoformat()
 
+    bid_submissions_join = (
+        [{"id": str(BID_SUBMISSION_IDS[status])}] if status == "submitted" else []
+    )
+
     return {
         "id": str(INVITATION_IDS[status]),
         "bid_package_id": str(BID_PACKAGE_ID),
@@ -171,6 +176,7 @@ def _make_invitation(status: str, sent_minutes_ago: int = 120) -> dict:
             "full_name": f"Contact {status.title()}",
             "email": f"{status}@example.com",
         },
+        "bid_submissions": bid_submissions_join,
     }
 
 

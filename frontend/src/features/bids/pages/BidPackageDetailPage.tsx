@@ -13,6 +13,7 @@ import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
+import { BidSubmissionDetailModal } from '@/features/bids/components/BidSubmissionDetailModal';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { SubmissionStatusPie } from '@/features/bids/components/SubmissionStatusPie';
 import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
@@ -45,6 +46,7 @@ export function BidPackageDetailPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [declineConfirmId, setDeclineConfirmId] = useState<string | null>(null);
+  const [viewSubmissionId, setViewSubmissionId] = useState<string | null>(null);
 
   const handleResendBidLink = (invitationId: string) => {
     setResendingId(invitationId);
@@ -216,6 +218,7 @@ export function BidPackageDetailPage() {
             isLoading={false}
             onResendBidLink={handleResendBidLink}
             onMarkDeclined={setDeclineConfirmId}
+            onViewBid={setViewSubmissionId}
             resendingId={resendingId}
             updatingId={updatingId}
           />
@@ -284,6 +287,13 @@ export function BidPackageDetailPage() {
           )}
         </div>
       </Card>
+
+      {/* View Bid Submission Modal */}
+      <BidSubmissionDetailModal
+        submissionId={viewSubmissionId}
+        isOpen={!!viewSubmissionId}
+        onClose={() => setViewSubmissionId(null)}
+      />
 
       {/* Decline Confirmation Modal */}
       <Modal

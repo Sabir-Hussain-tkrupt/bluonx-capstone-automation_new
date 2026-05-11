@@ -1,0 +1,164 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen } from '@testing-library/react';
+import { renderWithRouter } from '@/test/test-utils';
+import { BidSubmissionDetailModal } from '../BidSubmissionDetailModal';
+import type { BidSubmissionDetail } from '@/features/bids/types';
+
+const mockUseBidSubmissionDetail = vi.fn();
+
+vi.mock('@/features/bids/hooks/useBidSubmissionDetail', () => ({
+  useBidSubmissionDetail: (id: string | null) => mockUseBidSubmissionDetail(id),
+}));
+
+function makeDetail(overrides: Partial<BidSubmissionDetail> = {}): BidSubmissionDetail {
+  return {
+    id: 'sub-1',
+    bid_invitation_id: 'inv-1',
+    status: 'submitted',
+    is_direct_assign: false,
+    total_amount: 47500,
+    vendor_notes: 'Includes mobilization.',
+    submitted_at: '2026-05-01T12:00:00Z',
+    vendor_company_name: 'Apex Grading',
+    vendor_contact_name: 'Jane Roe',
+    vendor_contact_email: 'jane@apex.example.com',
+    line_items: [
+      {
+        id: 'li-1',
+        description: 'Site prep',
+        item_type: 'lump_sum',
+        quantity: null,
+        unit_of_measure: null,
+        unit_price: null,
+        lump_sum_amount: 12500,
+        line_total: 12500,
+        sort_order: 0,
+      },
+      {
+        id: 'li-2',
+        description: 'Excavation',
+        item_type: 'unit_price',
+        quantity: 300,
+        unit_of_measure: 'CY',
+        unit_price: 100,
+        lump_sum_amount: null,
+        line_total: 30000,
+        sort_order: 1,
+      },
+    ],
+    attachments: [
+      {
+        id: 'a-1',
+        file_name: 'scope.pdf',
+        file_size: 12345,
+        file_type: 'application/pdf',
+        uploaded_at: '2026-05-01T12:00:00Z',
+        download_url: 'https://signed.example.com/scope.pdf?token=abc',
+        download_url_expires_in: 3600,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe('BidSubmissionDetailModal', () => {
+  beforeEach(() => {
+    mockUseBidSubmissionDetail.mockReset();
+  });
+
+  it('shows a skeleton while loading', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    expect(screen.getByTestId('bid-detail-skeleton')).toBeInTheDocument();
+  });
+
+  it('renders header, total, line items, notes and attachments', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail(),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    expect(screen.getByText('Apex Grading')).toBeInTheDocument();
+    // Total Bid in header — value also appears in Grand Total footer when sums match,
+    // so allow ≥1 occurrence.
+    expect(screen.getAllByText('$47,500').length).toBeGreaterThan(0);
+    // Each line item appears in both mobile + desktop layouts, so use getAllByText.
+    expect(screen.getAllByText('Site prep').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Excavation').length).toBeGreaterThan(0);
+
+    // New columns: Type badge + Grand Total footer (rendered in mobile + desktop)
+    expect(screen.getAllByText('Lump Sum').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Unit Price').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Grand Total').length).toBeGreaterThan(0);
+
+    // Notes section
+    expect(screen.getByText('Vendor Notes')).toBeInTheDocument();
+    expect(screen.getByText('Includes mobilization.')).toBeInTheDocument();
+
+    // Attachments
+    expect(screen.getByText('Attachments')).toBeInTheDocument();
+    expect(screen.getByText('scope.pdf')).toBeInTheDocument();
+    const downloadLink = screen.getByRole('link', { name: 'Download' });
+    expect(downloadLink).toHaveAttribute(
+      'href',
+      'https://signed.example.com/scope.pdf?token=abc',
+    );
+    expect(downloadLink).toHaveAttribute('target', '_blank');
+    expect(downloadLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('hides Vendor Notes section when notes are empty', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail({ vendor_notes: null }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    expect(screen.queryByText('Vendor Notes')).toBeNull();
+  });
+
+  it('hides Attachments section when there are none', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail({ attachments: [] }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    expect(screen.queryByText('Attachments')).toBeNull();
+  });
+
+  it('shows the Direct Assign pill when is_direct_assign is true', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail({ is_direct_assign: true }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    expect(screen.getByText('Direct Assign')).toBeInTheDocument();
+  });
+});

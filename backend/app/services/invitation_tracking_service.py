@@ -125,7 +125,8 @@ def _fetch_invitations(
     query = (
         db.table("bid_invitations")
         .select(
-            "*, vendors(id, company_name), vendor_contacts(full_name, email)"
+            "*, vendors(id, company_name), vendor_contacts(full_name, email),"
+            " bid_submissions(id)"
         )
         .eq("bid_package_id", str(bid_package_id))
     )
@@ -182,6 +183,14 @@ def _transform_invitation(row: dict) -> dict:
     """Flatten nested vendors / vendor_contacts into flat response fields."""
     vendors = row.get("vendors") or {}
     contacts = row.get("vendor_contacts") or {}
+    subs_raw = row.get("bid_submissions")
+    if isinstance(subs_raw, dict):
+        subs = [subs_raw]
+    elif isinstance(subs_raw, list):
+        subs = subs_raw
+    else:
+        subs = []
+    bid_submission_id = subs[0].get("id") if subs else None
     return {
         "id": row.get("id"),
         "vendor_id": row.get("vendor_id"),
@@ -192,6 +201,7 @@ def _transform_invitation(row: dict) -> dict:
         "sent_at": row.get("sent_at"),
         "opened_at": row.get("opened_at"),
         "responded_at": row.get("responded_at"),
+        "bid_submission_id": bid_submission_id,
     }
 
 

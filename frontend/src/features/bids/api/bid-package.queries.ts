@@ -5,6 +5,7 @@ import type { ApiError } from '@/lib/api';
 import type {
   QualifiedVendorsResponse,
   BidPackageDetail,
+  BidSubmissionDetail,
   EmailLogResponse,
   ProjectDocument,
   BidPackageListItem,
@@ -21,6 +22,11 @@ export async function fetchQualifiedVendors(taskId: string): Promise<QualifiedVe
 
 export async function fetchBidPackageDetail(id: string): Promise<BidPackageDetail> {
   const { data } = await api.get<BidPackageDetail>(API_ENDPOINTS.BID_PACKAGE(id));
+  return data;
+}
+
+export async function fetchBidSubmissionDetail(id: string): Promise<BidSubmissionDetail> {
+  const { data } = await api.get<BidSubmissionDetail>(API_ENDPOINTS.BID_SUBMISSION(id));
   return data;
 }
 

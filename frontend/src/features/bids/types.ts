@@ -84,6 +84,7 @@ export interface BidInvitation {
   sent_at: string | null;
   opened_at: string | null;
   responded_at: string | null;
+  bid_submission_id: string | null;
 }
 
 export interface SubmittedBid {
@@ -103,6 +104,45 @@ export interface BidPackageDetail {
   invitation_summary: InvitationSummary;
   invitations: BidInvitation[];
   submitted_bids: SubmittedBid[];
+}
+
+// ─── Bid Submission Detail (GET /v1/bid-submissions/{id}) ───────────
+
+export interface BidSubmissionLineItem {
+  id: string;
+  description: string;
+  item_type: 'lump_sum' | 'unit_price';
+  quantity: number | null;
+  unit_of_measure: string | null;
+  unit_price: number | null;
+  lump_sum_amount: number | null;
+  line_total: number;
+  sort_order: number;
+}
+
+export interface BidSubmissionAttachment {
+  id: string;
+  file_name: string;
+  file_size: number;
+  file_type: string | null;
+  uploaded_at: string;
+  download_url: string;
+  download_url_expires_in: number;
+}
+
+export interface BidSubmissionDetail {
+  id: string;
+  bid_invitation_id: string;
+  status: string;
+  is_direct_assign: boolean;
+  total_amount: number | null;
+  vendor_notes: string | null;
+  submitted_at: string | null;
+  vendor_company_name: string | null;
+  vendor_contact_name: string | null;
+  vendor_contact_email: string | null;
+  line_items: BidSubmissionLineItem[];
+  attachments: BidSubmissionAttachment[];
 }
 
 // ─── Create Bid Package (POST /v1/tasks/{id}/bid-packages) ──────────

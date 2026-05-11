@@ -1,0 +1,97 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { InvitationsTable } from '../InvitationsTable';
+import type { BidInvitation, InvitationStatus } from '@/features/bids/types';
+
+function makeInvitation(overrides: Partial<BidInvitation> = {}): BidInvitation {
+  return {
+    id: 'inv-1',
+    vendor_id: 'v-1',
+    vendor_company_name: 'Apex Grading',
+    vendor_contact_name: 'Jane Roe',
+    vendor_contact_email: 'jane@apex.example.com',
+    status: 'sent',
+    sent_at: '2026-04-30T10:00:00Z',
+    opened_at: null,
+    responded_at: null,
+    bid_submission_id: null,
+    ...overrides,
+  };
+}
+
+function renderTable(invitations: BidInvitation[], onViewBid?: (id: string) => void) {
+  return render(
+    <InvitationsTable
+      invitations={invitations}
+      isLoading={false}
+      onResendBidLink={vi.fn()}
+      onMarkDeclined={vi.fn()}
+      onViewBid={onViewBid}
+      resendingId={null}
+      updatingId={null}
+    />,
+  );
+}
+
+describe('InvitationsTable — View Bid action', () => {
+  it('renders View Bid only for submitted rows with a bid_submission_id', () => {
+    const submitted = makeInvitation({
+      id: 'inv-sub',
+      status: 'submitted',
+      bid_submission_id: 'sub-123',
+      vendor_company_name: 'Submitted Vendor',
+    });
+    const sent = makeInvitation({ id: 'inv-sent', status: 'sent' });
+    const opened = makeInvitation({ id: 'inv-opened', status: 'opened' });
+    const declined = makeInvitation({ id: 'inv-decl', status: 'declined' });
+    const expired = makeInvitation({ id: 'inv-exp', status: 'expired' });
+    const noResp = makeInvitation({ id: 'inv-nr', status: 'no_response' });
+
+    renderTable([submitted, sent, opened, declined, expired, noResp], vi.fn());
+
+    // The Table primitive renders both mobile and desktop views, so a single
+    // submitted row produces 2 View Bid buttons (one per layout).
+    const viewBidButtons = screen.getAllByRole('button', { name: 'View Bid' });
+    expect(viewBidButtons).toHaveLength(2);
+  });
+
+  it('does NOT render View Bid for any non-submitted status', () => {
+    const statuses: InvitationStatus[] = [
+      'sent',
+      'opened',
+      'declined',
+      'expired',
+      'no_response',
+    ];
+    const invitations = statuses.map((s, i) =>
+      makeInvitation({ id: `inv-${i}`, status: s, bid_submission_id: null }),
+    );
+
+    renderTable(invitations, vi.fn());
+    expect(screen.queryByRole('button', { name: 'View Bid' })).toBeNull();
+  });
+
+  it('does NOT render View Bid when bid_submission_id is null even if submitted', () => {
+    const submittedNoId = makeInvitation({
+      status: 'submitted',
+      bid_submission_id: null,
+    });
+    renderTable([submittedNoId], vi.fn());
+    expect(screen.queryByRole('button', { name: 'View Bid' })).toBeNull();
+  });
+
+  it('invokes onViewBid with the bid_submission_id when clicked', async () => {
+    const user = userEvent.setup();
+    const onViewBid = vi.fn();
+    const submitted = makeInvitation({
+      status: 'submitted',
+      bid_submission_id: 'sub-abc',
+    });
+    renderTable([submitted], onViewBid);
+
+    const buttons = screen.getAllByRole('button', { name: 'View Bid' });
+    await user.click(buttons[0]);
+    expect(onViewBid).toHaveBeenCalledWith('sub-abc');
+  });
+});

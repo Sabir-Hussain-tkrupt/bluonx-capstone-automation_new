@@ -22,12 +22,21 @@
 --   1 bid_package   — open, deadline 14 days out
 --   7 invitations   — 3 submitted, 1 opened, 1 sent, 1 declined, 1 expired
 --   3 submissions   — $41,200 / $47,500 / $52,800 (one above the $50k budget)
+--   9 bid_line_items — 3 rows per submission, mirroring template
+--                     `Grading & Earthwork Breakdown` (Mobilization lump_sum,
+--                     Grading unit_price/SY, Fill Material unit_price/CY).
+--                     Each submission's line_total values sum to its total_amount.
 --
 -- Trigger note: inserting a bid_submissions row with status='submitted' fires
 -- `fn_sync_bid_invitation_on_submission`, which overwrites the parent
--- bid_invitations.responded_at with NOW(). This is fine for a demo; the dates
--- on the 3 submitted rows will read "today" rather than the historical value
--- set in the INSERT below.
+-- bid_invitations.responded_at with NOW(). The final UPDATE in step 6 below
+-- re-syncs responded_at back to bid_submissions.submitted_at so the
+-- "Responded" column in the invitations table matches the "Submitted"
+-- timestamp shown in the bid detail modal.
+--
+-- bid_line_items are removed automatically by ON DELETE CASCADE on
+-- bid_submission_id, so the IDEMPOTENCY block below does not need to delete
+-- them explicitly.
 -- ============================================================================
 
 BEGIN;
@@ -167,13 +176,13 @@ INSERT INTO bid_submissions (
   ('d000d000-0000-0000-0000-000000000201',
    'd000d000-0000-0000-0000-000000000101',
    'ae788094-19b5-405f-aa0e-e71f6a7a5208',  -- AquaFlow
-   41200.00, 'submitted', FALSE, FALSE, NOW() - INTERVAL '1 day',
+   41200.00, 'submitted', FALSE, FALSE, NOW() - INTERVAL '3 days',
    'Includes mobilization. Pricing held firm 30 days.'),
 
   ('d000d000-0000-0000-0000-000000000202',
    'd000d000-0000-0000-0000-000000000102',
    'dcb1bf07-dee8-4710-810e-4176c71dfa0b',  -- Aquifer
-   47500.00, 'submitted', FALSE, FALSE, NOW() - INTERVAL '1 day',
+   47500.00, 'submitted', FALSE, FALSE, NOW() - INTERVAL '1 day 8 hours',
    'Mobilization separate line. Schedule contingent on permitting.'),
 
   ('d000d000-0000-0000-0000-000000000203',
@@ -181,6 +190,96 @@ INSERT INTO bid_submissions (
    '30199a0e-bb61-4c9a-b81b-a949f9998bc3',  -- Gateway
    52800.00, 'submitted', FALSE, FALSE, NOW() - INTERVAL '6 hours',
    'All-inclusive. Premium pricing reflects expedited start window.');
+
+
+-- ── 5. Bid line items — 3 rows per submission ────────────────────────────
+--    Each row mirrors a row of bid_template `Grading & Earthwork Breakdown`
+--    (Mobilization lump_sum, Grading unit_price/SY, Fill Material unit_price/CY).
+--    line_total values sum to the parent submission's total_amount:
+--      AquaFlow:  5,000 + 32,000 +  4,200 = 41,200
+--      Aquifer:   6,000 + 36,000 +  5,500 = 47,500
+--      Gateway:   7,000 + 40,000 +  5,800 = 52,800
+--    For lump_sum rows, quantity / unit_price / unit_of_measure are NULL and
+--    line_total = lump_sum_amount. For unit_price rows, lump_sum_amount is NULL
+--    and line_total = quantity × unit_price.
+
+INSERT INTO bid_line_items (
+  id, bid_submission_id, description, item_type,
+  quantity, unit_of_measure, unit_price, lump_sum_amount,
+  line_total, sort_order
+) VALUES
+  -- ── Submission 201 — AquaFlow ($41,200) ──
+  ('d000d000-0000-0000-0000-000000000301',
+   'd000d000-0000-0000-0000-000000000201',
+   'Mobilization', 'lump_sum',
+   NULL, NULL, NULL, 5000.00,
+   5000.00, 0),
+
+  ('d000d000-0000-0000-0000-000000000302',
+   'd000d000-0000-0000-0000-000000000201',
+   'Grading', 'unit_price',
+   4000.00, 'SY', 8.00, NULL,
+   32000.00, 1),
+
+  ('d000d000-0000-0000-0000-000000000303',
+   'd000d000-0000-0000-0000-000000000201',
+   'Fill Material', 'unit_price',
+   4200.00, 'CY', 1.00, NULL,
+   4200.00, 2),
+
+  -- ── Submission 202 — Aquifer ($47,500) ──
+  ('d000d000-0000-0000-0000-000000000311',
+   'd000d000-0000-0000-0000-000000000202',
+   'Mobilization', 'lump_sum',
+   NULL, NULL, NULL, 6000.00,
+   6000.00, 0),
+
+  ('d000d000-0000-0000-0000-000000000312',
+   'd000d000-0000-0000-0000-000000000202',
+   'Grading', 'unit_price',
+   4500.00, 'SY', 8.00, NULL,
+   36000.00, 1),
+
+  ('d000d000-0000-0000-0000-000000000313',
+   'd000d000-0000-0000-0000-000000000202',
+   'Fill Material', 'unit_price',
+   5500.00, 'CY', 1.00, NULL,
+   5500.00, 2),
+
+  -- ── Submission 203 — Gateway ($52,800) ──
+  ('d000d000-0000-0000-0000-000000000321',
+   'd000d000-0000-0000-0000-000000000203',
+   'Mobilization', 'lump_sum',
+   NULL, NULL, NULL, 7000.00,
+   7000.00, 0),
+
+  ('d000d000-0000-0000-0000-000000000322',
+   'd000d000-0000-0000-0000-000000000203',
+   'Grading', 'unit_price',
+   5000.00, 'SY', 8.00, NULL,
+   40000.00, 1),
+
+  ('d000d000-0000-0000-0000-000000000323',
+   'd000d000-0000-0000-0000-000000000203',
+   'Fill Material', 'unit_price',
+   5800.00, 'CY', 1.00, NULL,
+   5800.00, 2);
+
+
+-- ── 6. Sync invitations.responded_at back to submissions.submitted_at ────
+--    The trigger `fn_sync_bid_invitation_on_submission` fires on each
+--    bid_submissions INSERT above and overwrites the parent
+--    bid_invitations.responded_at with NOW(). That makes the
+--    "Responded" column in the invitations table disagree with the
+--    "Submitted" timestamp in the bid detail modal — for a single bid
+--    they should be the same moment. Re-align them here so both views
+--    show the historical date the seed intended.
+
+UPDATE bid_invitations bi
+   SET responded_at = bs.submitted_at
+  FROM bid_submissions bs
+ WHERE bs.bid_invitation_id = bi.id
+   AND bi.bid_package_id = 'd000d000-0000-0000-0000-000000000002';
 
 
 COMMIT;
@@ -210,6 +309,17 @@ COMMIT;
 --  )
 --  ORDER BY bs.total_amount;
 -- -- expected: 41200 AquaFlow, 47500 Aquifer, 52800 Gateway
+--
+-- SELECT bs.total_amount, SUM(li.line_total) AS sum_of_lines, COUNT(li.id) AS line_count
+--   FROM bid_submissions bs
+--   LEFT JOIN bid_line_items li ON li.bid_submission_id = bs.id
+--  WHERE bs.bid_invitation_id IN (
+--    SELECT id FROM bid_invitations
+--     WHERE bid_package_id = 'd000d000-0000-0000-0000-000000000002'
+--  )
+--  GROUP BY bs.id, bs.total_amount
+--  ORDER BY bs.total_amount;
+-- -- expected: each row's sum_of_lines == total_amount, line_count == 3
 
 
 -- ============================================================================

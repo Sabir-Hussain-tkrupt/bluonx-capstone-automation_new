@@ -25,6 +25,7 @@ interface InvitationsTableProps {
   isLoading: boolean;
   onResendBidLink: (invitationId: string) => void;
   onMarkDeclined: (invitationId: string) => void;
+  onViewBid?: (submissionId: string) => void;
   resendingId: string | null;
   updatingId: string | null;
 }
@@ -34,6 +35,7 @@ export function InvitationsTable({
   isLoading,
   onResendBidLink,
   onMarkDeclined,
+  onViewBid,
   resendingId,
   updatingId,
 }: InvitationsTableProps) {
@@ -89,6 +91,15 @@ export function InvitationsTable({
       header: 'Actions',
       accessor: (row) => (
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          {row.status === 'submitted' && row.bid_submission_id && onViewBid && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onViewBid(row.bid_submission_id as string)}
+            >
+              View Bid
+            </Button>
+          )}
           {canResend(row.status) && (
             <Button
               variant="ghost"

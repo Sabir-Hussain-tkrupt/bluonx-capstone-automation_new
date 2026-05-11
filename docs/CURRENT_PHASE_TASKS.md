@@ -18,18 +18,19 @@
 
 ## Phase 6: Real-Time Dashboard & Visibility (~30h) — 🔄 IN PROGRESS
 
-**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, and visual breakdowns of in-flight bids.
+**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, single-bid inspection, and visual breakdowns of in-flight bids.
+ 
+**Tables read:** `bid_packages`, `bid_invitations`, `bid_submissions`, `bid_line_items`, `bid_attachments`, `tasks`, `projects`, `vendors`, `vendor_contacts`, `magic_link_tokens`
+ 
+**Tables written:** none in Phase 6 proper. (Lifecycle status writes — `opened`, `expired` — were handled as a pre-Phase-6 cleanup pass before this phase started.)
 
-**Tables read:** `bid_packages`, `bid_invitations`, `bid_submissions`, `bid_line_items`, `tasks`, `projects`, `vendors`, `magic_link_tokens`
 
-
-### Architecture Context (carry forward from prior phases)
-
-- **Refresh model — intentional, no changes.** Reads use the existing global QueryClient defaults: `staleTime: 2min`, `refetchOnWindowFocus: true`, `refetchOnMount: true`, `refetchOnReconnect: 'always'`. Mutations invalidate query keys in `onSuccess`. **No polling (`refetchInterval`) and no Supabase Realtime subscriptions are added in Phase 6.** The existing `useRealtimeSubscription` and `useRealtimeQueryInvalidation` hooks remain in the codebase but unused — they are intentional dormant infrastructure for post-MVP if needed.
-- **Why no real-time?** The current event-driven refresh (focus + interaction + invalidation) covers the actual PM workflow for a small (≤10) team with low write frequency. Bid submissions arrive over days, not seconds. Adding polling or WebSockets would be net-negative — extra load and complexity for no perceived UX gain.
+### Architecture Context
+ 
+- **Refresh model — intentional, no changes.** Reads use the existing global QueryClient defaults: `staleTime: 2min`, `refetchOnWindowFocus: true`, `refetchOnMount: true`, `refetchOnReconnect: 'always'`. Mutations invalidate query keys in `onSuccess`. **No polling (`refetchInterval`) and no Supabase Realtime subscriptions are added in Phase 6.** Existing dormant Realtime hooks (`useRealtimeSubscription`, `useRealtimeQueryInvalidation`) remain unused — preserved as post-MVP infrastructure.
 - **Reads:** Continue using Supabase JS client with RLS for authenticated dashboard reads. Writes via FastAPI (service_role).
-- **Routing:** All new pages live under the existing admin layout and are wrapped by the standard `ProtectedRoute`. No new role-based gating in Phase 6 — both `admin` and `project_manager` see the same dashboard and bid package list.
-- **Charts library:** Recharts. To be added to `frontend/package.json` in Task 6.4. Declarative JSX-based, SVG output, plays well with TailwindCSS theme tokens.
+- **Routing:** All new pages live under the existing admin layout and are wrapped by the standard `ProtectedRoute`. No new role-based gating in Phase 6 — both `admin` and `project_manager` see the same surfaces.
+- **Charts library:** Recharts (added in Task 6.4).
 
 
 ### Task 6.1: Wire Up Real Dashboard Counts (~3–4h)
@@ -51,8 +52,50 @@
 - Use the existing `staleTime: 2min` default. Do not add `refetchInterval`. Stat cards refresh on tab focus, which is the right cadence.
 
 ---
+ 
+### Task 6.2: PM Single Bid Detail View (~6–8h)
+ 
+**Why this exists:** Currently a PM cannot inspect a submitted bid's contents from the Bid Package Detail page — only aggregate counts and totals are visible. This task closes that gap.
+ 
+**Scope:** Single-bid inspection only. No draft visibility, no annotations, no comparison.
+ 
+**Sub-task A: PM-side single submission endpoint**
+ 
+- Implement the existing stub at `GET /api/v1/bid-submissions/{submission_id}` in `backend/app/routers/bid_submissions.py` (currently raises 501).
+- Returns full submission shape:
+  - Top-level: vendor company name, vendor contact (name, email), `total_amount`, `status`, `vendor_notes`, `submitted_at`, `is_direct_assign`, `bid_invitation_id`.
+  - Line items array: `description`, `item_type` (lump_sum / unit_price), `quantity`, `unit_of_measure`, `unit_price`, `lump_sum_amount`, `line_total`, `sort_order`.
+  - Attachments array: `file_name`, `file_size`, `file_type`, signed download URL.
+- Read-only. user-authed via existing `get_current_active_user`. 404 if submission missing.
+- Use the same Supabase Storage signed-URL pattern that the vendor portal uses for project documents — don't reinvent.
 
-### Task 6.2: Bid Package List View (~6–8h)
+**Sub-task B: "View Bid" quick action on invitations table**
+ 
+- Add a "View Bid" button to the actions cell of the invitations row when `bid_invitations.status = 'submitted'`. Same actions cell that currently holds Resend Bid Link / Mark Declined.
+- Opens a modal (preferred over a dedicated route — keeps return-to-context flow tight on a page where the PM is comparing rows).
+- Modal layout (top to bottom):
+  - Header: vendor company name + contact name/email + status pill + total amount (large)
+  - Submission metadata: submitted_at timestamp, direct-assign indicator if applicable
+  - Line items: clean table matching the structure the vendor saw on the portal's pricing step (description, qty, UoM, unit price, lump sum amount, line total). Sorted by `sort_order`.
+  - Vendor notes: rendered as plain text in a bordered panel; hidden if empty.
+  - Attachments: list with file name, file size, file type icon, download button (signed URL). Hidden if no attachments.
+- Read-only. No edit / annotate / approve / reject actions inside the modal.
+- Mobile: modal becomes near-full-screen; line item table scrolls horizontally if columns overflow.
+**Out of scope:**
+- Cross-bid comparison (Phase 8)
+- PM annotations or notes on bids (Phase 8)
+- Editing, voiding, or invalidating submitted bids
+- Draft visibility / "vendor has a draft in progress" signals (vendor-private)
+- "View Bid" action on declined / expired / sent / opened rows (only `submitted` shows the button)
+**Acceptance criteria:**
+- `GET /v1/bid-submissions/{id}` returns full nested submission shape with signed attachment URLs; 404 if missing; admin-authed.
+- "View Bid" button appears in the actions cell of submitted-status invitations rows and nowhere else.
+- Modal opens with full submission contents; closes cleanly; works in mobile viewport.
+- Skeleton state while submission loads; empty states for "no notes" and "no attachments" handled silently (sections hidden, not shown empty).
+
+---
+
+### Task 6.3: Bid Package List View (~6–8h)
 
 **Goal:** Bid packages currently exist only as nested children of tasks — the only way to find them is to navigate Project → Task → Bid Packages section. As bids accumulate across multiple projects, PMs need a cross-task overview to see all in-flight bidding work in one place.
 
@@ -102,7 +145,7 @@
 
 ---
 
-### Task 6.3: Charts on Bid Package Detail (~6–7h)
+### Task 6.4: Charts on Bid Package Detail (~6–7h)
 
 **Goal:** Add two charts to the bid package detail page — a small status pie centered below the stat cards row, and a full bid amount comparison bar chart between the invitations table and email log.
 
@@ -146,9 +189,9 @@
 
 ---
 
-### Task 6.4: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
+### Task 6.5: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
 
-**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.3.
+**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
 
 **Sub-tasks:**
 
@@ -187,14 +230,16 @@
 ---
 
 ## What Phase 6 Intentionally Does NOT Include
-
-- **No polling / `refetchInterval`.** The existing `staleTime + refetchOnWindowFocus + mutation invalidation` model is the right design for ≤10 PMs and low-frequency writes. Adding polling would be net-negative.
-- **No Supabase Realtime subscriptions.** Existing hooks (`useRealtimeSubscription`, `useRealtimeQueryInvalidation`) remain in the codebase as dormant infrastructure for post-MVP. No tables added to `supabase_realtime` publication in this phase.
-- **No completeness checker.** The Phase 5 form prevents incomplete submissions structurally — there's no incomplete state to detect post-submission.
-- **No timeline / activity feed component.** Phase 10's notifications system will provide cross-project event visibility. Building a parallel activity feed now would duplicate that work.
-- **No score-comparison radar chart.** Phase 8 (Bid Comparison & Scoring) owns that work.
+ 
+- **No polling / `refetchInterval`.** The existing `staleTime + refetchOnWindowFocus + mutation invalidation` model is the right design for ≤10 PMs and low-frequency writes.
+- **No Supabase Realtime subscriptions.** Existing hooks remain dormant for post-MVP.
+- **No completeness checker.** The Phase 5 form prevents incomplete submissions structurally.
+- **No timeline / activity feed component.** Phase 10's notifications system will provide cross-project event visibility.
+- **No score-comparison radar chart.** Phase 8 owns that work.
+- **No draft visibility for PMs.** Drafts are vendor-private; PMs only care about submitted bids.
+- **No PM annotations on bids.** Phase 8 territory.
 - **No CSV / PDF exports.** Phase 8 / post-MVP.
-- **No fix for the resend token invalidation bug.** Documented in `docs/DEFERRED.md`. Out of scope for Phase 6.
+- **No "Cancel Bid Package" wiring.** The button is a TODO stub; deferred as a separate cleanup.
 
 ---
 

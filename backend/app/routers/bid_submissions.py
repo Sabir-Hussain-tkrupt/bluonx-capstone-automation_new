@@ -11,6 +11,11 @@ from app.models.bids import (
     BidSubmissionCreate,
     BidSubmissionResponse,
     BidSubmissionUpdate,
+    PMBidSubmissionDetailResponse,
+)
+from app.services.bid_submission_detail_service import (
+    BidSubmissionNotFoundError,
+    get_pm_bid_submission_detail,
 )
 
 router = APIRouter()
@@ -27,15 +32,22 @@ async def list_bid_submissions(
     return []
 
 
-@router.get("/bid-submissions/{submission_id}", response_model=BidSubmissionResponse)
+@router.get(
+    "/bid-submissions/{submission_id}",
+    response_model=PMBidSubmissionDetailResponse,
+)
 async def get_bid_submission(
     submission_id: UUID,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Get a single bid submission by ID."""
-    # TODO: Implement in later phase
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Get a single bid submission with vendor, line items, and attachments."""
+    try:
+        return await get_pm_bid_submission_detail(
+            submission_id=submission_id, db=db
+        )
+    except BidSubmissionNotFoundError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.post(
