@@ -81,7 +81,7 @@ function StatPlaceholder({ label, value, isLoading = false }: StatPlaceholderPro
 export function DashboardPage() {
   const { profile } = useAuth();
 
-  const { data: activeProjectCount } = useQuery({
+  const { data: activeProjectCount, isLoading: activeProjectsLoading } = useQuery({
     queryKey: ['dashboard', 'activeProjects'],
     queryFn: async () => {
       const { count, error } = await supabase
@@ -94,7 +94,7 @@ export function DashboardPage() {
     },
   });
 
-  const { data: activeVendorCount } = useQuery({
+  const { data: activeVendorCount, isLoading: activeVendorsLoading } = useQuery({
     queryKey: ['dashboard', 'activeVendors'],
     queryFn: async () => {
       const { count, error } = await supabase
@@ -136,7 +136,11 @@ export function DashboardPage() {
 
       {/* Summary stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPlaceholder label="Active Projects" value={activeProjectCount != null ? String(activeProjectCount) : '--'} />
+        <StatPlaceholder
+          label="Active Projects"
+          value={activeProjectCount != null ? String(activeProjectCount) : ''}
+          isLoading={activeProjectsLoading && activeProjectCount == null}
+        />
         <StatPlaceholder
           label="Open Tasks"
           value={openTaskCount != null ? String(openTaskCount) : '0'}
@@ -147,7 +151,11 @@ export function DashboardPage() {
           value={pendingBidCount != null ? String(pendingBidCount) : '0'}
           isLoading={countsLoading && pendingBidCount == null}
         />
-        <StatPlaceholder label="Active Vendors" value={activeVendorCount != null ? String(activeVendorCount) : '--'} />
+        <StatPlaceholder
+          label="Active Vendors"
+          value={activeVendorCount != null ? String(activeVendorCount) : ''}
+          isLoading={activeVendorsLoading && activeVendorCount == null}
+        />
       </div>
 
       {/* Quick navigation cards */}

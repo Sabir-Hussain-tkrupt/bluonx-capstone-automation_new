@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { SkeletonTable } from '@/components/ui/Skeleton';
 import { ROUTES } from '@/constants/routes';
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import type { BidPackagesListRow } from '@/features/bids/api/bid-packages-list.queries';
@@ -224,6 +225,46 @@ export function BidPackagesListTable({ items }: BidPackagesListTableProps) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function MobileCardSkeleton() {
+  return (
+    <div
+      className="w-full rounded-lg border border-secondary-200 bg-white p-4 shadow-sm"
+      aria-hidden="true"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="h-4 w-2/3 animate-pulse rounded bg-secondary-200" />
+        <div className="h-4 w-8 animate-pulse rounded-full bg-secondary-200" />
+      </div>
+      <div className="mt-4 space-y-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center justify-between gap-2">
+            <div className="h-3 w-1/3 animate-pulse rounded bg-secondary-200" />
+            <div className="h-3 w-1/4 animate-pulse rounded bg-secondary-200" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function BidPackagesListSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-secondary-200">
+      {/* Mobile card skeleton */}
+      <div className="space-y-3 p-4 md:hidden">
+        {Array.from({ length: rows }).map((_, i) => (
+          <MobileCardSkeleton key={i} />
+        ))}
+      </div>
+
+      {/* Desktop table skeleton */}
+      <div className="hidden md:block">
+        <SkeletonTable rows={8} columns={7} />
       </div>
     </div>
   );
