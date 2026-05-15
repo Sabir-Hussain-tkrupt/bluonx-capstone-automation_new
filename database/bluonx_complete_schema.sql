@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.40
--- Date:     May 01, 2026
+-- Version:  2.31
+-- Date:     May 14, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   28
+-- Tables:   29
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -13,7 +13,7 @@
 --   1. Access Control            (1 table)
 --   2. Trade & Vendor Management (5 tables)
 --   3. Project & Task Management (3 tables)
---   4. Bid Lifecycle             (10 tables)
+--   4. Bid Lifecycle             (11 tables)  ← was 10; +bid_revision_requests
 --   5. Award & Contract          (3 tables)
 --   6. Milestone Tracking        (3 tables)
 --   7. Communication & Audit     (3 tables)
@@ -357,6 +357,7 @@ CREATE TABLE magic_link_tokens (
   ip_address          INET,
   revoked_at          TIMESTAMPTZ,
   revoked_by          UUID          REFERENCES users(id) ON DELETE SET NULL,
+  bid_revision_request_id UUID REFERENCES bid_revision_requests(id) ON DELETE RESTRICT,
   created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
@@ -364,12 +365,13 @@ COMMENT ON TABLE  magic_link_tokens            IS 'Secure single-use tokens for 
 COMMENT ON COLUMN magic_link_tokens.token_hash IS 'SHA-256 hash of the actual token. Raw token is emailed, never stored.';
 COMMENT ON COLUMN magic_link_tokens.revoked_at IS 'When this token was hard-revoked (e.g., via Resend Bid Link). NULL = live. Validator rejects revoked tokens with 410.';
 COMMENT ON COLUMN magic_link_tokens.revoked_by IS 'User who revoked this token. NULL when not revoked or when the revoking user is later deleted.';
+COMMENT ON COLUMN magic_link_tokens.bid_revision_request_id IS 'Discriminator. NULL = initial bid invitation token. Non-NULL = revision token. Validator branches on this to bypass package-status check and to validate the revision request is still pending.';
 
 
 -- Bid submissions: vendor's actual bid response
 CREATE TABLE bid_submissions (
   id                  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  bid_invitation_id   UUID          NOT NULL UNIQUE REFERENCES bid_invitations(id) ON DELETE RESTRICT,
+  bid_invitation_id   UUID          NOT NULL REFERENCES bid_invitations(id) ON DELETE RESTRICT,
   vendor_id           UUID          NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,
   total_amount        DECIMAL(15,2) CHECK (total_amount >= 0),
   status              VARCHAR(20)   NOT NULL DEFAULT 'draft'
@@ -378,14 +380,23 @@ CREATE TABLE bid_submissions (
   is_direct_assign    BOOLEAN       NOT NULL DEFAULT FALSE,
   submitted_at        TIMESTAMPTZ,
   vendor_notes        TEXT,
+  supersedes_submission_id UUID    REFERENCES bid_submissions(id) ON DELETE RESTRICT,
+  is_superseded       BOOLEAN       NOT NULL DEFAULT FALSE,
+  revision_number     INTEGER       NOT NULL DEFAULT 1 CHECK (revision_number >= 1),
   created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT chk_bid_submissions_supersedes_not_self
+    CHECK (supersedes_submission_id IS NULL OR supersedes_submission_id != id),
 );
 
 COMMENT ON TABLE  bid_submissions              IS 'Vendor bid response. One per invitation. Supports draft state for auto-save.';
 COMMENT ON COLUMN bid_submissions.is_draft     IS 'TRUE while vendor is editing. Set FALSE on final submission.';
 COMMENT ON COLUMN bid_submissions.is_direct_assign IS 'TRUE for synthetic submissions created via direct_assign flow. Distinguishes from competitive bids.';
 COMMENT ON COLUMN bid_submissions.vendor_id    IS 'Denormalized for query perf. Enforced = bid_invitations.vendor_id by trigger.';
+COMMENT ON COLUMN bid_submissions.supersedes_submission_id IS 'Chain pointer to the predecessor submission this row supersedes. NULL = original. RESTRICT delete (audit chain).';
+COMMENT ON COLUMN bid_submissions.is_superseded IS 'TRUE when a newer revision exists. Trigger-maintained by fn_flip_superseded_on_revision_finalize.';
+COMMENT ON COLUMN bid_submissions.revision_number IS 'Human-visible version number. 1 = original. Each revision increments by 1 (enforced by fn_enforce_supersession_chain).';
 
 
 -- Bid line items: pricing breakdown within a submission
@@ -439,6 +450,39 @@ CREATE TABLE bid_scores (
 COMMENT ON TABLE  bid_scores                    IS 'Weighted scores per bid submission. One score record per submission.';
 COMMENT ON COLUMN bid_scores.scored_by          IS 'NULL = system-generated score. Non-NULL = manually adjusted by a user.';
 COMMENT ON COLUMN bid_scores.scoring_metadata   IS 'JSONB snapshot of scoring breakdown and weights used at time of scoring.';
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- bid_revision_requests: PM-initiated request asking a single vendor to
+-- revise their submitted bid. Lifecycle: pending → submitted | declined |
+-- expired | cancelled. One pending request per invitation at a time
+-- (partial unique index). Multiple terminal-state rows coexist as history.
+-- ────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE bid_revision_requests (
+  id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  bid_invitation_id       UUID          NOT NULL REFERENCES bid_invitations(id) ON DELETE RESTRICT,
+  original_submission_id  UUID          NOT NULL REFERENCES bid_submissions(id) ON DELETE RESTRICT,
+  pm_note                 TEXT          NOT NULL CHECK (length(pm_note) > 0),
+  revision_deadline       TIMESTAMPTZ   NOT NULL,
+  status                  VARCHAR(20)   NOT NULL DEFAULT 'pending'
+                                        CHECK (status IN ('pending', 'submitted', 'declined', 'expired', 'cancelled')),
+  decline_reason          TEXT,
+  requested_by            UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  requested_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  responded_at            TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  bid_revision_requests IS
+  'PM-initiated revision request for a single vendor. Independent deadline (may outlive bid_packages.deadline). One pending row per invitation; terminal-state rows kept as audit history.';
+COMMENT ON COLUMN bid_revision_requests.original_submission_id IS
+  'Denormalized pointer to the submission being revised. The successor relationship lives on bid_submissions.supersedes_submission_id.';
+COMMENT ON COLUMN bid_revision_requests.revision_deadline IS
+  'Per-request deadline, independent of bid_packages.deadline.';
+COMMENT ON COLUMN bid_revision_requests.decline_reason IS
+  'Optional short note from vendor on decline.';
 
 
 -- ========================================
@@ -672,6 +716,19 @@ CREATE UNIQUE INDEX idx_contracts_one_active_per_task
   ON contracts (task_id)
   WHERE status NOT IN ('terminated');
 
+-- Only ONE current (non-superseded, non-draft) submission per invitation.
+-- Allows historical (superseded) versions and concurrent drafts to coexist.
+-- Replaces the column-level UNIQUE that existed in v2.30.
+CREATE UNIQUE INDEX idx_bid_submissions_current_per_invitation
+  ON bid_submissions (bid_invitation_id)
+  WHERE is_superseded = FALSE AND is_draft = FALSE;
+
+-- Only ONE pending revision request per invitation at a time.
+-- Terminal-state rows (submitted/declined/expired/cancelled) coexist as history.
+CREATE UNIQUE INDEX idx_bid_revision_requests_one_pending_per_invitation
+  ON bid_revision_requests (bid_invitation_id)
+  WHERE status = 'pending';
+
 
 -- ============================================================================
 -- SECTION 5: PERFORMANCE INDEXES
@@ -746,6 +803,13 @@ CREATE INDEX idx_notifications_user_unread          ON notifications (user_id, i
                                                     WHERE is_read = FALSE;
 
 
+-- ---- Group 4: Bid Lifecycle additions ----
+CREATE INDEX idx_bid_revision_requests_invitation ON bid_revision_requests (bid_invitation_id);
+CREATE INDEX idx_bid_revision_requests_status ON bid_revision_requests (status);
+CREATE INDEX idx_bid_revision_requests_original_submission ON bid_revision_requests (original_submission_id);
+CREATE INDEX idx_magic_link_tokens_revision_request ON magic_link_tokens (bid_revision_request_id) WHERE bid_revision_request_id IS NOT NULL;
+
+
 -- ============================================================================
 -- ============================================================================
 --
@@ -805,6 +869,9 @@ CREATE TRIGGER trg_docusign_envelopes_updated_at
 CREATE TRIGGER trg_milestones_updated_at
   BEFORE UPDATE ON milestones FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+CREATE TRIGGER trg_bid_revision_requests_updated_at
+  BEFORE UPDATE ON bid_revision_requests FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 6.2  BID PACKAGE ROUND NUMBER AUTO-INCREMENT
@@ -834,6 +901,8 @@ CREATE TRIGGER trg_bid_packages_round_number
 -- When a bid_submission is created with or transitions to 'submitted',
 -- automatically update the parent bid_invitation status and responded_at.
 -- Handles both INSERT (draft or direct submit) and UPDATE (draft → submitted).
+-- responded_at uses COALESCE so revisions do not overwrite the original
+-- response timestamp. Original behavior is preserved for first-time submits.
 
 CREATE OR REPLACE FUNCTION fn_sync_bid_invitation_on_submission()
 RETURNS TRIGGER AS $$
@@ -841,7 +910,7 @@ BEGIN
   IF NEW.status = 'submitted' AND (OLD IS NULL OR OLD.status IS DISTINCT FROM 'submitted') THEN
     UPDATE bid_invitations
        SET status       = 'submitted',
-           responded_at = NOW()
+           responded_at = COALESCE(responded_at, NOW())
      WHERE id = NEW.bid_invitation_id;
   END IF;
   RETURN NEW;
@@ -1107,7 +1176,133 @@ CREATE TRIGGER trg_contracts_manage_vendor_capacity
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 6.6  SUPABASE AUTH → USER PROFILE CREATION
+-- 6.6  SUPERSESSION CHAIN VALIDATOR
+-- ────────────────────────────────────────────────────────────────────────────
+-- Validates that any submission row with a non-NULL supersedes_submission_id
+-- forms a well-shaped chain: predecessor exists, same bid_invitation, the
+-- predecessor is finalized (not a draft), and revision_number is exactly
+-- predecessor.revision_number + 1.
+--
+-- Fires only on INSERT or UPDATE of supersedes_submission_id / revision_number,
+-- so the predecessor's own is_superseded flip does NOT re-trigger validation.
+
+CREATE OR REPLACE FUNCTION fn_enforce_supersession_chain()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_predecessor RECORD;
+BEGIN
+  IF NEW.supersedes_submission_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT bid_invitation_id, is_draft, revision_number
+    INTO v_predecessor
+    FROM bid_submissions
+   WHERE id = NEW.supersedes_submission_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Supersedes_submission_id (%) references a non-existent submission', NEW.supersedes_submission_id;
+  END IF;
+
+  IF v_predecessor.bid_invitation_id != NEW.bid_invitation_id THEN
+    RAISE EXCEPTION 'Supersession must stay within the same bid_invitation. predecessor=%, new=%',
+      v_predecessor.bid_invitation_id, NEW.bid_invitation_id;
+  END IF;
+
+  IF v_predecessor.is_draft = TRUE THEN
+    RAISE EXCEPTION 'Cannot supersede a draft submission (predecessor id = %)', NEW.supersedes_submission_id;
+  END IF;
+
+  IF NEW.revision_number != v_predecessor.revision_number + 1 THEN
+    RAISE EXCEPTION 'revision_number must equal predecessor.revision_number + 1. Got: %, expected: %',
+      NEW.revision_number, v_predecessor.revision_number + 1;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_bid_submissions_enforce_supersession
+  BEFORE INSERT OR UPDATE OF supersedes_submission_id, revision_number
+  ON bid_submissions
+  FOR EACH ROW EXECUTE FUNCTION fn_enforce_supersession_chain();
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.7  PREDECESSOR-FLIP ON REVISION FINALIZE
+-- ────────────────────────────────────────────────────────────────────────────
+-- The load-bearing trigger for the per-vendor bid revision feature. When a
+-- revision draft finalizes (is_draft TRUE → FALSE), flips the predecessor's
+-- is_superseded to TRUE.
+--
+-- Critical: BEFORE UPDATE OF is_draft. The inner UPDATE (against the
+-- predecessor) runs to completion inside the BEFORE trigger, including its
+-- own index update. By the time Postgres checks the partial unique index
+-- on the outer UPDATE, the predecessor has already been removed from the
+-- index (is_superseded = TRUE no longer matches the predicate). The outer
+-- UPDATE sees only one matching row for its bid_invitation_id — no conflict.
+--
+-- Recursion termination: the OF is_draft column filter prevents this trigger
+-- from re-firing on the predecessor's own UPDATE (which only touches
+-- is_superseded). The body's OLD.is_draft = TRUE guard is defense-in-depth.
+
+CREATE OR REPLACE FUNCTION fn_flip_superseded_on_revision_finalize()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.supersedes_submission_id IS NOT NULL
+     AND OLD.is_draft = TRUE
+     AND NEW.is_draft = FALSE
+     AND NEW.is_superseded = FALSE THEN
+
+    UPDATE bid_submissions
+       SET is_superseded = TRUE
+     WHERE id = NEW.supersedes_submission_id
+       AND is_superseded = FALSE;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_bid_submissions_flip_superseded
+  BEFORE UPDATE OF is_draft ON bid_submissions
+  FOR EACH ROW EXECUTE FUNCTION fn_flip_superseded_on_revision_finalize();
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.8  AUTO-CLOSE REVISION REQUEST ON FINALIZE
+-- ────────────────────────────────────────────────────────────────────────────
+-- When a revision finalizes, close the matching pending revision request
+-- to status = 'submitted' in the same transaction.
+--
+-- AFTER UPDATE only (never INSERT) — the function body dereferences OLD.
+-- Revisions are always created as drafts and finalized via UPDATE, so
+-- UPDATE-only is sufficient.
+
+CREATE OR REPLACE FUNCTION fn_close_revision_request_on_finalize()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.supersedes_submission_id IS NOT NULL
+     AND OLD.is_draft = TRUE
+     AND NEW.is_draft = FALSE
+     AND NEW.status = 'submitted' THEN
+
+    UPDATE bid_revision_requests
+       SET status = 'submitted',
+           responded_at = NOW()
+     WHERE original_submission_id = NEW.supersedes_submission_id
+       AND status = 'pending';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_bid_submissions_close_revision_request
+  AFTER UPDATE ON bid_submissions
+  FOR EACH ROW EXECUTE FUNCTION fn_close_revision_request_on_finalize();
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.9  SUPABASE AUTH → USER PROFILE CREATION
 -- ────────────────────────────────────────────────────────────────────────────
 -- Automatically creates a row in public.users when a new user signs up
 -- via Supabase Auth. Uses SECURITY DEFINER because the trigger runs
@@ -1139,11 +1334,13 @@ CREATE TRIGGER trg_on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION fn_handle_new_auth_user();
 
 
+
+
 -- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
--- Total tables:    28
--- Total indexes:   49 custom (47 regular + 2 partial unique) + auto PK/UNIQUE
--- Total triggers:  25 (24 active + 1 disabled onboarding sync)
--- Total functions: 11 (10 active + 1 disabled onboarding sync)
+-- Total tables:    29
+-- Total indexes:   55 custom (51 regular + 4 partial unique) + auto PK/UNIQUE
+-- Total triggers:  29 (28 active + 1 disabled onboarding sync)
+-- Total functions: 14 (13 active + 1 disabled onboarding sync)
 -- ============================================================================

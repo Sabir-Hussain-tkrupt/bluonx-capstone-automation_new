@@ -141,6 +141,7 @@ ALTER TABLE bid_submissions         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_line_items          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_attachments         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_scores              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bid_revision_requests   ENABLE ROW LEVEL SECURITY;
 
 -- Group 5: Award & Contract
 ALTER TABLE awards                  ENABLE ROW LEVEL SECURITY;
@@ -466,6 +467,13 @@ CREATE POLICY bid_scores_select_authenticated
     (SELECT private.is_active_user())
   );
 
+-- ── bid_revision_requests ──────────────────────────────────────────────────
+CREATE POLICY bid_revision_requests_select_authenticated
+  ON bid_revision_requests FOR SELECT
+  TO authenticated
+  USING (
+    (SELECT private.is_active_user())
+  );
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GROUP 5: AWARD & CONTRACT
@@ -641,6 +649,7 @@ REVOKE ALL ON TABLE milestone_alerts        FROM anon;
 REVOKE ALL ON TABLE email_log               FROM anon;
 REVOKE ALL ON TABLE vendor_flags            FROM anon;
 REVOKE ALL ON TABLE notifications           FROM anon;
+REVOKE ALL ON TABLE bid_revision_requests   FROM anon;
 
 -- Also revoke anon access to our private helper functions
 REVOKE ALL ON SCHEMA private FROM anon;
