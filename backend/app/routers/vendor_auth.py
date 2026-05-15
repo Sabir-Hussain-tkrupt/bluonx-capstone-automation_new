@@ -75,7 +75,10 @@ async def validate_magic_link_token(
     # 1. Token exists?
     token_resp = (
         db.table("magic_link_tokens")
-        .select("id, bid_invitation_id, expires_at, is_used, revoked_at")
+        .select(
+            "id, bid_invitation_id, expires_at, is_used, revoked_at,"
+            " bid_revision_request_id"
+        )
         .eq("token_hash", token_hash)
         .limit(1)
         .execute()
@@ -107,6 +110,11 @@ async def validate_magic_link_token(
             detail="This bid link has expired",
         )
 
+    # Discriminator: NULL = initial-bid token, non-NULL = revision token.
+    # Revision tokens bypass the package-status and "already submitted" gates
+    # and instead require their revision request to still be pending.
+    is_revision_token = token_row.get("bid_revision_request_id") is not None
+
     # 3. Bid package still open? Also pulls the invitation + package identity
     #    we need for the JWT and the 409 check.
     invitation_resp = (
@@ -134,26 +142,50 @@ async def validate_magic_link_token(
 
     invitation = invitation_resp.data
     pkg = invitation["bid_packages"]
-    if pkg["status"] != "open":
-        raise HTTPException(
-            status_code=status.HTTP_423_LOCKED,
-            detail="Bidding for this package is closed",
-        )
 
-    # 4. Already submitted (non-draft)?
-    existing_resp = (
-        db.table("bid_submissions")
-        .select("id, is_draft")
-        .eq("bid_invitation_id", invitation["id"])
-        .limit(1)
-        .execute()
-    )
-    existing_rows = existing_resp.data or []
-    if existing_rows and existing_rows[0]["is_draft"] is False:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A bid has already been submitted for this invitation",
+    if is_revision_token:
+        # Revision tokens deliberately skip gate 3 (package status) and gate 4
+        # (no non-draft submission) — a revision exists precisely because a
+        # finalized submission is present, and the revision deadline is
+        # independent of the package deadline. The pending-request check below
+        # is the gate for revision tokens.
+        revision_resp = (
+            db.table("bid_revision_requests")
+            .select("id, status")
+            .eq("id", token_row["bid_revision_request_id"])
+            .limit(1)
+            .execute()
         )
+        revision_rows = revision_resp.data or []
+        if not revision_rows or revision_rows[0]["status"] != "pending":
+            # Covers submitted/declined/expired/cancelled terminal states and
+            # the (shouldn't-happen) deleted-request case.
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="This revision request is no longer active",
+            )
+    else:
+        # 3. Bid package still open?
+        if pkg["status"] != "open":
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail="Bidding for this package is closed",
+            )
+
+        # 4. Already submitted (non-draft)?
+        existing_resp = (
+            db.table("bid_submissions")
+            .select("id, is_draft")
+            .eq("bid_invitation_id", invitation["id"])
+            .limit(1)
+            .execute()
+        )
+        existing_rows = existing_resp.data or []
+        if existing_rows and existing_rows[0]["is_draft"] is False:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A bid has already been submitted for this invitation",
+            )
 
     # 5. First use only — mark token consumed + capture IP.
     if not token_row["is_used"]:
@@ -192,8 +224,11 @@ async def validate_magic_link_token(
         bid_invitation_id=invitation["id"],
         bid_package_id=pkg["id"],
         task_id=pkg["task_id"],
+        bid_revision_request_id=token_row.get("bid_revision_request_id"),
     )
     jwt_token = issue_vendor_jwt(ctx)
-    bid_context = build_bid_context(db, ctx.bid_invitation_id)
+    bid_context = build_bid_context(
+        db, ctx.bid_invitation_id, ctx.bid_revision_request_id
+    )
 
     return ValidateTokenResponse(jwt=jwt_token, bid_context=bid_context)
