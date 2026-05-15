@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SkeletonTable } from '@/components/ui/Skeleton';
 import { ROUTES } from '@/constants/routes';
 import { useProjects } from '@/features/projects/hooks/useProjects';
 import { useBidPackagesList } from '@/features/bids/hooks/useBidPackagesList';
-import { BidPackagesListTable } from '@/features/bids/components/BidPackagesListTable';
+import {
+  BidPackagesListTable,
+  BidPackagesListSkeleton,
+} from '@/features/bids/components/BidPackagesListTable';
 import type {
   BidPackageListFilters,
   BidPackageListSortBy,
@@ -131,7 +133,7 @@ export function BidPackageListPage() {
 
       {/* Body */}
       {isLoading ? (
-        <SkeletonTable rows={8} columns={7} />
+        <BidPackagesListSkeleton />
       ) : !items || items.length === 0 ? (
         hasActiveFilters ? (
           <EmptyState

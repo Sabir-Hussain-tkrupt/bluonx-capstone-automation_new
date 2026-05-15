@@ -14,6 +14,13 @@ interface BidAmountBarChartProps {
   submittedBids: SubmittedBid[];
 }
 
+const MAX_LABEL_CHARS = 14;
+
+function truncateLabel(value: string): string {
+  if (value.length <= MAX_LABEL_CHARS) return value;
+  return `${value.slice(0, MAX_LABEL_CHARS - 1)}…`;
+}
+
 export function BidAmountBarChart({ submittedBids }: BidAmountBarChartProps) {
   if (submittedBids.length === 0) return null;
 
@@ -45,6 +52,7 @@ export function BidAmountBarChart({ submittedBids }: BidAmountBarChartProps) {
               dataKey="name"
               width={140}
               tick={{ fontSize: 12, fill: '#334155' }}
+              tickFormatter={(value: string) => truncateLabel(value)}
             />
             <Tooltip
               formatter={(value: number) => [formatCurrency(value), 'Total']}
