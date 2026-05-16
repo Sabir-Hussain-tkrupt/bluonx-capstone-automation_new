@@ -297,6 +297,51 @@ class BidScoreResponse(BluOnXBase):
     scored_by: UUID | None = None
 
 
+# ── bid_revision_requests ────────────────────────────────────────────────
+
+BID_REVISION_REQUEST_STATUSES = Literal[
+    "pending", "submitted", "declined", "expired", "cancelled",
+]
+
+
+class BidRevisionRequestCreate(BluOnXBase):
+    """PM-initiated request asking one vendor to revise a submitted bid.
+
+    `original_submission_id` is NOT accepted from the client — it is derived
+    server-side from the invitation's current (non-superseded, finalized)
+    submission. `requested_by` comes from the authenticated PM.
+    """
+
+    bid_invitation_id: UUID
+    pm_note: str = Field(..., min_length=1, max_length=2000)
+    revision_deadline: datetime
+
+
+class BidRevisionRequestResponse(BluOnXBase):
+    id: UUID
+    bid_invitation_id: UUID
+    original_submission_id: UUID
+    pm_note: str
+    revision_deadline: datetime
+    status: str
+    decline_reason: str | None = None
+    requested_by: UUID
+    requested_at: datetime
+    responded_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BidRevisionRequestCreateResponse(BluOnXBase):
+    """201 body for create. Carries the raw magic-link token + portal URL so
+    the (later) email step can deliver it. The raw token is never persisted.
+    """
+
+    revision_request: BidRevisionRequestResponse
+    magic_link_token: str
+    portal_url: str
+
+
 # ── magic_link_tokens (model only, no router) ───────────────────────────
 
 
