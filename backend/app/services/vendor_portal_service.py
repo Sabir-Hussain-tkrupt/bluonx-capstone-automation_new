@@ -43,6 +43,7 @@ from app.models.vendor_portal import (
     SubmissionLineItemResponse,
     SubmissionResponse,
     VendorBidContextModel,
+    VendorRevisionContextModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,16 +59,37 @@ def _parse_timestamptz(value: str | datetime) -> datetime:
     return dt
 
 
-def build_bid_context(db, bid_invitation_id: UUID) -> VendorBidContextModel:
+def build_bid_context(
+    db,
+    bid_invitation_id: UUID,
+    bid_revision_request_id: UUID | None = None,
+) -> VendorBidContextModel:
     """Assemble the full VendorBidContext payload for a validated invitation.
 
     Assumes the invitation has already been authorized (either via magic link
     validation or vendor JWT) — this function does no permission checks.
+
+    When `bid_revision_request_id` is set the vendor entered via a revision
+    link: a `revision_context` block is attached and draft resumption is
+    scoped to the revision draft (never the stale original draft).
     """
     invitation_row = _fetch_invitation_tree(db, bid_invitation_id)
     template_items = _fetch_template_items(db, invitation_row["bid_packages"]["bid_template_id"])
     project_documents = _fetch_project_documents(db, invitation_row["bid_package_id"])
-    existing_draft = _fetch_existing_draft(db, bid_invitation_id, template_items)
+
+    revision_context: VendorRevisionContextModel | None = None
+    original_submission_id: UUID | None = None
+    if bid_revision_request_id is not None:
+        revision_context = _fetch_revision_context(db, bid_revision_request_id)
+        original_submission_id = revision_context.original_submission_id
+
+    existing_draft = _fetch_existing_draft(
+        db,
+        bid_invitation_id,
+        template_items,
+        bid_revision_request_id=bid_revision_request_id,
+        original_submission_id=original_submission_id,
+    )
 
     pkg = invitation_row["bid_packages"]
     task = pkg["tasks"]
@@ -111,6 +133,7 @@ def build_bid_context(db, bid_invitation_id: UUID) -> VendorBidContextModel:
         ),
         project_documents=project_documents,
         existing_draft=existing_draft,
+        revision_context=revision_context,
     )
 
 
@@ -183,20 +206,76 @@ def _fetch_project_documents(db, bid_package_id: str) -> list[PortalProjectDocum
     return out
 
 
+def _fetch_revision_context(
+    db, bid_revision_request_id: UUID
+) -> VendorRevisionContextModel:
+    """Load the revision request + the original submission's revision_number.
+
+    Caller (`build_bid_context`) only invokes this for revision tokens, and
+    the validator has already proven the request exists and is pending — so a
+    missing row here is an invariant breach, not a vendor-facing condition.
+    """
+    rev_resp = (
+        db.table("bid_revision_requests")
+        .select("id, pm_note, revision_deadline, original_submission_id")
+        .eq("id", str(bid_revision_request_id))
+        .single()
+        .execute()
+    )
+    if not rev_resp.data:
+        raise RuntimeError(
+            f"Bid revision request not found: {bid_revision_request_id}"
+        )
+    rev = rev_resp.data
+
+    orig_resp = (
+        db.table("bid_submissions")
+        .select("revision_number")
+        .eq("id", rev["original_submission_id"])
+        .single()
+        .execute()
+    )
+    if not orig_resp.data:
+        raise RuntimeError(
+            f"Original submission not found: {rev['original_submission_id']}"
+        )
+
+    return VendorRevisionContextModel(
+        bid_revision_request_id=rev["id"],
+        pm_note=rev["pm_note"],
+        revision_deadline=rev["revision_deadline"],
+        original_submission_id=rev["original_submission_id"],
+        original_revision_number=orig_resp.data["revision_number"],
+    )
+
+
 def _fetch_existing_draft(
     db,
     bid_invitation_id: UUID,
     template_items: list[PortalTemplateItemModel],
+    bid_revision_request_id: UUID | None = None,
+    original_submission_id: UUID | None = None,
 ) -> BidDraftModel | None:
-    """Hydrate the in-progress draft submission, if one exists."""
-    resp = (
+    """Hydrate the in-progress draft submission, if one exists.
+
+    For a revision link the probe is scoped to the revision draft via
+    `supersedes_submission_id = original_submission_id`, so a vendor never
+    resumes their stale original draft. `is_superseded = FALSE` is always
+    applied — a no-op on current data, but it defends against a superseded
+    history row ever transitioning back to a draft.
+    """
+    query = (
         db.table("bid_submissions")
         .select("id, vendor_notes, total_amount, updated_at, is_draft")
         .eq("bid_invitation_id", str(bid_invitation_id))
         .eq("is_draft", True)
-        .limit(1)
-        .execute()
+        .eq("is_superseded", False)
     )
+    if bid_revision_request_id is not None:
+        query = query.eq(
+            "supersedes_submission_id", str(original_submission_id)
+        )
+    resp = query.limit(1).execute()
     rows = resp.data or []
     if not rows:
         return None

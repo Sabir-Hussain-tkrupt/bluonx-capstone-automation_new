@@ -44,6 +44,7 @@ class VendorContext:
     bid_invitation_id: UUID
     bid_package_id: UUID
     task_id: UUID
+    bid_revision_request_id: UUID | None = None
 
 
 def issue_vendor_jwt(ctx: VendorContext) -> str:
@@ -59,6 +60,10 @@ def issue_vendor_jwt(ctx: VendorContext) -> str:
         "iat": now,
         "exp": now + timedelta(hours=settings.VENDOR_JWT_EXPIRY_HOURS),
     }
+    # Revision claim is OMITTED entirely for initial-bid tokens so existing
+    # tokens stay bit-identical. Only revision tokens carry this claim.
+    if ctx.bid_revision_request_id is not None:
+        payload["bid_revision_request_id"] = str(ctx.bid_revision_request_id)
     return jwt.encode(payload, settings.VENDOR_JWT_SECRET, algorithm=VENDOR_JWT_ALGORITHM)
 
 
@@ -95,12 +100,17 @@ async def get_vendor_context(
         )
 
     try:
+        # Optional: absent for initial-bid tokens, present for revision tokens.
+        # Read via .get() and never raise on absence.
+        revision_raw = payload.get("bid_revision_request_id")
+        bid_revision_request_id = UUID(revision_raw) if revision_raw else None
         return VendorContext(
             vendor_id=UUID(payload["vendor_id"]),
             vendor_contact_id=UUID(payload["vendor_contact_id"]),
             bid_invitation_id=UUID(payload["bid_invitation_id"]),
             bid_package_id=UUID(payload["bid_package_id"]),
             task_id=UUID(payload["task_id"]),
+            bid_revision_request_id=bid_revision_request_id,
         )
     except (KeyError, ValueError) as e:
         logger.warning("Vendor JWT payload malformed: %s", e)

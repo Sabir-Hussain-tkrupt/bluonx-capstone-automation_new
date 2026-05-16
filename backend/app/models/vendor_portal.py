@@ -95,6 +95,20 @@ class BidDraftModel(BluOnXBase):
     last_saved_at: datetime
 
 
+class VendorRevisionContextModel(BluOnXBase):
+    """Present only when the vendor entered via a revision magic link.
+
+    Frontend checks `revision_context is not None` to render the
+    "you are revising version N" banner.
+    """
+
+    bid_revision_request_id: UUID
+    pm_note: str
+    revision_deadline: datetime
+    original_submission_id: UUID
+    original_revision_number: int
+
+
 class VendorBidContextModel(BluOnXBase):
     vendor: PortalVendorModel
     project: PortalProjectModel
@@ -103,6 +117,7 @@ class VendorBidContextModel(BluOnXBase):
     bid_template: PortalBidTemplateModel
     project_documents: list[PortalProjectDocumentModel]
     existing_draft: BidDraftModel | None = None
+    revision_context: VendorRevisionContextModel | None = None
 
 
 class ValidateTokenResponse(BluOnXBase):
