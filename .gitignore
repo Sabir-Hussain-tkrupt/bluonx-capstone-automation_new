@@ -81,3 +81,5 @@ build/
 # Claude
 .claude/
 CLAUDE.md
+
+/tmp

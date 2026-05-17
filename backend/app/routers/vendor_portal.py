@@ -137,6 +137,68 @@ def _find_existing_submission(db: Client, bid_invitation_id: UUID) -> dict | Non
     return rows[0] if rows else None
 
 
+def _resolve_revision_draft_target(
+    db: Client, ctx: VendorContext
+) -> tuple[str, int, str | None]:
+    """Revision pre-flight shared by both create_draft 409 spots.
+
+    Returns (original_submission_id, predecessor_revision_number,
+    existing_revision_draft_id | None). Centralized so the pre-flight
+    check and the UNIQUE-violation recovery branch stay identical.
+    """
+    rr_resp = (
+        db.table("bid_revision_requests")
+        .select("id, original_submission_id, status")
+        .eq("id", str(ctx.bid_revision_request_id))
+        .limit(1)
+        .execute()
+    )
+    rr_rows = rr_resp.data or []
+    if not rr_rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Revision request not found",
+        )
+    rr = rr_rows[0]
+    if rr["status"] != "pending":
+        # Defense-in-depth: assert_revision_request_active already
+        # enforced this at the guard step.
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This revision request is no longer active",
+        )
+    original_submission_id = str(rr["original_submission_id"])
+
+    pred_resp = (
+        db.table("bid_submissions")
+        .select("revision_number")
+        .eq("id", original_submission_id)
+        .limit(1)
+        .execute()
+    )
+    pred_rows = pred_resp.data or []
+    if not pred_rows:
+        # Unreachable: the revision request pins a finalized predecessor.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original submission not found",
+        )
+    predecessor_revision_number = pred_rows[0]["revision_number"]
+
+    draft_resp = (
+        db.table("bid_submissions")
+        .select("id")
+        .eq("bid_invitation_id", str(ctx.bid_invitation_id))
+        .eq("is_draft", True)
+        .eq("supersedes_submission_id", original_submission_id)
+        .limit(1)
+        .execute()
+    )
+    draft_rows = draft_resp.data or []
+    existing_draft_id = draft_rows[0]["id"] if draft_rows else None
+    return original_submission_id, predecessor_revision_number, existing_draft_id
+
+
 def _is_unique_violation(err: APIError) -> bool:
     """Heuristic — supabase-py wraps Postgres errors in APIError with code.
 
@@ -185,23 +247,42 @@ async def create_draft(
     (from an auto-save race or a retried request) returns 409 with the
     existing submission id so the frontend can switch to PUT.
     """
-    assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    if ctx.bid_revision_request_id is None:
+        assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    else:
+        # Revision tokens validate against the per-request deadline +
+        # status, NOT the package deadline / package status.
+        assert_revision_request_active(db, ctx.bid_revision_request_id)
 
-    # Short-circuit if a submission already exists — avoids a roundtrip to
-    # the UNIQUE-violation path on the common case.
-    existing = _find_existing_submission(db, ctx.bid_invitation_id)
-    if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "detail": (
-                    "Draft already exists"
-                    if existing["is_draft"]
-                    else "Bid already submitted"
-                ),
-                "existing_submission_id": existing["id"],
-            },
+    revision_original_id: str | None = None
+    revision_number: int | None = None
+    if ctx.bid_revision_request_id is None:
+        # Initial bid: short-circuit if a submission already exists —
+        # avoids a roundtrip to the UNIQUE-violation path on the common
+        # case. The finalized predecessor of a revision is EXPECTED to
+        # exist, so this 409 must not fire on the revision path.
+        existing = _find_existing_submission(db, ctx.bid_invitation_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": (
+                        "Draft already exists"
+                        if existing["is_draft"]
+                        else "Bid already submitted"
+                    ),
+                    "existing_submission_id": existing["id"],
+                },
+            )
+    else:
+        revision_original_id, predecessor_rev, existing_draft_id = (
+            _resolve_revision_draft_target(db, ctx)
         )
+        if existing_draft_id is not None:
+            # Idempotent resume: vendor reopened the revision link.
+            # Returns with the route's 201 (create-or-resume semantic).
+            return load_draft_response(db, existing_draft_id)
+        revision_number = predecessor_rev + 1
 
     # Fetch template to copy description/item_type/uom/sort_order into the
     # line-item rows. This decouples the submission from future template
@@ -223,25 +304,39 @@ async def create_draft(
         "is_draft": True,
         "is_direct_assign": False,
     }
+    if revision_original_id is not None:
+        # fn_enforce_supersession_chain validates: predecessor exists,
+        # same invitation, predecessor finalized, revision_number == +1.
+        submission_row["supersedes_submission_id"] = revision_original_id
+        submission_row["revision_number"] = revision_number
     try:
         insert_resp = (
             db.table("bid_submissions").insert(submission_row).execute()
         )
     except APIError as e:
         if _is_unique_violation(e):
-            existing = _find_existing_submission(db, ctx.bid_invitation_id)
-            if existing:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "detail": (
-                            "Draft already exists"
-                            if existing["is_draft"]
-                            else "Bid already submitted"
-                        ),
-                        "existing_submission_id": existing["id"],
-                    },
-                ) from e
+            if ctx.bid_revision_request_id is None:
+                existing = _find_existing_submission(db, ctx.bid_invitation_id)
+                if existing:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "detail": (
+                                "Draft already exists"
+                                if existing["is_draft"]
+                                else "Bid already submitted"
+                            ),
+                            "existing_submission_id": existing["id"],
+                        },
+                    ) from e
+            else:
+                # Effectively unreachable: the partial unique index
+                # idx_bid_submissions_current_per_invitation excludes
+                # drafts, so a revision-draft insert can't collide. If a
+                # concurrent revision draft somehow exists, resume it.
+                _, _, existing_draft_id = _resolve_revision_draft_target(db, ctx)
+                if existing_draft_id is not None:
+                    return load_draft_response(db, existing_draft_id)
         logger.exception("bid_submissions insert failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -294,7 +389,12 @@ async def update_draft(
     """
     sub = _fetch_owned_submission(db, ctx, submission_id)
     _assert_draft(sub)
-    assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    if ctx.bid_revision_request_id is None:
+        assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    else:
+        # Revision draft edits validate against the revision request, not
+        # the (now-closed) package deadline / status.
+        assert_revision_request_active(db, ctx.bid_revision_request_id)
 
     template_id = await _fetch_template_id_for_invitation(db, ctx.bid_invitation_id)
     template_map = fetch_template_items_map(db, template_id)
