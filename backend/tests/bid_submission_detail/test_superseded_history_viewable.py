@@ -16,6 +16,8 @@ from app.core.auth import get_current_active_user
 from app.main import app
 from app.core.supabase_client import get_supabase
 
+from uuid import uuid4
+
 from .conftest import (
     SUBMISSION_ID,
     build_chain,
@@ -23,6 +25,7 @@ from .conftest import (
 )
 
 URL = f"/api/v1/bid-submissions/{SUBMISSION_ID}"
+PREDECESSOR_ID = str(uuid4())
 
 
 @pytest.fixture()
@@ -30,6 +33,8 @@ def superseded_client(sample_submission_row, sample_line_items_unordered,
                        sample_attachments, authed_user):
     sub = dict(sample_submission_row)
     sub["is_superseded"] = True
+    sub["supersedes_submission_id"] = PREDECESSOR_ID
+    sub["revision_number"] = 2
 
     client = MagicMock()
 
@@ -57,4 +62,9 @@ def superseded_client(sample_submission_row, sample_line_items_unordered,
 def test_superseded_submission_detail_still_200(superseded_client):
     resp = superseded_client.get(URL)
     assert resp.status_code == 200, resp.text
-    assert resp.json()["id"] == str(SUBMISSION_ID)
+    body = resp.json()
+    assert body["id"] == str(SUBMISSION_ID)
+    # Revision metadata so the SPA can render a "Historical version" badge.
+    assert body["is_superseded"] is True
+    assert body["supersedes_submission_id"] is not None
+    assert body["revision_number"] >= 2
