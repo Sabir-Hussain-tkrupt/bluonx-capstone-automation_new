@@ -40,6 +40,7 @@ from app.models.vendor_portal import (
     AttachmentResponse,
     BidDraftModel,
     DraftPayload,
+    RevisionPrefillResponse,
     SignedUrlResponse,
     SubmissionResponse,
     SubmitBidResponse,
@@ -49,8 +50,10 @@ from app.services.email_service import EmailService, get_email_service
 from app.services.template_renderer import template_renderer
 from app.services.vendor_portal_service import (
     assert_package_open_and_before_deadline,
+    assert_revision_request_active,
     build_bid_context,
     build_line_item_rows,
+    build_revision_prefill,
     fetch_attachments,
     fetch_submission_detail,
     fetch_template_items_map,
@@ -344,7 +347,12 @@ async def submit_bid(
     """
     sub = _fetch_owned_submission(db, ctx, submission_id)
     _assert_draft(sub)
-    assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    if ctx.bid_revision_request_id is None:
+        assert_package_open_and_before_deadline(db, ctx.bid_package_id)
+    else:
+        # Revision tokens validate against the per-request deadline +
+        # status, NOT the package deadline / package status.
+        assert_revision_request_active(db, ctx.bid_revision_request_id)
 
     # Re-read authoritative state (NEVER trust the request body for
     # validation — drafts are the source of truth for submit-time checks).
@@ -390,12 +398,16 @@ async def submit_bid(
             }
         )
         .eq("id", str(submission_id))
+        .eq("is_draft", True)
         .execute()
     )
     if not update_resp.data:
+        # is_draft in the WHERE makes this also catch the TOCTOU race
+        # between _assert_draft and this UPDATE. Spec-mandated
+        # defense-in-depth: previously a (today-unreachable) 500.
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to finalize submission",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Bid has already been submitted",
         )
 
     # The total_amount returned to the client / logged in the email must
@@ -431,6 +443,73 @@ async def submit_bid(
         attachment_count=attachment_count,
         confirmation_email_sent=email_sent,
     )
+
+
+@router.get(
+    "/submissions/{submission_id}/revision-prefill",
+    response_model=RevisionPrefillResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_revision_prefill(
+    submission_id: UUID,
+    ctx: VendorContext = Depends(get_vendor_context),
+    db: Client = Depends(get_supabase),
+) -> RevisionPrefillResponse:
+    """Original submission's data, shaped for the revision form prefill.
+
+    Revision-only: requires a revision JWT AND the path submission_id
+    must equal the revision request's original_submission_id AND the JWT
+    vendor must own the submission. Vendor identity comes from the JWT,
+    never from the request.
+    """
+    if ctx.bid_revision_request_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available for revision requests",
+        )
+
+    rr_resp = (
+        db.table("bid_revision_requests")
+        .select("id, original_submission_id")
+        .eq("id", str(ctx.bid_revision_request_id))
+        .limit(1)
+        .execute()
+    )
+    rr_rows = rr_resp.data or []
+    if not rr_rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Revision request not found",
+        )
+    if str(rr_rows[0]["original_submission_id"]) != str(submission_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Submission does not match this revision request",
+        )
+
+    sub_resp = (
+        db.table("bid_submissions")
+        .select("vendor_id")
+        .eq("id", str(submission_id))
+        .limit(1)
+        .execute()
+    )
+    sub_rows = sub_resp.data or []
+    if not sub_rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found",
+        )
+    if str(sub_rows[0]["vendor_id"]) != str(ctx.vendor_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Submission does not belong to this vendor",
+        )
+
+    template_id = await _fetch_template_id_for_invitation(
+        db, ctx.bid_invitation_id
+    )
+    return build_revision_prefill(db, submission_id, template_id)
 
 
 @router.get(

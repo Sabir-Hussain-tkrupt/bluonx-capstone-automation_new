@@ -41,6 +41,27 @@ async def create_award(
     db: Client = Depends(get_supabase),
 ):
     """Create an award for a bid submission."""
+    # Fail fast BEFORE any (future) side effects: never award a
+    # submission the vendor has since revised. The DB trigger
+    # fn_enforce_award_consistency would only catch this with a cryptic
+    # message; this gives the PM a clear, actionable error.
+    sub_resp = (
+        db.table("bid_submissions")
+        .select("id, is_superseded")
+        .eq("id", str(award.bid_submission_id))
+        .limit(1)
+        .execute()
+    )
+    sub_rows = sub_resp.data or []
+    if sub_rows and sub_rows[0].get("is_superseded"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This submission has been revised. "
+                "Award the latest version instead."
+            ),
+        )
+
     # TODO: Implement in later phase
     raise HTTPException(status_code=501, detail="Not implemented")
 

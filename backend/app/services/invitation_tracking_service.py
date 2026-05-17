@@ -126,7 +126,7 @@ def _fetch_invitations(
         db.table("bid_invitations")
         .select(
             "*, vendors(id, company_name), vendor_contacts(full_name, email),"
-            " bid_submissions(id)"
+            " bid_submissions(id, is_superseded)"
         )
         .eq("bid_package_id", str(bid_package_id))
     )
@@ -149,6 +149,7 @@ def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
         )
         .eq("bid_invitations.bid_package_id", str(bid_package_id))
         .eq("bid_invitations.status", "submitted")
+        .eq("is_superseded", False)
         .execute()
     )
     return _unwrap_list(resp.data)
@@ -190,7 +191,18 @@ def _transform_invitation(row: dict) -> dict:
         subs = subs_raw
     else:
         subs = []
-    bid_submission_id = subs[0].get("id") if subs else None
+    # Deep-link the current (non-superseded) submission. Fall back to
+    # subs[0] for pre-revision / single / direct-assign rows (no
+    # is_superseded key, or no superseded sibling). No PostgREST
+    # embedded-filter syntax — zero codebase precedent; this Python
+    # post-filter is deterministic.
+    active = [s for s in subs if not s.get("is_superseded")]
+    if active:
+        bid_submission_id = active[0].get("id")
+    elif subs:
+        bid_submission_id = subs[0].get("id")
+    else:
+        bid_submission_id = None
     return {
         "id": row.get("id"),
         "vendor_id": row.get("vendor_id"),

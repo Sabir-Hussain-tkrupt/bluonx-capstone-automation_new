@@ -40,6 +40,8 @@ from app.models.vendor_portal import (
     PortalTaskModel,
     PortalTemplateItemModel,
     PortalVendorModel,
+    RevisionPrefillLineItem,
+    RevisionPrefillResponse,
     SubmissionLineItemResponse,
     SubmissionResponse,
     VendorBidContextModel,
@@ -338,6 +340,88 @@ def _fetch_existing_draft(
     )
 
 
+def build_revision_prefill(
+    db, original_submission_id: UUID, template_id: str | UUID | None
+) -> RevisionPrefillResponse:
+    """Original submission's data shaped for the revision form prefill.
+
+    bid_line_items carries no template_item_id; we derive it via the
+    sort_order ↔ template.sort_order map, exactly as _fetch_existing_draft
+    does. Orphan lines (sort_order not in the current template) are
+    skipped with a warning rather than poisoning the whole prefill.
+    """
+    sub_resp = (
+        db.table("bid_submissions")
+        .select("id, vendor_notes, total_amount")
+        .eq("id", str(original_submission_id))
+        .limit(1)
+        .execute()
+    )
+    sub_rows = sub_resp.data or []
+    if not sub_rows:
+        # Unreachable: the caller already validated this submission.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found",
+        )
+    sub = sub_rows[0]
+
+    template_map = fetch_template_items_map(db, template_id)
+    sort_to_template_id: dict[int, str] = {
+        row["sort_order"]: tid for tid, row in template_map.items()
+    }
+
+    li_resp = (
+        db.table("bid_line_items")
+        .select(
+            "description, item_type, quantity, unit_of_measure,"
+            " unit_price, lump_sum_amount, line_total, sort_order"
+        )
+        .eq("bid_submission_id", str(original_submission_id))
+        .order("sort_order")
+        .execute()
+    )
+    line_items: list[RevisionPrefillLineItem] = []
+    for row in li_resp.data or []:
+        template_item_id = sort_to_template_id.get(row["sort_order"])
+        if not template_item_id:
+            logger.warning(
+                "Submission %s has line with sort_order=%s not in current "
+                "template — skipping in revision prefill",
+                original_submission_id,
+                row["sort_order"],
+            )
+            continue
+        line_items.append(
+            RevisionPrefillLineItem(
+                template_item_id=template_item_id,
+                description=row["description"],
+                item_type=row["item_type"],
+                quantity=row.get("quantity"),
+                unit_of_measure=row.get("unit_of_measure"),
+                unit_price=row.get("unit_price"),
+                lump_sum_amount=row.get("lump_sum_amount"),
+                line_total=row["line_total"],
+                sort_order=row["sort_order"],
+            )
+        )
+
+    att_resp = (
+        db.table("bid_attachments")
+        .select("id")
+        .eq("bid_submission_id", str(original_submission_id))
+        .execute()
+    )
+    attachment_ids = [r["id"] for r in (att_resp.data or [])]
+
+    return RevisionPrefillResponse(
+        total_amount=sub.get("total_amount"),
+        vendor_notes=sub.get("vendor_notes") or "",
+        line_items=line_items,
+        attachment_ids=attachment_ids,
+    )
+
+
 # ── Submission write helpers (Tasks 5.3–5.6) ─────────────────────────────
 
 
@@ -373,6 +457,41 @@ def assert_package_open_and_before_deadline(db, bid_package_id: UUID) -> None:
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="The bid deadline has passed",
+        )
+
+
+def assert_revision_request_active(db, bid_revision_request_id: UUID) -> None:
+    """Revision-path analogue of assert_package_open_and_before_deadline.
+
+    Mirrors the decline guard (bid_revision_service.decline_*) but
+    ADDITIONALLY enforces revision_deadline > NOW(): a revision token is
+    valid against the per-request deadline + status, never the package
+    deadline / package status.
+    """
+    resp = (
+        db.table("bid_revision_requests")
+        .select("id, status, revision_deadline")
+        .eq("id", str(bid_revision_request_id))
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Revision request not found",
+        )
+    rr = rows[0]
+    if rr["status"] != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This revision request is no longer active",
+        )
+    deadline = _parse_timestamptz(rr["revision_deadline"])
+    if deadline <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This revision request is no longer active",
         )
 
 

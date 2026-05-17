@@ -95,6 +95,32 @@ class BidDraftModel(BluOnXBase):
     last_saved_at: datetime
 
 
+class RevisionPrefillLineItem(BluOnXBase):
+    template_item_id: UUID
+    description: str
+    item_type: Literal["lump_sum", "unit_price"]
+    quantity: Decimal | None = None
+    unit_of_measure: str | None = None
+    unit_price: Decimal | None = None
+    lump_sum_amount: Decimal | None = None
+    line_total: Decimal
+    sort_order: int
+
+
+class RevisionPrefillResponse(BluOnXBase):
+    """Original submission's data, shaped for the revision form prefill.
+
+    Returned only by the revision-only prefill endpoint. attachment_ids
+    are the original submission's bid_attachments; the SPA renders them
+    read-only as "previously uploaded".
+    """
+
+    total_amount: Decimal | None = None
+    vendor_notes: str
+    line_items: list[RevisionPrefillLineItem]
+    attachment_ids: list[UUID]
+
+
 class VendorRevisionContextModel(BluOnXBase):
     """Present only when the vendor entered via a revision magic link.
 
