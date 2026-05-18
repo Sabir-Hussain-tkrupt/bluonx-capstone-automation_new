@@ -41,4 +41,10 @@ export const deleteAttachment: PortalApi['deleteAttachment'] = (submissionId, at
 export const downloadProjectDocument: PortalApi['downloadProjectDocument'] = (documentId) =>
   impl.downloadProjectDocument(documentId);
 
+export const getRevisionPrefill: PortalApi['getRevisionPrefill'] = (originalSubmissionId) =>
+  impl.getRevisionPrefill(originalSubmissionId);
+export const listSubmissionAttachments: PortalApi['listSubmissionAttachments'] = (
+  submissionId,
+) => impl.listSubmissionAttachments(submissionId);
+
 export type { DraftPayload } from './portalApi.types';

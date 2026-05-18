@@ -18,6 +18,8 @@ import type {
   BidDraft,
   FormAttachment,
   PortalFieldError,
+  RevisionPrefillResponse,
+  SubmissionAttachmentMeta,
   SubmitBidResult,
   ValidateTokenResponse,
 } from '../types/portal';
@@ -255,6 +257,33 @@ async function deleteAttachment(
   }
 }
 
+// ─── Revision prefill + attachment metadata (Phase E) ───────────────
+async function getRevisionPrefill(
+  originalSubmissionId: string,
+): Promise<RevisionPrefillResponse> {
+  try {
+    const { data } = await realAxios.get<RevisionPrefillResponse>(
+      `/vendor-portal/submissions/${originalSubmissionId}/revision-prefill`,
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+async function listSubmissionAttachments(
+  submissionId: string,
+): Promise<SubmissionAttachmentMeta[]> {
+  try {
+    const { data } = await realAxios.get<SubmissionAttachmentMeta[]>(
+      `/vendor-portal/submissions/${submissionId}/attachments`,
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
 // ─── Project document download (Task 5.3) ───────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   try {
@@ -278,4 +307,6 @@ export const realPortalApi: PortalApi = {
   uploadAttachment,
   deleteAttachment,
   downloadProjectDocument,
+  getRevisionPrefill,
+  listSubmissionAttachments,
 };

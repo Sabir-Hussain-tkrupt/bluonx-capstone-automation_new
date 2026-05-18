@@ -7,6 +7,7 @@ import type { SubmitBidResult } from '../types/portal';
 interface LocationState {
   result?: SubmitBidResult;
   grandTotal?: number;
+  isRevision?: boolean;
 }
 
 function coerceTotal(
@@ -27,6 +28,7 @@ export function SubmissionConfirmationPage() {
   const { vendor, project, task } = useBidContext();
   const state = (location.state ?? {}) as LocationState;
   const result = state.result;
+  const isRevision = state.isRevision ?? false;
   const total = coerceTotal(result, state.grandTotal ?? 0);
   const submittedAt = result?.submitted_at
     ? new Date(result.submitted_at)
@@ -52,10 +54,20 @@ export function SubmissionConfirmationPage() {
           </svg>
         </div>
         <h1 className="mt-4 text-2xl font-bold text-secondary-900 sm:text-3xl">
-          Bid submitted successfully
+          {isRevision ? 'Revised Bid Submitted' : 'Bid submitted successfully'}
         </h1>
         <p className="mt-2 text-sm text-secondary-600">
-          Thank you, {vendor.primary_contact_name}. Your bid has been received by BluOnX.
+          {isRevision ? (
+            <>
+              Your revised bid has been received. The project manager has been
+              notified, and your original bid remains in the record.
+            </>
+          ) : (
+            <>
+              Thank you, {vendor.primary_contact_name}. Your bid has been
+              received by BluOnX.
+            </>
+          )}
         </p>
       </div>
 

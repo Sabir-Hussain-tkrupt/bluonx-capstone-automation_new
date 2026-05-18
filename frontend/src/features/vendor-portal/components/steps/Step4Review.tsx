@@ -15,6 +15,8 @@ export interface Step4ReviewProps {
   submitting: boolean;
   /** When true (deadline expired mid-session), Submit is locked. */
   disabled?: boolean;
+  /** Revision mode — switches submit copy to "Submit Revised Bid". */
+  isRevision?: boolean;
 }
 
 export function Step4Review({
@@ -25,6 +27,7 @@ export function Step4Review({
   onSubmit,
   submitting,
   disabled = false,
+  isRevision = false,
 }: Step4ReviewProps) {
   const { vendor, project, task, bid_template } = useBidContext();
   const [showConfirm, setShowConfirm] = useState(false);
@@ -221,7 +224,7 @@ export function Step4Review({
           onClick={() => setShowConfirm(true)}
           disabled={!canSubmit || submitting}
         >
-          Submit Bid
+          {isRevision ? 'Submit Revised Bid' : 'Submit Bid'}
         </Button>
       </div>
 
@@ -232,6 +235,7 @@ export function Step4Review({
         grandTotal={grandTotal}
         projectName={project.name}
         submitting={submitting}
+        isRevision={isRevision}
       />
     </div>
   );

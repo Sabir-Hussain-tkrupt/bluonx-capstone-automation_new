@@ -24,7 +24,25 @@ type Action =
   | { type: 'REMOVE_ATTACHMENT'; id: string }
   | { type: 'SET_SUBMISSION_ID'; id: string }
   | { type: 'HYDRATE_FROM_DRAFT'; draft: BidDraft }
+  | { type: 'HYDRATE_FROM_PREFILL'; prefill: PrefillHydration }
   | { type: 'MARK_CLEAN' };
+
+/**
+ * Revision prefill, decimals already parsed to numbers by the caller.
+ * Unlike HYDRATE_FROM_DRAFT this does NOT set submissionId — the revised
+ * bid is a brand-new submission row created on first save/submit — and
+ * leaves the form dirty so it gets persisted.
+ */
+export interface PrefillHydration {
+  vendor_notes: string;
+  total_amount: number | null;
+  line_items: Array<{
+    template_item_id: string;
+    quantity: number | null;
+    unit_price: number | null;
+    lump_sum_amount: number | null;
+  }>;
+}
 
 // ─── Initial state from template ────────────────────────────────────
 
@@ -149,6 +167,29 @@ function reducer(state: BidFormState, action: Action): BidFormState {
       };
     }
 
+    case 'HYDRATE_FROM_PREFILL': {
+      const lineItems = state.pricing.line_items.map((it) => {
+        const match = action.prefill.line_items.find(
+          (d) => d.template_item_id === it.template_item_id,
+        );
+        if (!match) return it;
+        return {
+          ...it,
+          quantity: match.quantity,
+          unit_price: match.unit_price,
+          lump_sum_amount: match.lump_sum_amount,
+        };
+      });
+      return {
+        ...state,
+        // submissionId intentionally untouched (stays null → a fresh
+        // revision draft is created on first save/submit).
+        dirty: true,
+        companyInfo: { vendor_notes: action.prefill.vendor_notes },
+        pricing: { total_amount: action.prefill.total_amount, line_items: lineItems },
+      };
+    }
+
     case 'MARK_CLEAN':
       return { ...state, dirty: false };
 
@@ -173,6 +214,7 @@ export interface UseBidFormStateResult {
   removeAttachment: (id: string) => void;
   setSubmissionId: (id: string) => void;
   hydrateFromDraft: (draft: BidDraft) => void;
+  hydrateFromPrefill: (prefill: PrefillHydration) => void;
   markClean: () => void;
 }
 
@@ -210,6 +252,10 @@ export function useBidFormState(template: PortalBidTemplate): UseBidFormStateRes
     ),
     hydrateFromDraft: useCallback(
       (draft) => dispatch({ type: 'HYDRATE_FROM_DRAFT', draft }),
+      [],
+    ),
+    hydrateFromPrefill: useCallback(
+      (prefill) => dispatch({ type: 'HYDRATE_FROM_PREFILL', prefill }),
       [],
     ),
     markClean: useCallback(() => dispatch({ type: 'MARK_CLEAN' }), []),
