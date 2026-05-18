@@ -127,6 +127,10 @@ class TestEndpoint200:
         assert isinstance(body["attachments"], list)
         assert body["attachments"][0]["download_url"].startswith("https://")
         assert body["is_direct_assign"] is False
+        # Non-superseded original: revision metadata defaults.
+        assert body["is_superseded"] is False
+        assert body["supersedes_submission_id"] is None
+        assert body["revision_number"] == 1
 
 
 class TestEndpoint404:

@@ -94,8 +94,9 @@ async def get_pm_bid_submission_detail(*, submission_id: UUID, db) -> dict:
     sub_resp = (
         db.table("bid_submissions")
         .select(
-            "id, bid_invitation_id, status, is_direct_assign, total_amount,"
-            " vendor_notes, submitted_at,"
+            "id, bid_invitation_id, status, is_direct_assign,"
+            " is_superseded, supersedes_submission_id, revision_number,"
+            " total_amount, vendor_notes, submitted_at,"
             " bid_invitations!inner(vendor_contacts(full_name, email)),"
             " vendors(company_name)"
         )
@@ -156,6 +157,9 @@ async def get_pm_bid_submission_detail(*, submission_id: UUID, db) -> dict:
         "bid_invitation_id": sub.get("bid_invitation_id"),
         "status": sub.get("status"),
         "is_direct_assign": bool(sub.get("is_direct_assign")),
+        "is_superseded": bool(sub.get("is_superseded")),
+        "supersedes_submission_id": sub.get("supersedes_submission_id"),
+        "revision_number": sub.get("revision_number") or 1,
         "total_amount": sub.get("total_amount"),
         "vendor_notes": sub.get("vendor_notes"),
         "submitted_at": sub.get("submitted_at"),
