@@ -4,6 +4,13 @@ import { cn } from '@/utils/cn';
 export interface BidDeadlineCountdownProps {
   deadline: string; // ISO
   className?: string;
+  /**
+   * Heading copy. Defaults to "Bid deadline" (initial-bid path). In
+   * revision mode the parent overrides this with "Revision deadline" so
+   * the widget reflects revision_context.revision_deadline, not the
+   * (irrelevant) package deadline.
+   */
+  label?: string;
 }
 
 interface RemainingTime {
@@ -28,7 +35,11 @@ function compute(deadline: string): RemainingTime {
   return { expired: false, days, hours, minutes, seconds };
 }
 
-export function BidDeadlineCountdown({ deadline, className }: BidDeadlineCountdownProps) {
+export function BidDeadlineCountdown({
+  deadline,
+  className,
+  label = 'Bid deadline',
+}: BidDeadlineCountdownProps) {
   const [remaining, setRemaining] = useState<RemainingTime>(() => compute(deadline));
 
   useEffect(() => {
@@ -69,7 +80,7 @@ export function BidDeadlineCountdown({ deadline, className }: BidDeadlineCountdo
       </svg>
       <div className="flex-1 text-sm">
         <p className="font-semibold">
-          {remaining.expired ? 'Bid deadline has passed' : 'Bid deadline'}
+          {remaining.expired ? `${label} has passed` : label}
         </p>
         {!remaining.expired && (
           <p className="mt-0.5 font-mono text-xs tabular-nums">

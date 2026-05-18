@@ -377,7 +377,14 @@ export function BidFormPage() {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          <BidDeadlineCountdown deadline={bidContext.bid_package.deadline} />
+          <BidDeadlineCountdown
+            deadline={
+              isRevision && revision
+                ? revision.revision_deadline
+                : bidContext.bid_package.deadline
+            }
+            label={isRevision ? 'Revision deadline' : 'Bid deadline'}
+          />
           <DraftIndicator
             status={autoSave.status}
             lastSavedAt={autoSave.lastSavedAt}
