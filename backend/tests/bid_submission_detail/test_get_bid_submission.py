@@ -78,6 +78,45 @@ class TestServiceShape:
         )
 
 
+class TestIsDraftExposed:
+    """The detail response exposes is_draft so the PM version-history
+    chain-walk can skip draft rows. The endpoint still returns 200 on a
+    draft — only the rendering layer filters."""
+
+    @pytest.mark.asyncio
+    async def test_finalized_submission_is_draft_false(self, mock_supabase):
+        result = await get_pm_bid_submission_detail(
+            submission_id=SUBMISSION_ID, db=mock_supabase
+        )
+        assert result["is_draft"] is False
+
+    @pytest.mark.asyncio
+    async def test_draft_submission_is_draft_true(self, mock_supabase_draft):
+        result = await get_pm_bid_submission_detail(
+            submission_id=SUBMISSION_ID, db=mock_supabase_draft
+        )
+        assert result["is_draft"] is True
+
+    def test_endpoint_returns_200_on_draft_with_flag(
+        self, mock_supabase_draft, authed_user
+    ):
+        from app.core.auth import get_current_active_user
+        from app.core.supabase_client import get_supabase
+        from app.main import app
+
+        app.dependency_overrides[get_current_active_user] = lambda: authed_user
+        app.dependency_overrides[get_supabase] = lambda: mock_supabase_draft
+        try:
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as c:
+                resp = c.get(URL)
+            assert resp.status_code == 200
+            assert resp.json()["is_draft"] is True
+        finally:
+            app.dependency_overrides.clear()
+
+
 class TestNotFound:
     @pytest.mark.asyncio
     async def test_raises_not_found(self, mock_supabase_not_found):

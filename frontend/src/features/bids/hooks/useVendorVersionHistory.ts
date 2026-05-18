@@ -39,9 +39,20 @@ export function useVendorVersionHistory(
             queryKey: queryKeys.bidSubmissions.detail(nextId),
             queryFn: () => fetchBidSubmissionDetail(nextId as string),
           });
-        versions.push(submission);
-        nextId = submission.supersedes_submission_id;
         hops += 1;
+        const predecessorId = submission.supersedes_submission_id;
+        // Skip draft submissions: a draft (e.g. a revision in progress)
+        // is not a real version of the bid and must not render in PM
+        // history. Keep walking via its predecessor though — a revision
+        // draft correctly points at the finalized version it supersedes,
+        // so submitted audit history stays intact. A draft at the START
+        // shouldn't happen after the backend _transform_invitation fix
+        // (which no longer hands a draft id to this walk); handled
+        // defensively here regardless → predecessor-only history.
+        if (!submission.is_draft) {
+          versions.push(submission);
+        }
+        nextId = predecessorId;
       }
 
       return versions.sort((a, b) => a.revision_number - b.revision_number);

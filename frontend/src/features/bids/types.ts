@@ -135,6 +135,7 @@ export interface BidSubmissionDetail {
   bid_invitation_id: string;
   status: string;
   is_direct_assign: boolean;
+  is_draft: boolean;
   is_superseded: boolean;
   revision_number: number;
   supersedes_submission_id: string | null;
