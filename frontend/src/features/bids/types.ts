@@ -135,6 +135,9 @@ export interface BidSubmissionDetail {
   bid_invitation_id: string;
   status: string;
   is_direct_assign: boolean;
+  is_superseded: boolean;
+  revision_number: number;
+  supersedes_submission_id: string | null;
   total_amount: number | null;
   vendor_notes: string | null;
   submitted_at: string | null;
@@ -143,6 +146,42 @@ export interface BidSubmissionDetail {
   vendor_contact_email: string | null;
   line_items: BidSubmissionLineItem[];
   attachments: BidSubmissionAttachment[];
+}
+
+// ─── Bid Revision Requests (/v1/bid-revision-requests) ──────────────
+
+export type RevisionRequestStatus =
+  | 'pending'
+  | 'submitted'
+  | 'declined'
+  | 'expired'
+  | 'cancelled';
+
+export interface BidRevisionRequest {
+  id: string;
+  bid_invitation_id: string;
+  original_submission_id: string;
+  pm_note: string;
+  revision_deadline: string;
+  status: RevisionRequestStatus;
+  decline_reason: string | null;
+  requested_by: string;
+  requested_at: string;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRevisionRequestPayload {
+  bid_invitation_id: string;
+  pm_note: string;
+  revision_deadline: string;
+}
+
+export interface CreateRevisionRequestResponse {
+  revision_request: BidRevisionRequest;
+  magic_link_token: string;
+  portal_url: string;
 }
 
 // ─── Create Bid Package (POST /v1/tasks/{id}/bid-packages) ──────────

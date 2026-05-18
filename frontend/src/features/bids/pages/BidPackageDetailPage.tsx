@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -8,16 +8,20 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
+import { useRevisionRequests } from '@/features/bids/hooks/useRevisionRequests';
 import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
 import { BidSubmissionDetailModal } from '@/features/bids/components/BidSubmissionDetailModal';
+import { RequestRevisionModal } from '@/features/bids/components/RequestRevisionModal';
+import { CancelRevisionDialog } from '@/features/bids/components/CancelRevisionDialog';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { SubmissionStatusPie } from '@/features/bids/components/SubmissionStatusPie';
 import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
 import { cn } from '@/utils/cn';
+import type { BidInvitation, BidRevisionRequest } from '@/features/bids/types';
 
 export function BidPackageDetailPage() {
   const { id: projectId, taskId, bidPackageId } = useParams<{
@@ -29,7 +33,21 @@ export function BidPackageDetailPage() {
   const { toast } = useToast();
 
   const { data: bp, isLoading, error } = useBidPackageDetail(bidPackageId!);
+  const { data: revisionRequests } = useRevisionRequests(bidPackageId!);
   const { remaining, isPassed } = useCountdown(bp?.deadline ?? '');
+
+  // Most-recent non-cancelled revision request per invitation. The list is
+  // sorted newest-first, so the first non-cancelled hit per invitation wins.
+  const revisionByInvitationId = useMemo(() => {
+    const map = new Map<string, BidRevisionRequest>();
+    for (const req of revisionRequests ?? []) {
+      if (req.status === 'cancelled') continue;
+      if (!map.has(req.bid_invitation_id)) {
+        map.set(req.bid_invitation_id, req);
+      }
+    }
+    return map;
+  }, [revisionRequests]);
 
   // Email log — lazy loaded
   const [showEmailLog, setShowEmailLog] = useState(false);
@@ -47,6 +65,15 @@ export function BidPackageDetailPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [declineConfirmId, setDeclineConfirmId] = useState<string | null>(null);
   const [viewSubmissionId, setViewSubmissionId] = useState<string | null>(null);
+  const [expandedInvitationId, setExpandedInvitationId] = useState<string | null>(
+    null,
+  );
+  const [requestRevisionFor, setRequestRevisionFor] =
+    useState<BidInvitation | null>(null);
+  const [cancelRevision, setCancelRevision] = useState<{
+    request: BidRevisionRequest;
+    invitation: BidInvitation;
+  } | null>(null);
 
   const handleResendBidLink = (invitationId: string) => {
     setResendingId(invitationId);
@@ -221,6 +248,16 @@ export function BidPackageDetailPage() {
             onViewBid={setViewSubmissionId}
             resendingId={resendingId}
             updatingId={updatingId}
+            revisionByInvitationId={revisionByInvitationId}
+            expandedInvitationId={expandedInvitationId}
+            onToggleExpand={(id) =>
+              setExpandedInvitationId((cur) => (cur === id ? null : id))
+            }
+            onRequestRevision={setRequestRevisionFor}
+            onCancelRevision={(request, invitation) =>
+              setCancelRevision({ request, invitation })
+            }
+            bidPackageOpen={bp.status === 'open'}
           />
         </div>
       </Card>
@@ -294,6 +331,27 @@ export function BidPackageDetailPage() {
         isOpen={!!viewSubmissionId}
         onClose={() => setViewSubmissionId(null)}
       />
+
+      {/* Request Revision Modal */}
+      {requestRevisionFor && (
+        <RequestRevisionModal
+          isOpen={!!requestRevisionFor}
+          onClose={() => setRequestRevisionFor(null)}
+          invitation={requestRevisionFor}
+          bidPackageId={bidPackageId!}
+        />
+      )}
+
+      {/* Cancel Revision Confirmation */}
+      {cancelRevision && (
+        <CancelRevisionDialog
+          isOpen={!!cancelRevision}
+          onClose={() => setCancelRevision(null)}
+          revisionRequestId={cancelRevision.request.id}
+          vendorName={cancelRevision.invitation.vendor_company_name ?? 'The vendor'}
+          bidPackageId={bidPackageId!}
+        />
+      )}
 
       {/* Decline Confirmation Modal */}
       <Modal
