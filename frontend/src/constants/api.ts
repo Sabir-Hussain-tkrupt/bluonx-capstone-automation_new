@@ -56,6 +56,10 @@ export const API_ENDPOINTS = {
   BID_SUBMISSIONS: '/bid-submissions',
   BID_SUBMISSION: (id: string) => `/bid-submissions/${id}`,
 
+  // Bid Revision Requests
+  BID_REVISION_REQUESTS: '/bid-revision-requests',
+  BID_REVISION_REQUEST_CANCEL: (id: string) => `/bid-revision-requests/${id}/cancel`,
+
   // Awards
   AWARDS: '/awards',
   AWARD: (id: string) => `/awards/${id}`,

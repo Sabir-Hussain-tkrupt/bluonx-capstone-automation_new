@@ -8,6 +8,7 @@ export interface ConfirmSubmitDialogProps {
   grandTotal: number;
   projectName: string;
   submitting: boolean;
+  isRevision?: boolean;
 }
 
 export function ConfirmSubmitDialog({
@@ -17,12 +18,13 @@ export function ConfirmSubmitDialog({
   grandTotal,
   projectName,
   submitting,
+  isRevision = false,
 }: ConfirmSubmitDialogProps) {
   return (
     <Modal
       isOpen={isOpen}
       onClose={submitting ? () => {} : onClose}
-      title="Submit your bid?"
+      title={isRevision ? 'Submit your revised bid?' : 'Submit your bid?'}
       size="md"
       closeOnOverlayClick={!submitting}
       mobileCenter

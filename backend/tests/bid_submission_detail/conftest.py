@@ -221,6 +221,35 @@ def mock_supabase_direct_assign(
 
 
 @pytest.fixture()
+def sample_draft_submission_row(sample_submission_row) -> dict:
+    """A still-draft submission (e.g. a revision in progress)."""
+    row = dict(sample_submission_row)
+    row["is_draft"] = True
+    row["status"] = "draft"
+    return row
+
+
+@pytest.fixture()
+def mock_supabase_draft(
+    sample_draft_submission_row, sample_line_items_unordered, sample_attachments
+) -> MagicMock:
+    client = MagicMock()
+
+    def table_side_effect(name: str):
+        if name == "bid_submissions":
+            return build_chain(data=sample_draft_submission_row)
+        if name == "bid_line_items":
+            return build_chain(data=sample_line_items_unordered)
+        if name == "bid_attachments":
+            return build_chain(data=sample_attachments)
+        return build_chain(data=[])
+
+    client.table.side_effect = table_side_effect
+    client.storage = _make_signed_url_storage_mock()
+    return client
+
+
+@pytest.fixture()
 def mock_supabase_not_found() -> MagicMock:
     client = MagicMock()
 

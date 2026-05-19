@@ -249,6 +249,7 @@ class PMBidSubmissionDetailResponse(BluOnXBase):
     bid_invitation_id: UUID
     status: str
     is_direct_assign: bool
+    is_draft: bool = False
     is_superseded: bool = False
     supersedes_submission_id: UUID | None = None
     revision_number: int = 1

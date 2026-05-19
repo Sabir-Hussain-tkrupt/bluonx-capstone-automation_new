@@ -126,7 +126,7 @@ def _fetch_invitations(
         db.table("bid_invitations")
         .select(
             "*, vendors(id, company_name), vendor_contacts(full_name, email),"
-            " bid_submissions(id, is_superseded)"
+            " bid_submissions(id, is_superseded, is_draft)"
         )
         .eq("bid_package_id", str(bid_package_id))
     )
@@ -150,6 +150,7 @@ def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
         .eq("bid_invitations.bid_package_id", str(bid_package_id))
         .eq("bid_invitations.status", "submitted")
         .eq("is_superseded", False)
+        .eq("is_draft", False)
         .execute()
     )
     return _unwrap_list(resp.data)
@@ -191,16 +192,22 @@ def _transform_invitation(row: dict) -> dict:
         subs = subs_raw
     else:
         subs = []
-    # Deep-link the current (non-superseded) submission. Fall back to
-    # subs[0] for pre-revision / single / direct-assign rows (no
-    # is_superseded key, or no superseded sibling). No PostgREST
-    # embedded-filter syntax — zero codebase precedent; this Python
-    # post-filter is deterministic.
-    active = [s for s in subs if not s.get("is_superseded")]
+    # Deep-link the current submission for display: non-superseded AND
+    # non-draft. A draft (e.g. a revision in progress) is never the
+    # "current bid" — if the only submission is a draft, there is no
+    # current bid yet, so bid_submission_id is None (NO subs[0]
+    # fallback; a draft must never surface to PM read paths). Rows with
+    # no is_superseded/is_draft keys (pre-revision / single /
+    # direct-assign) still match since .get() → None → not None → True.
+    # No PostgREST embedded-filter syntax — this Python post-filter is
+    # deterministic.
+    active = [
+        s
+        for s in subs
+        if not s.get("is_superseded") and not s.get("is_draft")
+    ]
     if active:
         bid_submission_id = active[0].get("id")
-    elif subs:
-        bid_submission_id = subs[0].get("id")
     else:
         bid_submission_id = None
     return {

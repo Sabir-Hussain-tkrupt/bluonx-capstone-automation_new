@@ -118,6 +118,12 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.bidSubmissions.details(), id] as const,
   },
 
+  bidRevisionRequests: {
+    all: ['bid_revision_requests'] as const,
+    list: (bidPackageId: string) =>
+      [...queryKeys.bidRevisionRequests.all, 'list', bidPackageId] as const,
+  },
+
   awards: {
     all: ['awards'] as const,
     lists: () => [...queryKeys.awards.all, 'list'] as const,

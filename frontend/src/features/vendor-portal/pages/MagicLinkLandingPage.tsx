@@ -24,7 +24,14 @@ export function MagicLinkLandingPage() {
       try {
         const response = await validateToken(token);
         setSession(response.jwt, response.bid_context);
-        navigate(ROUTES.PORTAL_FORM, { replace: true });
+        // Revision tokens get an interstitial landing screen; the
+        // initial-bid path is unchanged.
+        navigate(
+          response.bid_context.revision_context
+            ? ROUTES.PORTAL_REVISION
+            : ROUTES.PORTAL_FORM,
+          { replace: true },
+        );
       } catch (err) {
         if (err instanceof PortalApiError) {
           switch (err.code) {

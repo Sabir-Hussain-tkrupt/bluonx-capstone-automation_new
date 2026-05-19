@@ -74,6 +74,19 @@ export interface BidDraft {
   last_saved_at: string;
 }
 
+/**
+ * Present only when the vendor entered via a revision magic link
+ * (mirrors backend VendorRevisionContextModel). `null`/absent on
+ * initial-bid tokens — the initial flow must not branch on this.
+ */
+export interface VendorRevisionContext {
+  bid_revision_request_id: string;
+  pm_note: string;
+  revision_deadline: string; // ISO 8601 timestamptz
+  original_submission_id: string;
+  original_revision_number: number;
+}
+
 export interface VendorBidContext {
   vendor: PortalVendor;
   project: PortalProject;
@@ -82,6 +95,38 @@ export interface VendorBidContext {
   bid_template: PortalBidTemplate;
   project_documents: PortalProjectDocument[];
   existing_draft: BidDraft | null;
+  revision_context?: VendorRevisionContext | null;
+}
+
+// ─── Revision prefill (GET /vendor-portal/submissions/{id}/revision-prefill) ─
+// Decimal fields arrive as strings over the wire (Pydantic Decimal).
+
+export interface RevisionPrefillLineItem {
+  template_item_id: string;
+  description: string;
+  item_type: TemplateItemType;
+  quantity: string | null;
+  unit_of_measure: string | null;
+  unit_price: string | null;
+  lump_sum_amount: string | null;
+  line_total: string | null;
+  sort_order: number;
+}
+
+export interface RevisionPrefillResponse {
+  total_amount: string | null;
+  vendor_notes: string;
+  line_items: RevisionPrefillLineItem[];
+  attachment_ids: string[];
+}
+
+/** Metadata for the original submission's attachments (read-only display). */
+export interface SubmissionAttachmentMeta {
+  id: string;
+  file_name: string;
+  file_size: number;
+  file_type: string | null;
+  uploaded_at: string;
 }
 
 export interface ValidateTokenResponse {

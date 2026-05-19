@@ -36,8 +36,10 @@ export const ROUTES = {
 
   // ─── Vendor Portal (public, isolated from admin layout) ─────────
   PORTAL_LANDING: '/bid/:token',
+  PORTAL_REVISION: '/bid/revision',
   PORTAL_FORM: '/bid/form',
   PORTAL_SUBMITTED: '/bid/submitted/:id',
+  PORTAL_REVISION_INACTIVE: '/bid/revision-unavailable',
   PORTAL_EXPIRED: '/bid/expired',
   PORTAL_INVALID: '/bid/invalid',
   PORTAL_CLOSED: '/bid/closed',

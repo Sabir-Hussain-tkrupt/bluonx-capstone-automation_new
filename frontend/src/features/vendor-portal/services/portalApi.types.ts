@@ -11,6 +11,8 @@ import type {
   BidDraft,
   BidDraftLineItem,
   FormAttachment,
+  RevisionPrefillResponse,
+  SubmissionAttachmentMeta,
   SubmitBidResult,
   ValidateTokenResponse,
 } from '../types/portal';
@@ -33,4 +35,10 @@ export interface PortalApi {
   uploadAttachment: (submissionId: string, file: File) => Promise<FormAttachment>;
   deleteAttachment: (submissionId: string, attachmentId: string) => Promise<void>;
   downloadProjectDocument: (documentId: string) => Promise<string>;
+  /** Original submission's data for revision-form prefill (revision tokens only). */
+  getRevisionPrefill: (originalSubmissionId: string) => Promise<RevisionPrefillResponse>;
+  /** Attachment metadata for a submission (resolves prefill attachment_ids). */
+  listSubmissionAttachments: (
+    submissionId: string,
+  ) => Promise<SubmissionAttachmentMeta[]>;
 }

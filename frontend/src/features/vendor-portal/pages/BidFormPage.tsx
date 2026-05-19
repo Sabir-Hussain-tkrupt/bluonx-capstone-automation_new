@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, useToast } from '@/components/ui';
+import { ROUTES } from '@/constants/routes';
 import { BidDeadlineCountdown } from '../components/BidDeadlineCountdown';
 import { DeadlineExpiredModal } from '../components/DeadlineExpiredModal';
 import { DraftIndicator } from '../components/DraftIndicator';
@@ -17,6 +18,8 @@ import {
 } from '../hooks/useBidFormState';
 import {
   createDraft,
+  getRevisionPrefill,
+  listSubmissionAttachments,
   submitBid,
   updateDraft,
   type DraftPayload,
@@ -24,8 +27,30 @@ import {
 import {
   PortalApiError,
   type PortalFieldError,
+  type RevisionPrefillResponse,
   type StepIndex,
+  type SubmissionAttachmentMeta,
 } from '../types/portal';
+
+/** Decimal strings (Pydantic Decimal over the wire) → number | null. */
+function toNum(v: string | null): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function prefillToHydration(pf: RevisionPrefillResponse) {
+  return {
+    vendor_notes: pf.vendor_notes,
+    total_amount: toNum(pf.total_amount),
+    line_items: pf.line_items.map((li) => ({
+      template_item_id: li.template_item_id,
+      quantity: toNum(li.quantity),
+      unit_price: toNum(li.unit_price),
+      lump_sum_amount: toNum(li.lump_sum_amount),
+    })),
+  };
+}
 
 /**
  * Maps a server field path to the step that owns it. The validator
@@ -44,6 +69,11 @@ export function BidFormPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const form = useBidFormState(bidContext.bid_template);
+  const revision = bidContext.revision_context ?? null;
+  const isRevision = !!revision;
+  const [previouslyUploaded, setPreviouslyUploaded] = useState<
+    SubmissionAttachmentMeta[]
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [deadlinePassed, setDeadlinePassed] = useState(false);
   const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
@@ -52,9 +82,31 @@ export function BidFormPage() {
   // initiated draft creations from racing the auto-save POST.
   const creatingDraftRef = useRef<Promise<string> | null>(null);
 
-  // Hydrate from existing draft on first mount if backend provided one.
+  // Hydrate on first mount. Initial path: from existing_draft if any.
+  // Revision path: resume an in-progress revision draft if the backend
+  // returned one, else prefill from the original submission; either way
+  // load the original's attachments for the read-only "previously
+  // uploaded" list. Any prefill/list failure means the revision request
+  // is no longer usable → revision-inactive page.
   useEffect(() => {
-    if (bidContext.existing_draft) {
+    if (isRevision && revision) {
+      (async () => {
+        try {
+          if (bidContext.existing_draft) {
+            form.hydrateFromDraft(bidContext.existing_draft);
+          } else {
+            const pf = await getRevisionPrefill(revision.original_submission_id);
+            form.hydrateFromPrefill(prefillToHydration(pf));
+          }
+          const atts = await listSubmissionAttachments(
+            revision.original_submission_id,
+          );
+          setPreviouslyUploaded(atts);
+        } catch {
+          navigate(ROUTES.PORTAL_REVISION_INACTIVE, { replace: true });
+        }
+      })();
+    } else if (bidContext.existing_draft) {
       form.hydrateFromDraft(bidContext.existing_draft);
     }
     // Intentionally run once on mount; context is stable within session.
@@ -247,12 +299,26 @@ export function BidFormPage() {
       }
 
       const result = await submitBid(submissionId);
-      toast({ variant: 'success', message: 'Bid submitted successfully' });
+      toast({
+        variant: 'success',
+        message: isRevision
+          ? 'Revised bid submitted successfully'
+          : 'Bid submitted successfully',
+      });
       navigate(`/bid/submitted/${result.id}`, {
         replace: true,
-        state: { result, grandTotal },
+        state: { result, grandTotal, isRevision },
       });
     } catch (err) {
+      if (
+        isRevision &&
+        err instanceof PortalApiError &&
+        err.status === 410
+      ) {
+        // Revision request cancelled/expired between open and submit.
+        navigate(ROUTES.PORTAL_REVISION_INACTIVE, { replace: true });
+        return;
+      }
       if (err instanceof PortalApiError && err.code === 'DEADLINE_PASSED') {
         handleDeadlinePassed();
       } else if (
@@ -293,6 +359,7 @@ export function BidFormPage() {
     goToStep,
     grandTotal,
     handleDeadlinePassed,
+    isRevision,
     navigate,
     toast,
   ]);
@@ -310,7 +377,14 @@ export function BidFormPage() {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          <BidDeadlineCountdown deadline={bidContext.bid_package.deadline} />
+          <BidDeadlineCountdown
+            deadline={
+              isRevision && revision
+                ? revision.revision_deadline
+                : bidContext.bid_package.deadline
+            }
+            label={isRevision ? 'Revision deadline' : 'Bid deadline'}
+          />
           <DraftIndicator
             status={autoSave.status}
             lastSavedAt={autoSave.lastSavedAt}
@@ -318,6 +392,20 @@ export function BidFormPage() {
           />
         </div>
       </div>
+
+      {isRevision && revision && (
+        <div className="mt-6">
+          <Alert
+            variant="warning"
+            title="You are submitting a revision. Your original bid is preserved."
+          >
+            <p className="mt-1 text-xs font-medium tracking-wide text-warning-700 uppercase">
+              Note from the project manager
+            </p>
+            <p className="mt-1 whitespace-pre-wrap">{revision.pm_note}</p>
+          </Alert>
+        </div>
+      )}
 
       <div className="mt-6">
         <ProgressStepper
@@ -370,6 +458,7 @@ export function BidFormPage() {
             ensureSubmissionId={ensureSubmissionId}
             onDeadlinePassed={handleDeadlinePassed}
             disabled={deadlinePassed}
+            previouslyUploaded={isRevision ? previouslyUploaded : undefined}
           />
         )}
         {form.state.step === 4 && (
@@ -381,6 +470,7 @@ export function BidFormPage() {
             onSubmit={handleSubmit}
             submitting={submitting}
             disabled={deadlinePassed}
+            isRevision={isRevision}
           />
         )}
       </div>

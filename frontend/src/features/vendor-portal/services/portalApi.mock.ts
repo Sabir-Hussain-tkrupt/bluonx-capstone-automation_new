@@ -14,6 +14,8 @@ import axios from 'axios';
 import type {
   BidDraft,
   FormAttachment,
+  RevisionPrefillResponse,
+  SubmissionAttachmentMeta,
   SubmitBidResult,
   ValidateTokenResponse,
   VendorBidContext,
@@ -151,6 +153,7 @@ function uid(prefix: string): string {
  *   - `invalid-token`    → 404 TOKEN_INVALID
  *   - `closed-token`     → 423 BIDDING_CLOSED
  *   - `submitted-token`  → 409 ALREADY_SUBMITTED
+ *   - `revision-token`   → happy path WITH revision_context populated
  * Any other token resolves to the happy-path context.
  */
 async function validateToken(token: string): Promise<ValidateTokenResponse> {
@@ -169,6 +172,19 @@ async function validateToken(token: string): Promise<ValidateTokenResponse> {
         'A bid has already been submitted for this invitation.',
         409,
       );
+    case 'revision-token': {
+      const ctx = cloneContext(SEED_CONTEXT);
+      ctx.revision_context = {
+        bid_revision_request_id: 'rev-req-mock-001',
+        pm_note:
+          'Please revise the Cut and Fill unit price — the geotech report\nindicates more rock than originally scoped. Update line item 3.',
+        // 18h from now → exercises the <24h countdown branch.
+        revision_deadline: new Date(Date.now() + 18 * 60 * 60 * 1000).toISOString(),
+        original_submission_id: 'sub-original-mock-001',
+        original_revision_number: 1,
+      };
+      return { jwt: `mock.vendor.jwt.${uid('tok')}`, bid_context: ctx };
+    }
     default:
       return {
         jwt: `mock.vendor.jwt.${uid('tok')}`,
@@ -252,6 +268,55 @@ async function deleteAttachment(
   console.log('[portalApi:mock] deleteAttachment →', submissionId, attachmentId);
 }
 
+// ─── Revision prefill + attachment metadata (Phase E) ───────────────
+async function getRevisionPrefill(
+  originalSubmissionId: string,
+): Promise<RevisionPrefillResponse> {
+  await delay(400);
+  // eslint-disable-next-line no-console
+  console.log('[portalApi:mock] getRevisionPrefill →', originalSubmissionId);
+  return {
+    total_amount: '52800.0',
+    vendor_notes: 'Original bid — mobilization quoted firm for 30 days.',
+    line_items: SEED_CONTEXT.bid_template.items.map((it) => ({
+      template_item_id: it.id,
+      description: it.description,
+      item_type: it.item_type,
+      quantity: it.item_type === 'unit_price' ? '100.0' : null,
+      unit_of_measure: it.unit_of_measure,
+      unit_price: it.item_type === 'unit_price' ? '120.0' : null,
+      lump_sum_amount: it.item_type === 'lump_sum' ? '8000.0' : null,
+      line_total: it.item_type === 'lump_sum' ? '8000.0' : '12000.0',
+      sort_order: it.sort_order,
+    })),
+    attachment_ids: ['att-orig-000', 'att-orig-001'],
+  };
+}
+
+async function listSubmissionAttachments(
+  submissionId: string,
+): Promise<SubmissionAttachmentMeta[]> {
+  await delay(200);
+  // eslint-disable-next-line no-console
+  console.log('[portalApi:mock] listSubmissionAttachments →', submissionId);
+  return [
+    {
+      id: 'att-orig-000',
+      file_name: 'Original_Bid_Proposal.pdf',
+      file_size: 1_204_233,
+      file_type: 'application/pdf',
+      uploaded_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'att-orig-001',
+      file_name: 'Insurance_Certificate.pdf',
+      file_size: 318_004,
+      file_type: 'application/pdf',
+      uploaded_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  ];
+}
+
 // ─── Project document download stub ─────────────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   await delay(200);
@@ -275,4 +340,6 @@ export const mockPortalApi: PortalApi = {
   uploadAttachment,
   deleteAttachment,
   downloadProjectDocument,
+  getRevisionPrefill,
+  listSubmissionAttachments,
 };

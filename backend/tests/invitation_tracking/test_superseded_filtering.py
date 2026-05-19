@@ -72,3 +72,44 @@ def test_transform_invitation_single_submission_unaffected():
 def test_transform_invitation_no_submissions():
     row = {"id": str(uuid4()), "vendor_id": str(uuid4()), "bid_submissions": None}
     assert _transform_invitation(row)["bid_submission_id"] is None
+
+
+# ── Draft leakage regression (Phase D+E QA) ───────────────────────────────
+
+
+def test_fetch_submitted_bids_excludes_drafts():
+    """Drafts (is_draft=TRUE) must not contribute to the chart, even when
+    is_superseded is FALSE."""
+    db, calls = _recording_db([])
+    _fetch_submitted_bids(db, uuid4())
+    assert ("is_draft", False) in calls
+
+
+def test_transform_invitation_only_draft_returns_none():
+    """An invitation whose only submission is a draft has no current bid
+    for display — bid_submission_id is None (NOT the draft's id)."""
+    draft = str(uuid4())
+    row = {
+        "id": str(uuid4()),
+        "vendor_id": str(uuid4()),
+        "bid_submissions": [
+            {"id": draft, "is_superseded": False, "is_draft": True},
+        ],
+    }
+    assert _transform_invitation(row)["bid_submission_id"] is None
+
+
+def test_transform_invitation_prefers_finalized_over_draft():
+    """A draft revision in progress alongside a finalized original: the
+    finalized original's id is current, never the draft's (filter, not
+    array order)."""
+    original, draft = str(uuid4()), str(uuid4())
+    row = {
+        "id": str(uuid4()),
+        "vendor_id": str(uuid4()),
+        "bid_submissions": [
+            {"id": draft, "is_superseded": False, "is_draft": True},
+            {"id": original, "is_superseded": False, "is_draft": False},
+        ],
+    }
+    assert _transform_invitation(row)["bid_submission_id"] == original

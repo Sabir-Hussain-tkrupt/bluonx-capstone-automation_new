@@ -4,7 +4,11 @@ import {
   deleteAttachment,
   uploadAttachment,
 } from '../../services/portalApi';
-import type { BidFormState, FormAttachment } from '../../types/portal';
+import type {
+  BidFormState,
+  FormAttachment,
+  SubmissionAttachmentMeta,
+} from '../../types/portal';
 import { PortalApiError } from '../../types/portal';
 
 const ACCEPT_TYPES = 'application/pdf,image/jpeg,image/png';
@@ -34,6 +38,12 @@ export interface Step3DocumentsProps {
   onDeadlinePassed: () => void;
   /** When the deadline has already passed, uploads/removals are locked out. */
   disabled?: boolean;
+  /**
+   * Revision mode only: the original submission's attachments, shown
+   * read-only ("previously uploaded") above the new-upload area. They
+   * stay linked to the original submission and cannot be removed here.
+   */
+  previouslyUploaded?: SubmissionAttachmentMeta[];
 }
 
 export function Step3Documents({
@@ -47,6 +57,7 @@ export function Step3Documents({
   ensureSubmissionId,
   onDeadlinePassed,
   disabled = false,
+  previouslyUploaded,
 }: Step3DocumentsProps) {
   const { toast } = useToast();
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -150,6 +161,46 @@ export function Step3Documents({
         subtitle="Upload your bid proposal, certificates, and any alternate pricing"
         padding="md"
       >
+        {previouslyUploaded && previouslyUploaded.length > 0 && (
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-medium tracking-wide text-secondary-500 uppercase">
+              Previously uploaded (original bid)
+            </p>
+            <ul className="divide-y divide-secondary-100 rounded-md border border-secondary-200 bg-secondary-50">
+              {previouslyUploaded.map((att) => (
+                <li
+                  key={att.id}
+                  className="flex items-center gap-3 px-3 py-2 text-sm"
+                >
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-5 w-5 shrink-0 text-secondary-400"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0116 6.622V16.5a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 16.5v-13z" />
+                  </svg>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-secondary-700">
+                      {att.file_name}
+                    </p>
+                    <p className="text-xs text-secondary-500">
+                      {formatBytes(att.file_size)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-secondary-200 px-2 py-0.5 text-xs font-medium text-secondary-600">
+                    Previously uploaded
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-secondary-500">
+              These files stay attached to your original bid. Add any new
+              files for the revised bid below.
+            </p>
+          </div>
+        )}
+
         <FileUpload
           accept={ACCEPT_TYPES}
           maxSizeMB={MAX_FILE_SIZE_MB}

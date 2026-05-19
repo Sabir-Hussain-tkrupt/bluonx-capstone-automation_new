@@ -41,6 +41,8 @@ import {
   InvalidTokenPage,
   MagicLinkLandingPage,
   PortalLayout,
+  RevisionInactivePage,
+  RevisionLandingPage,
   SubmissionConfirmationPage,
   TokenExpiredPage,
   VendorPortalGuard,
@@ -118,9 +120,11 @@ export function AppRoutes() {
       >
         <Route path={ROUTES.PORTAL_LANDING} element={<MagicLinkLandingPage />} />
         <Route element={<VendorPortalGuard />}>
+          <Route path={ROUTES.PORTAL_REVISION} element={<RevisionLandingPage />} />
           <Route path={ROUTES.PORTAL_FORM} element={<BidFormPage />} />
           <Route path={ROUTES.PORTAL_SUBMITTED} element={<SubmissionConfirmationPage />} />
         </Route>
+        <Route path={ROUTES.PORTAL_REVISION_INACTIVE} element={<RevisionInactivePage />} />
         <Route path={ROUTES.PORTAL_EXPIRED} element={<TokenExpiredPage />} />
         <Route path={ROUTES.PORTAL_INVALID} element={<InvalidTokenPage />} />
         <Route path={ROUTES.PORTAL_CLOSED} element={<BiddingClosedPage />} />
