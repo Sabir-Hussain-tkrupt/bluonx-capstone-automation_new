@@ -24,7 +24,11 @@ import type {
   ValidateTokenResponse,
 } from '../types/portal';
 import { PortalApiError, type PortalApiErrorCode } from '../types/portal';
-import type { DraftPayload, PortalApi } from './portalApi.types';
+import type {
+  BidRevisionRequestResponse,
+  DraftPayload,
+  PortalApi,
+} from './portalApi.types';
 
 // ─── Axios instance ─────────────────────────────────────────────────
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -284,6 +288,25 @@ async function listSubmissionAttachments(
   }
 }
 
+async function declineRevisionRequest(
+  revisionRequestId: string,
+  decline_reason?: string,
+): Promise<BidRevisionRequestResponse> {
+  // Omit the field entirely when blank so the backend stores SQL NULL
+  // (matches its Optional[str] semantics — never send "").
+  const trimmed = decline_reason?.trim();
+  const body = trimmed ? { decline_reason: trimmed } : {};
+  try {
+    const { data } = await realAxios.post<BidRevisionRequestResponse>(
+      `/vendor-portal/revision-requests/${revisionRequestId}/decline`,
+      body,
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
 // ─── Project document download (Task 5.3) ───────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   try {
@@ -309,4 +332,5 @@ export const realPortalApi: PortalApi = {
   downloadProjectDocument,
   getRevisionPrefill,
   listSubmissionAttachments,
+  declineRevisionRequest,
 };

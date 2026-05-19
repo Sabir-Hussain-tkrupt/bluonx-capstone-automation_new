@@ -36,9 +36,11 @@ from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
 from app.core.vendor_auth import VendorContext, get_vendor_context
+from app.models.bids import BidRevisionRequestResponse
 from app.models.vendor_portal import (
     AttachmentResponse,
     BidDraftModel,
+    DeclineRevisionPayload,
     DraftPayload,
     RevisionPrefillResponse,
     SignedUrlResponse,
@@ -46,6 +48,7 @@ from app.models.vendor_portal import (
     SubmitBidResponse,
     VendorBidContextModel,
 )
+from app.services.bid_revision_service import decline_revision_request
 from app.services.email_service import EmailService, get_email_service
 from app.services.template_renderer import template_renderer
 from app.services.vendor_portal_service import (
@@ -610,6 +613,45 @@ async def get_revision_prefill(
         db, ctx.bid_invitation_id
     )
     return build_revision_prefill(db, submission_id, template_id)
+
+
+@router.post(
+    "/revision-requests/{revision_request_id}/decline",
+    response_model=BidRevisionRequestResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def decline_revision_request_endpoint(
+    revision_request_id: UUID,
+    payload: DeclineRevisionPayload,
+    ctx: VendorContext = Depends(get_vendor_context),
+    db: Client = Depends(get_supabase),
+) -> BidRevisionRequestResponse:
+    """Vendor declines a pending revision request from the SPA.
+
+    Revision-only: requires a revision JWT AND the JWT's
+    bid_revision_request_id claim must equal the path id. A vendor must not
+    be able to decline another vendor's request. Identity comes from the
+    JWT, never the request body or URL.
+    """
+    if ctx.bid_revision_request_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available for revision requests",
+        )
+    if str(ctx.bid_revision_request_id) != str(revision_request_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This token does not match this revision request",
+        )
+
+    # A blank / whitespace-only textarea must persist as SQL NULL, not "".
+    reason = (payload.decline_reason or "").strip() or None
+
+    return decline_revision_request(
+        db,
+        revision_request_id=revision_request_id,
+        decline_reason=reason,
+    )
 
 
 @router.get(

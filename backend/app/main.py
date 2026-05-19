@@ -31,7 +31,6 @@ from app.routers import (
     users,
     vendor_auth,
     vendor_portal,
-    vendor_revision,
     vendors,
     webhooks,
 )
@@ -86,4 +85,3 @@ app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
 app.include_router(vendor_auth.router, prefix=_v1, tags=["Vendor Auth"])
 app.include_router(vendor_portal.router, prefix=_v1, tags=["Vendor Portal"])
-app.include_router(vendor_revision.router, prefix=_v1, tags=["Vendor Revision"])

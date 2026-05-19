@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { RevisionLandingPage } from '../RevisionLandingPage';
 import type { VendorBidContext } from '../../types/portal';
+import { PortalApiError } from '../../types/portal';
 
 const navigateMock = vi.fn();
 
@@ -11,6 +12,19 @@ vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
   useNavigate: () => navigateMock,
 }));
+
+const declineMock = vi.fn();
+vi.mock('../../services/portalApi', () => ({
+  declineRevisionRequest: (...a: unknown[]) => declineMock(...a),
+}));
+
+const REVISION = {
+  bid_revision_request_id: 'rr1',
+  pm_note: 'Please revise line item 3.',
+  revision_deadline: new Date(Date.now() + 3 * 86400000).toISOString(),
+  original_submission_id: 'sub1',
+  original_revision_number: 1,
+};
 
 const ctxHolder = vi.hoisted(() => ({ current: null as VendorBidContext | null }));
 vi.mock('../../hooks/useBidContext', () => ({
@@ -71,5 +85,68 @@ describe('RevisionLandingPage', () => {
 
     await user.click(screen.getByRole('button', { name: /open bid form/i }));
     expect(navigateMock).toHaveBeenCalledWith('/bid/form');
+  });
+
+  it('renders both the bid-form and decline buttons', () => {
+    ctxHolder.current = baseContext(REVISION);
+    renderWithRouter(<RevisionLandingPage />);
+
+    expect(
+      screen.getByRole('button', { name: /open bid form/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /decline to revise/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the confirmation dialog when Decline is clicked', async () => {
+    ctxHolder.current = baseContext(REVISION);
+    const user = userEvent.setup();
+    renderWithRouter(<RevisionLandingPage />);
+
+    await user.click(
+      screen.getByRole('button', { name: /decline to revise/i }),
+    );
+    expect(
+      screen.getByText(/Decline this revision request\?/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /confirm decline/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('navigates to the declined page after a successful decline', async () => {
+    ctxHolder.current = baseContext(REVISION);
+    declineMock.mockResolvedValueOnce({ status: 'declined' });
+    const user = userEvent.setup();
+    renderWithRouter(<RevisionLandingPage />);
+
+    await user.click(
+      screen.getByRole('button', { name: /decline to revise/i }),
+    );
+    await user.click(screen.getByRole('button', { name: /confirm decline/i }));
+
+    expect(declineMock).toHaveBeenCalledWith('rr1', undefined);
+    expect(navigateMock).toHaveBeenCalledWith('/bid/revision-declined', {
+      replace: true,
+    });
+  });
+
+  it('navigates to the inactive page when decline returns 410', async () => {
+    ctxHolder.current = baseContext(REVISION);
+    declineMock.mockRejectedValueOnce(
+      new PortalApiError('TOKEN_EXPIRED', 'gone', 410),
+    );
+    const user = userEvent.setup();
+    renderWithRouter(<RevisionLandingPage />);
+
+    await user.click(
+      screen.getByRole('button', { name: /decline to revise/i }),
+    );
+    await user.click(screen.getByRole('button', { name: /confirm decline/i }));
+
+    expect(navigateMock).toHaveBeenCalledWith('/bid/revision-unavailable', {
+      replace: true,
+    });
   });
 });

@@ -24,6 +24,27 @@ export interface DraftPayload {
   attachment_ids: string[];
 }
 
+/**
+ * Mirrors the backend BidRevisionRequestResponse. Defined locally — the
+ * vendor portal is an isolated subsystem and must not import from
+ * `features/bids`. The decline flow only needs the call to resolve/reject,
+ * so this is the minimal accurate shape.
+ */
+export interface BidRevisionRequestResponse {
+  id: string;
+  bid_invitation_id: string;
+  original_submission_id: string;
+  pm_note: string;
+  revision_deadline: string;
+  status: string;
+  decline_reason: string | null;
+  requested_by: string;
+  requested_at: string;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PortalApi {
   setVendorJwt: (token: string | null) => void;
   getVendorJwt: () => string | null;
@@ -41,4 +62,9 @@ export interface PortalApi {
   listSubmissionAttachments: (
     submissionId: string,
   ) => Promise<SubmissionAttachmentMeta[]>;
+  /** Vendor declines a pending revision request (revision tokens only). */
+  declineRevisionRequest: (
+    revisionRequestId: string,
+    decline_reason?: string,
+  ) => Promise<BidRevisionRequestResponse>;
 }

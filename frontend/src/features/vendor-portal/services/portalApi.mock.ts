@@ -21,7 +21,11 @@ import type {
   VendorBidContext,
 } from '../types/portal';
 import { PortalApiError } from '../types/portal';
-import type { DraftPayload, PortalApi } from './portalApi.types';
+import type {
+  BidRevisionRequestResponse,
+  DraftPayload,
+  PortalApi,
+} from './portalApi.types';
 
 // ─── Axios instance (configured, but mocks bypass the network) ──────
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -317,6 +321,31 @@ async function listSubmissionAttachments(
   ];
 }
 
+async function declineRevisionRequest(
+  revisionRequestId: string,
+  decline_reason?: string,
+): Promise<BidRevisionRequestResponse> {
+  await delay(300);
+  // eslint-disable-next-line no-console
+  console.log('[portalApi:mock] declineRevisionRequest →', revisionRequestId);
+  const now = new Date().toISOString();
+  const reason = decline_reason?.trim() || null;
+  return {
+    id: revisionRequestId,
+    bid_invitation_id: 'inv-mock-001',
+    original_submission_id: 'sub-original-mock-001',
+    pm_note: 'Please revise the Cut and Fill unit price.',
+    revision_deadline: new Date(Date.now() + 18 * 60 * 60 * 1000).toISOString(),
+    status: 'declined',
+    decline_reason: reason,
+    requested_by: 'pm-mock-001',
+    requested_at: now,
+    responded_at: now,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 // ─── Project document download stub ─────────────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   await delay(200);
@@ -342,4 +371,5 @@ export const mockPortalApi: PortalApi = {
   downloadProjectDocument,
   getRevisionPrefill,
   listSubmissionAttachments,
+  declineRevisionRequest,
 };
