@@ -38,7 +38,8 @@ class Settings(BaseSettings):
 
     # Email
     EMAIL_PROVIDER: str = "ses"  # "mock" or "ses"
-    SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
+    # SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
+    SES_FROM_EMAIL: str = "noreply@bluonx.com"
 
     # Portal (vendor-facing URL for magic links)
     PORTAL_BASE_URL: str = "http://localhost:5173"

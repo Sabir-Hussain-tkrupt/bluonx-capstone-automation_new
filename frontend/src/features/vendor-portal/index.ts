@@ -6,6 +6,7 @@ export { RevisionLandingPage } from './pages/RevisionLandingPage';
 export { BidFormPage } from './pages/BidFormPage';
 export { SubmissionConfirmationPage } from './pages/SubmissionConfirmationPage';
 export { RevisionInactivePage } from './pages/RevisionInactivePage';
+export { RevisionDeclinedPage } from './pages/RevisionDeclinedPage';
 export { TokenExpiredPage } from './pages/TokenExpiredPage';
 export { InvalidTokenPage } from './pages/InvalidTokenPage';
 export { BiddingClosedPage } from './pages/BiddingClosedPage';

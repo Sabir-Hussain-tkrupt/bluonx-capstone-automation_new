@@ -47,4 +47,9 @@ export const listSubmissionAttachments: PortalApi['listSubmissionAttachments'] =
   submissionId,
 ) => impl.listSubmissionAttachments(submissionId);
 
-export type { DraftPayload } from './portalApi.types';
+export const declineRevisionRequest: PortalApi['declineRevisionRequest'] = (
+  revisionRequestId,
+  decline_reason,
+) => impl.declineRevisionRequest(revisionRequestId, decline_reason);
+
+export type { BidRevisionRequestResponse, DraftPayload } from './portalApi.types';

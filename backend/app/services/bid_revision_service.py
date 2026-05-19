@@ -12,11 +12,11 @@ real integrity backstop; these checks are for friendly error messages.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from postgrest.exceptions import APIError
 
 from app.core.config import settings
@@ -77,36 +77,6 @@ def _now_iso() -> str:
 
 def _to_response(row: dict) -> BidRevisionRequestResponse:
     return BidRevisionRequestResponse(**row)
-
-
-def _resolve_magic_link_token(db, raw_token: str) -> dict:
-    """Hash → magic_link_tokens lookup, then revoked/expiry gates.
-
-    Mirrors routers/vendor_auth.py's first three gates so the decline
-    click-through behaves identically to the portal entry path. Raises
-    BidRevisionValidationError so the caller can render an HTML error page.
-    """
-    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    resp = (
-        db.table("magic_link_tokens")
-        .select("id, bid_invitation_id, expires_at, revoked_at, bid_revision_request_id")
-        .eq("token_hash", token_hash)
-        .limit(1)
-        .execute()
-    )
-    rows = resp.data or []
-    if not rows:
-        raise BidRevisionValidationError(404, "Invalid or unknown bid link")
-    row = rows[0]
-    if row.get("revoked_at") is not None:
-        raise BidRevisionValidationError(
-            410,
-            "This link has been revoked. Please use the most recent link "
-            "sent to your email.",
-        )
-    if _parse_timestamptz(row["expires_at"]) <= datetime.now(timezone.utc):
-        raise BidRevisionValidationError(410, "This link has expired")
-    return row
 
 
 # ── B.1 create ───────────────────────────────────────────────────────────
@@ -342,56 +312,56 @@ def list_revision_requests_for_package(
     return [_to_response(r) for r in (rr_resp.data or [])]
 
 
-# ── B.5 vendor decline (GET click-through, raw token in URL) ─────────────
+# ── B.5 vendor decline (SPA-mediated, vendor JWT) ────────────────────────
 
 
-def decline_revision_request_via_token(
+def decline_revision_request(
     db,
     *,
     revision_request_id: UUID | str,
-    raw_token: str,
-) -> None:
-    """Vendor declines via the emailed link. No JWT — the raw token is the
-    credential, validated like vendor_auth does. Raises
-    BidRevisionValidationError; the router renders the HTML page."""
+    decline_reason: str | None,
+) -> BidRevisionRequestResponse:
+    """Vendor declines a pending revision request from the SPA.
+
+    Auth + JWT-claim/path-id binding are enforced by the router (the vendor
+    JWT is the credential). This function owns the state transition only.
+    Raises HTTPException — the JWT router surfaces it as JSON.
+    """
     rid = str(revision_request_id)
-    token_row = _resolve_magic_link_token(db, raw_token)
 
-    # Identity binding: the token's revision request must be THIS one. A
-    # vendor must not be able to decline another vendor's request.
-    token_rrid = token_row.get("bid_revision_request_id")
-    if not token_rrid or str(token_rrid) != rid:
-        raise BidRevisionValidationError(
-            403, "This link does not match this revision request"
-        )
-
-    rr_resp = (
+    existing = (
         db.table("bid_revision_requests")
-        .select("id, status")
+        .select("id")
         .eq("id", rid)
         .limit(1)
         .execute()
     )
-    rr_rows = rr_resp.data or []
-    if not rr_rows:
-        raise BidRevisionValidationError(404, "Revision request not found")
-    if rr_rows[0]["status"] != "pending":
-        raise BidRevisionValidationError(
-            410, "This revision request is no longer active"
+    if not (existing.data or []):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Revision request not found",
         )
 
-    # Guarded write — decline_reason intentionally left NULL (the optional
-    # vendor note is deferred; this is a GET click-through, no body).
+    # Guarded write. The .eq("status","pending") makes this a no-op if the
+    # request already moved off pending (terminal state or concurrent
+    # decline/finalize/cancel) — empty result ⇒ 410 (covers both cases).
     updated = (
         db.table("bid_revision_requests")
-        .update({"status": "declined", "responded_at": _now_iso()})
+        .update(
+            {
+                "status": "declined",
+                "decline_reason": decline_reason,
+                "responded_at": _now_iso(),
+            }
+        )
         .eq("id", rid)
         .eq("status", "pending")
         .execute()
     )
     if not (updated.data or []):
-        raise BidRevisionValidationError(
-            410, "This revision request is no longer active"
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This revision request is no longer active",
         )
 
     # Revoke the token(s). revoked_by stays NULL — a vendor action has no
@@ -399,3 +369,17 @@ def decline_revision_request_via_token(
     db.table("magic_link_tokens").update(
         {"is_used": True, "revoked_at": _now_iso()}
     ).eq("bid_revision_request_id", rid).execute()
+
+    # Re-read the full row so the response matches the PM endpoints' shape.
+    refreshed = (
+        db.table("bid_revision_requests")
+        .select(
+            "id, bid_invitation_id, original_submission_id, pm_note,"
+            " revision_deadline, status, decline_reason, requested_by,"
+            " requested_at, responded_at, created_at, updated_at"
+        )
+        .eq("id", rid)
+        .limit(1)
+        .execute()
+    )
+    return _to_response((refreshed.data or [updated.data[0]])[0])

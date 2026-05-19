@@ -25,6 +25,13 @@ class ValidateTokenRequest(BluOnXBase):
     token: str = Field(..., min_length=1, max_length=512)
 
 
+class DeclineRevisionPayload(BluOnXBase):
+    """Body for the SPA-mediated revision decline. The reason is optional —
+    a blank textarea is normalized to NULL by the router before the write."""
+
+    decline_reason: str | None = Field(None, max_length=500)
+
+
 # ── Response: nested context ─────────────────────────────────────────────
 
 

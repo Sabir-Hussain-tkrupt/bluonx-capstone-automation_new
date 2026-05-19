@@ -40,6 +40,7 @@ export const ROUTES = {
   PORTAL_FORM: '/bid/form',
   PORTAL_SUBMITTED: '/bid/submitted/:id',
   PORTAL_REVISION_INACTIVE: '/bid/revision-unavailable',
+  PORTAL_REVISION_DECLINED: '/bid/revision-declined',
   PORTAL_EXPIRED: '/bid/expired',
   PORTAL_INVALID: '/bid/invalid',
   PORTAL_CLOSED: '/bid/closed',
