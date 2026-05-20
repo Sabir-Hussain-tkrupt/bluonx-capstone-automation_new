@@ -63,6 +63,7 @@ from app.services.vendor_portal_service import (
     fetch_template_metadata,
     load_draft_response,
     resolve_unique_filename,
+    send_revision_submitted_email,
     send_submission_confirmation_email,
 )
 from app.services.vendor_portal_submit_validator import validate_for_submit
@@ -525,15 +526,29 @@ async def submit_bid(
     email_ctx = _fetch_submission_email_context(db, submission_id)
     attachment_count = _count_attachments(db, submission_id)
 
-    email_sent = await send_submission_confirmation_email(
-        email_service=email_service,
-        template_renderer=template_renderer,
-        submission_id=submission_id,
-        submitted_at=submitted_at,
-        total_amount=committed_total,
-        attachment_count=attachment_count,
-        context=email_ctx,
-    )
+    # A revised submission gets the revision receipt; an initial bid gets
+    # the (unchanged, bit-identical) confirmation. Never both — the
+    # discriminator is the revision claim already on the vendor JWT.
+    if ctx.bid_revision_request_id is not None:
+        email_sent = await send_revision_submitted_email(
+            email_service=email_service,
+            template_renderer=template_renderer,
+            submission_id=submission_id,
+            submitted_at=submitted_at,
+            total_amount=committed_total,
+            attachment_count=attachment_count,
+            context=email_ctx,
+        )
+    else:
+        email_sent = await send_submission_confirmation_email(
+            email_service=email_service,
+            template_renderer=template_renderer,
+            submission_id=submission_id,
+            submitted_at=submitted_at,
+            total_amount=committed_total,
+            attachment_count=attachment_count,
+            context=email_ctx,
+        )
 
     return SubmitBidResponse(
         id=submission_id,

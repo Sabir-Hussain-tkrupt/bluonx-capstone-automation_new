@@ -9,6 +9,8 @@ op-aware DB mock feeds the remaining queries.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 import app.routers.vendor_portal as vp
@@ -55,6 +57,7 @@ def _patch_finalize_helpers(monkeypatch):
         },
     )
     monkeypatch.setattr(vp, "send_submission_confirmation_email", _send)
+    monkeypatch.setattr(vp, "send_revision_submitted_email", _send)
 
 
 def _revision_spec(*, rr=None, update=None) -> dict:
@@ -126,6 +129,37 @@ def test_submit_revision_zero_rows_is_draft_returns_409(client_factory):
     r = c.post(URL)
     assert r.status_code == 409
     assert r.json()["detail"] == "Bid has already been submitted"
+
+
+# ── F.2 email branch: revision receipt REPLACES the confirmation ───────────
+
+
+def test_revision_mode_sends_revision_receipt_only(client_factory, monkeypatch):
+    revision_mock = AsyncMock(return_value=True)
+    confirm_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(vp, "send_revision_submitted_email", revision_mock)
+    monkeypatch.setattr(vp, "send_submission_confirmation_email", confirm_mock)
+
+    c = client_factory(_revision_spec(), ctx=vendor_ctx(revision=True))
+    r = c.post(URL)
+
+    assert r.status_code == 200, r.text
+    revision_mock.assert_awaited_once()
+    confirm_mock.assert_not_awaited()
+
+
+def test_initial_mode_sends_confirmation_only(client_factory, monkeypatch):
+    revision_mock = AsyncMock(return_value=True)
+    confirm_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(vp, "send_revision_submitted_email", revision_mock)
+    monkeypatch.setattr(vp, "send_submission_confirmation_email", confirm_mock)
+
+    c = client_factory(_initial_spec(), ctx=vendor_ctx(revision=False))
+    r = c.post(URL)
+
+    assert r.status_code == 200, r.text
+    confirm_mock.assert_awaited_once()
+    revision_mock.assert_not_awaited()
 
 
 # ── Initial-bid regression (must stay bit-identical) ───────────────────────

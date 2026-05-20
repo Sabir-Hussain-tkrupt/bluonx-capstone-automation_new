@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
 from app.main import app
+from app.services.email_service import get_email_service
 
 # ── Deterministic IDs ──────────────────────────────────────────────────────
 
@@ -140,6 +141,11 @@ def client_factory(authed_user):
         if auth:
             app.dependency_overrides[get_current_active_user] = lambda: authed_user
         app.dependency_overrides[get_supabase] = lambda: make_db(spec)
+        # create_revision_request_endpoint depends on get_email_service,
+        # which reads request.app.state.supabase (unset under TestClient).
+        # Default to a no-op async email service; the email-wiring test
+        # monkeypatches the helper itself for assertions.
+        app.dependency_overrides[get_email_service] = lambda: MagicMock()
         c = TestClient(app)
         created.append(c)
         return c

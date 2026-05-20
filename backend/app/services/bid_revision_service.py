@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -26,6 +27,7 @@ from app.models.bids import (
     BidRevisionRequestResponse,
 )
 from app.services.bid_package_service import _generate_magic_link_token
+from app.services.vendor_portal_service import _format_submitted_at
 
 logger = logging.getLogger(__name__)
 
@@ -383,3 +385,114 @@ def decline_revision_request(
         .execute()
     )
     return _to_response((refreshed.data or [updated.data[0]])[0])
+
+
+# ── F.1 revision-request email (best-effort, mirrors ──────────────────────
+# vendor_portal_service.send_submission_confirmation_email) ────────────────
+
+
+async def send_revision_request_email(
+    *,
+    email_service: Any,
+    template_renderer: Any,
+    db,
+    bid_invitation_id: UUID | str,
+    revision_request_id: UUID | str,
+    pm_note: str,
+    revision_deadline: datetime,
+    portal_url: str,
+) -> bool:
+    """Render and send the revision-request email. Best-effort.
+
+    Returns True iff the provider reported 'sent'. Never raises — the
+    revision request is already committed; a failed send is an ops issue
+    (retry from the email_log), not a PM-facing failure.
+    """
+    # One joined read for the vendor/project/task fields — mirrors the
+    # select shape of vendor_portal._fetch_submission_email_context.
+    try:
+        resp = (
+            db.table("bid_invitations")
+            .select(
+                "id,"
+                " vendor_contacts(full_name, email),"
+                " vendors(company_name),"
+                " bid_packages!inner("
+                "   tasks!inner("
+                "     name,"
+                "     projects(name)"
+                "   )"
+                " )"
+            )
+            .eq("id", str(bid_invitation_id))
+            .single()
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to fetch email context for revision request %s",
+            revision_request_id,
+        )
+        return False
+
+    inv = resp.data or {}
+    contact = inv.get("vendor_contacts") or {}
+    vendor = inv.get("vendors") or {}
+    pkg = inv.get("bid_packages") or {}
+    task = pkg.get("tasks") or {}
+    project = task.get("projects") or {}
+
+    to_email = (contact.get("email") or "").strip()
+    if not to_email:
+        logger.warning(
+            "Revision request %s has no vendor contact email; skipping send",
+            revision_request_id,
+        )
+        return False
+
+    render_ctx = {
+        "vendor_contact_name": contact.get("full_name") or "",
+        "vendor_company_name": vendor.get("company_name") or "",
+        "project_name": project.get("name") or "",
+        "task_name": task.get("name") or "",
+        "pm_note": pm_note,
+        "revision_deadline_formatted": _format_submitted_at(revision_deadline),
+        "portal_url": portal_url,
+    }
+
+    try:
+        html_body = template_renderer.render(
+            "bid_revision_request.html", render_ctx
+        )
+        text_body = template_renderer.render_text(
+            "bid_revision_request.txt", render_ctx
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to render revision-request email for %s",
+            revision_request_id,
+        )
+        return False
+
+    subject = (
+        f"Revision Requested: {render_ctx['project_name']}"
+        f" — {render_ctx['task_name']}"
+    )
+    try:
+        result = await email_service.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_body,
+            plain_text_body=text_body,
+            email_type="general",
+            recipient_type="vendor_contact",
+            reference_type="bid_revision_requests",
+            reference_id=str(revision_request_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Revision-request email send raised for %s", revision_request_id
+        )
+        return False
+
+    return getattr(result, "status", None) == "sent"

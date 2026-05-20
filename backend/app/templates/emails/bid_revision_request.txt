@@ -1,0 +1,27 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+Hi {{ vendor_contact_name }},
+
+The project manager has requested a revision of your bid for {{ project_name }} — {{ task_name }}.
+
+NOTE FROM THE PROJECT MANAGER
+----------------------------------------------------------------
+{{ pm_note }}
+
+REVISION DETAILS
+----------------------------------------------------------------
+Project:            {{ project_name }}
+Scope:              {{ task_name }}
+Revision Deadline:  {{ revision_deadline_formatted }}
+
+OPEN BID PORTAL
+----------------------------------------------------------------
+Click the link below to review the request and submit your revised bid:
+
+{{ portal_url }}
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.
