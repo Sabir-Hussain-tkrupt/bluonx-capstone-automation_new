@@ -23,7 +23,10 @@ from app.services.bid_revision_service import (
     cancel_revision_request,
     create_revision_request,
     list_revision_requests_for_package,
+    send_revision_request_email,
 )
+from app.services.email_service import EmailService, get_email_service
+from app.services.template_renderer import template_renderer
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +42,39 @@ async def create_revision_request_endpoint(
     body: BidRevisionRequestCreate,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
+    email_service: EmailService = Depends(get_email_service),
 ) -> BidRevisionRequestCreateResponse:
     """PM asks one vendor to revise their submitted bid."""
     try:
-        return create_revision_request(
+        result = create_revision_request(
             db, payload=body, requested_by=user["user_id"]
         )
     except BidRevisionValidationError as exc:
         raise HTTPException(
             status_code=exc.status_code, detail=exc.detail
         ) from exc
+
+    # Best-effort vendor notification — the request is already committed,
+    # so a send failure must never turn the 201 into an error. The helper
+    # swallows its own exceptions; this guard is defence-in-depth.
+    try:
+        rr = result.revision_request
+        await send_revision_request_email(
+            email_service=email_service,
+            template_renderer=template_renderer,
+            db=db,
+            bid_invitation_id=rr.bid_invitation_id,
+            revision_request_id=rr.id,
+            pm_note=rr.pm_note,
+            revision_deadline=rr.revision_deadline,
+            portal_url=result.portal_url,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Revision-request email dispatch raised for %s", result.revision_request.id
+        )
+
+    return result
 
 
 @router.post(

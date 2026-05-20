@@ -1,0 +1,30 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+Hi {{ vendor_contact_name }},
+
+Thank you. Your revised bid for {{ project_name }} — {{ task_name }} has been received. This email serves as your receipt.
+
+REVISION SUMMARY
+----------------------------------------------------------------
+Company:            {{ vendor_company_name }}
+Project:            {{ project_name }}
+Scope:              {{ task_name }}
+Revised Bid Total:  {{ total_amount_formatted }}
+Submitted At:       {{ submitted_at_formatted }}
+
+Your original bid remains preserved in our records. You will be
+notified of the award decision — no action is required from you at
+this time.
+
+{% if pm_name and pm_email %}
+QUESTIONS?
+----------------------------------------------------------------
+Contact {{ pm_name }} at {{ pm_email }} if you have any questions
+about this revision.
+
+{% endif %}
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

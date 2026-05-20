@@ -829,6 +829,80 @@ async def send_submission_confirmation_email(
     return getattr(result, "status", None) == "sent"
 
 
+async def send_revision_submitted_email(
+    *,
+    email_service: Any,
+    template_renderer: Any,
+    submission_id: UUID,
+    submitted_at: datetime,
+    total_amount: Decimal | float | str | None,
+    attachment_count: int,
+    context: dict,
+) -> bool:
+    """Render and send the revised-bid receipt. Best-effort.
+
+    A near-clone of send_submission_confirmation_email — it REPLACES that
+    receipt when the finalized submission is a revision. The two helpers
+    never both fire for the same submission. Returns True iff the provider
+    reported 'sent'; never raises.
+    """
+    to_email = (context.get("vendor_email") or "").strip()
+    if not to_email:
+        logger.warning(
+            "Revision submission %s has no vendor contact email; skipping send",
+            submission_id,
+        )
+        return False
+
+    render_ctx = {
+        "vendor_contact_name": context.get("vendor_contact_name") or "",
+        "vendor_company_name": context.get("vendor_company_name") or "",
+        "project_name": context.get("project_name") or "",
+        "task_name": context.get("task_name") or "",
+        "total_amount_formatted": _format_currency(total_amount),
+        "submitted_at_formatted": _format_submitted_at(submitted_at),
+        "attachment_count": attachment_count,
+        "pm_name": context.get("pm_name"),
+        "pm_email": context.get("pm_email"),
+    }
+
+    try:
+        html_body = template_renderer.render(
+            "bid_revision_submitted.html", render_ctx
+        )
+        text_body = template_renderer.render_text(
+            "bid_revision_submitted.txt", render_ctx
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to render revision receipt for submission %s", submission_id
+        )
+        return False
+
+    subject = (
+        f"Bid Revision Received: {render_ctx['task_name']}"
+        f" — {render_ctx['project_name']}"
+    )
+    try:
+        result = await email_service.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_body,
+            plain_text_body=text_body,
+            email_type="general",
+            recipient_type="vendor_contact",
+            reference_type="bid_submissions",
+            reference_id=str(submission_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Revision receipt email send raised for submission %s", submission_id
+        )
+        return False
+
+    return getattr(result, "status", None) == "sent"
+
+
 def resolve_unique_filename(
     db, bucket: str, folder: str, desired_name: str
 ) -> str:
