@@ -10,6 +10,9 @@ python-multipart>=0.0.18,<1.0
 async-lru>=2.0,<3.0
 jinja2>=3.0,<4.0
 
+# Scheduling
+apscheduler>=3.10,<4.0
+
 # AWS
 boto3>=1.35,<2.0
 cryptography>=43.0,<45.0

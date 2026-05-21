@@ -21,6 +21,14 @@ load_dotenv(_BACKEND_ENV)
 
 from app.main import app  # noqa: E402
 from app.core.config import settings  # noqa: E402
+import app.main as _app_main  # noqa: E402
+
+# The root `client` fixture starts the app via `with TestClient(app)`, which
+# runs the FastAPI lifespan — and the lifespan calls start_scheduler(). Patch
+# both lifecycle hooks to no-ops so a real APScheduler never runs during the
+# test suite (the hourly job would otherwise fire against the real test DB).
+_app_main.start_scheduler = lambda: None
+_app_main.stop_scheduler = lambda: None
 
 
 # ── Test user credentials (pre-created in Supabase) ─────────────────────

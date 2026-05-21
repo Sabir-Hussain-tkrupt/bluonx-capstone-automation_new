@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.supabase_client import init_supabase
+from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.routers import (
     awards,
     bid_invitations,
@@ -26,6 +27,7 @@ from app.routers import (
     milestones,
     notifications,
     projects,
+    scheduler_health,
     tasks,
     trades,
     users,
@@ -38,11 +40,13 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create and store global Supabase client
+    # Startup: create and store global Supabase client, then start the scheduler
     client = init_supabase(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
     app.state.supabase = client
+    start_scheduler()
     yield
-    # Shutdown: nothing to clean up (httpx client handles its own pool)
+    # Shutdown: stop the scheduler (httpx client handles its own pool)
+    stop_scheduler()
 
 
 app = FastAPI(
@@ -83,5 +87,6 @@ app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
+app.include_router(scheduler_health.router, prefix=_v1, tags=["Scheduler"])
 app.include_router(vendor_auth.router, prefix=_v1, tags=["Vendor Auth"])
 app.include_router(vendor_portal.router, prefix=_v1, tags=["Vendor Portal"])
