@@ -16,6 +16,7 @@ function makeInvitation(overrides: Partial<BidInvitation> = {}): BidInvitation {
     opened_at: null,
     responded_at: null,
     bid_submission_id: null,
+    is_awarded: false,
     ...overrides,
   };
 }
@@ -93,5 +94,48 @@ describe('InvitationsTable — View Bid action', () => {
     const buttons = screen.getAllByRole('button', { name: 'View Bid' });
     await user.click(buttons[0]);
     expect(onViewBid).toHaveBeenCalledWith('sub-abc');
+  });
+});
+
+describe('InvitationsTable — Request Revision visibility', () => {
+  function renderWithRevision(invitation: BidInvitation) {
+    return render(
+      <InvitationsTable
+        invitations={[invitation]}
+        isLoading={false}
+        onResendBidLink={vi.fn()}
+        onMarkDeclined={vi.fn()}
+        resendingId={null}
+        updatingId={null}
+        onRequestRevision={vi.fn()}
+        bidPackageOpen
+      />,
+    );
+  }
+
+  it('renders Request Revision for a submitted bid when the task is not awarded', () => {
+    renderWithRevision(
+      makeInvitation({
+        status: 'submitted',
+        bid_submission_id: 'sub-1',
+        is_awarded: false,
+      }),
+    );
+    expect(
+      screen.getAllByRole('button', { name: 'Request Revision' }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('hides Request Revision when the task is already awarded', () => {
+    renderWithRevision(
+      makeInvitation({
+        status: 'submitted',
+        bid_submission_id: 'sub-1',
+        is_awarded: true,
+      }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Request Revision' }),
+    ).toBeNull();
   });
 });

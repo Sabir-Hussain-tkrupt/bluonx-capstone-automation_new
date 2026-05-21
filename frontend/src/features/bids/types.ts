@@ -85,6 +85,9 @@ export interface BidInvitation {
   opened_at: string | null;
   responded_at: string | null;
   bid_submission_id: string | null;
+  /** True when the task has an active award — the PM cannot request a
+   *  revision (the backend create endpoint 409s). Drives button visibility. */
+  is_awarded: boolean;
 }
 
 export interface SubmittedBid {

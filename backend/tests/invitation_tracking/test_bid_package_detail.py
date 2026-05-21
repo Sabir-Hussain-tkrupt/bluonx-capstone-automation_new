@@ -24,6 +24,7 @@ from .conftest import (
     BID_SUBMISSION_IDS,
     INVITATION_IDS,
     NONEXISTENT_BID_PACKAGE_ID,
+    TASK_ID,
     build_chain,
 )
 
@@ -321,3 +322,100 @@ class TestLazyExpiration:
         for u in submitted_updates:
             assert u["payload"]["status"] != "submitted"
             assert u["payload"]["status"] != "declined"
+
+
+class TestInvitationIsAwarded:
+    """Each invitation row carries is_awarded — true iff the task has an
+    award in a revision-blocking status (pending_acceptance / accepted)."""
+
+    @staticmethod
+    def _client_with_awards(
+        awards_rows: list[dict],
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ) -> MagicMock:
+        client = MagicMock()
+
+        def table_side_effect(name):
+            if name == "bid_packages":
+                return build_chain(data=[sample_bid_package_open])
+            if name == "bid_invitations":
+                return build_chain(data=sample_invitations_mixed_statuses)
+            if name == "email_log":
+                return build_chain(data=sample_email_log_rows)
+            if name == "bid_package_documents":
+                return build_chain(data=sample_bid_package_documents)
+            if name == "bid_submissions":
+                return build_chain(data=sample_bid_submissions)
+            if name == "awards":
+                return build_chain(data=awards_rows)
+            return build_chain(data=[])
+
+        client.table.side_effect = table_side_effect
+        return client
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("award_status", "expected"),
+        [
+            ("accepted", True),
+            ("pending_acceptance", True),
+            ("declined_by_vendor", False),
+            ("cancelled", False),
+        ],
+    )
+    async def test_is_awarded_reflects_award_status(
+        self,
+        award_status,
+        expected,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ):
+        client = self._client_with_awards(
+            [{"id": str(uuid4()), "task_id": str(TASK_ID), "status": award_status}],
+            sample_bid_package_open,
+            sample_invitations_mixed_statuses,
+            sample_email_log_rows,
+            sample_bid_package_documents,
+            sample_bid_submissions,
+        )
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID, db=client
+        )
+
+        assert result["invitations"]
+        for inv in result["invitations"]:
+            assert inv["is_awarded"] is expected
+
+    @pytest.mark.asyncio
+    async def test_is_awarded_false_when_no_award(
+        self,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ):
+        client = self._client_with_awards(
+            [],
+            sample_bid_package_open,
+            sample_invitations_mixed_statuses,
+            sample_email_log_rows,
+            sample_bid_package_documents,
+            sample_bid_submissions,
+        )
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID, db=client
+        )
+
+        assert result["invitations"]
+        for inv in result["invitations"]:
+            assert inv["is_awarded"] is False

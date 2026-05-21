@@ -16,6 +16,11 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+# Single source of truth for the award statuses that block a new revision
+# request. Imported (not redefined) so this read-path visibility flag can
+# never diverge from the create_revision_request backend guard.
+from app.services.bid_revision_service import _BLOCKING_AWARD_STATUSES
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,6 +141,28 @@ def _fetch_invitations(
     return _unwrap_list(resp.data)
 
 
+def _task_has_active_award(db, task_id) -> bool:
+    """True if the task has an award in a revision-blocking status.
+
+    One query per package-detail request (NOT per invitation). The status
+    set matches bid_revision_service.create_revision_request exactly. The
+    status check runs in Python so it stays correct regardless of whether
+    the caller's mock applies PostgREST filters.
+    """
+    if not task_id:
+        return False
+    resp = (
+        db.table("awards")
+        .select("id, status")
+        .eq("task_id", str(task_id))
+        .execute()
+    )
+    return any(
+        row.get("status") in _BLOCKING_AWARD_STATUSES
+        for row in _unwrap_list(resp.data)
+    )
+
+
 def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
     """Fetch submitted bid_submissions with vendor company_name for this package.
 
@@ -181,8 +208,12 @@ def _fetch_documents(db, bid_package_id: UUID) -> list[dict]:
     return _unwrap_list(resp.data)
 
 
-def _transform_invitation(row: dict) -> dict:
-    """Flatten nested vendors / vendor_contacts into flat response fields."""
+def _transform_invitation(row: dict, *, is_awarded: bool = False) -> dict:
+    """Flatten nested vendors / vendor_contacts into flat response fields.
+
+    `is_awarded` is task-scoped (all invitations in a package share one
+    task) — the caller computes it once and passes the same value here.
+    """
     vendors = row.get("vendors") or {}
     contacts = row.get("vendor_contacts") or {}
     subs_raw = row.get("bid_submissions")
@@ -221,6 +252,7 @@ def _transform_invitation(row: dict) -> dict:
         "opened_at": row.get("opened_at"),
         "responded_at": row.get("responded_at"),
         "bid_submission_id": bid_submission_id,
+        "is_awarded": is_awarded,
     }
 
 
@@ -333,7 +365,12 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
 
     documents_rows = _fetch_documents(db, bid_package_id)
 
-    invitations = [_transform_invitation(row) for row in invitations_rows]
+    # Task-scoped: one query for the whole package, applied to every row.
+    is_awarded = _task_has_active_award(db, bid_package.get("task_id"))
+    invitations = [
+        _transform_invitation(row, is_awarded=is_awarded)
+        for row in invitations_rows
+    ]
     summary = _build_summary(invitations)
 
     submitted_bids_rows = _fetch_submitted_bids(db, bid_package_id)
@@ -369,7 +406,10 @@ async def list_invitations(
         raise BidPackageNotFoundError()
 
     rows = _fetch_invitations(db, bid_package_id, status_filter=status_filter)
-    return [_transform_invitation(row) for row in rows]
+    is_awarded = _task_has_active_award(db, bid_package.get("task_id"))
+    return [
+        _transform_invitation(row, is_awarded=is_awarded) for row in rows
+    ]
 
 
 async def update_invitation_status(

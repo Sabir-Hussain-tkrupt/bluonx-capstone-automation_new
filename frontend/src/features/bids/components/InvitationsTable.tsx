@@ -141,7 +141,8 @@ export function InvitationsTable({
           row.status === 'submitted' &&
           !!row.bid_submission_id &&
           bidPackageOpen &&
-          !isPending;
+          !isPending &&
+          !row.is_awarded;
         const showHistory =
           !!onToggleExpand && !!row.bid_submission_id && hasHistory(revision);
         const isExpanded = expandedInvitationId === row.id;
