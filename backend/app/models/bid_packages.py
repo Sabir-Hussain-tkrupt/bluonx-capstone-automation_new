@@ -87,6 +87,10 @@ class InvitationItem(BluOnXBase):
     opened_at: datetime | None = None
     responded_at: datetime | None = None
     bid_submission_id: UUID | None = None
+    # True when the invitation's task has an active award (revision-blocking
+    # statuses). Lets the PM UI hide "Request Revision" — the backend
+    # create_revision_request guard remains the source of truth.
+    is_awarded: bool = False
 
 
 class BidTemplateSummary(BluOnXBase):

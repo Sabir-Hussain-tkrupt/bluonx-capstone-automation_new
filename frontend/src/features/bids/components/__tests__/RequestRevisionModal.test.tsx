@@ -22,6 +22,7 @@ const invitation: BidInvitation = {
   opened_at: null,
   responded_at: null,
   bid_submission_id: 'sub-1',
+  is_awarded: false,
 };
 
 function renderModal() {
