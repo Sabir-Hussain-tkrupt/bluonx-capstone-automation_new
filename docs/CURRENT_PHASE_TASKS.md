@@ -1,263 +1,159 @@
-# Current Phase Tasks — BluOnX Development Operations Platform
+## Phase 7: Automated Reminder & Alert System (44 Hours)
 
-**Last Updated:** May 1, 2026
+Module 7: Deadline Reminders, Insurance Expiration Monitoring & Escalation
 
----
-
-## Phase 1: Foundation & Database (60h) — ✅ COMPLETE
-## Phase 2: Frontend Foundation, Backend API & Auth (100h) — ✅ COMPLETE
-## Phase 3: Core Entity Management (76h) — ✅ COMPLETE
-## Phase 4: Bid Invitation System (50h) — ✅ COMPLETE
-## Phase 5: Bid Collection — Custom Secure Forms (60h) — ✅ COMPLETE
-
-**Deferred (see `docs/DEFERRED.md`):**
-- Task 1.8 — Dev/staging environment separation
-- Task 1.9 — AWS infrastructure setup (pending client credentials)
+**Architecture note:** All scheduled workflows in this phase run inside the existing FastAPI process via APScheduler (AsyncIOScheduler), using the in-process scheduler foundation established during the bid revision feature. There is no separate orchestration service. The system deploys as a single ECS Fargate task (`desiredCount=1`) with ECS auto-restart on health-check failure. All emails route through the existing `EmailService` (`backend/app/services/email_service.py`) which already owns `email_log` writes and SES retries.
 
 ---
 
-## Phase 6: Real-Time Dashboard & Visibility (~30h) — 🔄 IN PROGRESS
+### Implementation notes (evidence-backed, derived from existing code)
 
-**Goal:** Give PMs real visibility surfaces — a proper landing dashboard, a cross-task bid package overview, single-bid inspection, and visual breakdowns of in-flight bids.
- 
-**Tables read:** `bid_packages`, `bid_invitations`, `bid_submissions`, `bid_line_items`, `bid_attachments`, `tasks`, `projects`, `vendors`, `vendor_contacts`, `magic_link_tokens`
- 
-**Tables written:** none in Phase 6 proper. (Lifecycle status writes — `opened`, `expired` — were handled as a pre-Phase-6 cleanup pass before this phase started.)
+These notes capture conventions that already exist in the codebase. New jobs must follow them.
 
+**Scheduler integration pattern (matches existing `revision_expiry` job):**
+- Each job lives in its own module under `backend/app/jobs/` and exposes a `register(scheduler)` function.
+- Each job function is decorated with `@tracked_job(job_id)` from `backend/app/jobs/scheduler.py` (line 67). The decorator handles start/complete logging, success/failure recording into `_last_run`, and prevents exceptions from crashing the scheduler.
+- `register()` calls `scheduler.add_job(..., id=..., replace_existing=True, **DEFAULT_JOB_KWARGS)` where `DEFAULT_JOB_KWARGS = {"coalesce": True, "misfire_grace_time": 300, "max_instances": 1}`.
+- Each new job ID must be added to the `KNOWN_JOB_IDS` tuple in `scheduler.py` (currently `("revision_expiry",)`).
+- Each new job must be wired into `start_scheduler()` with a deferred import and an explicit `register(scheduler)` call.
+- Timezone: all new jobs use UTC (consistent with existing `revision_expiry` which uses `CronTrigger(minute=0)`). Cron expressions documented in code comments with the equivalent local time for the BluOnX team.
 
-### Architecture Context
- 
-- **Refresh model — intentional, no changes.** Reads use the existing global QueryClient defaults: `staleTime: 2min`, `refetchOnWindowFocus: true`, `refetchOnMount: true`, `refetchOnReconnect: 'always'`. Mutations invalidate query keys in `onSuccess`. **No polling (`refetchInterval`) and no Supabase Realtime subscriptions are added in Phase 6.** Existing dormant Realtime hooks (`useRealtimeSubscription`, `useRealtimeQueryInvalidation`) remain unused — preserved as post-MVP infrastructure.
-- **Reads:** Continue using Supabase JS client with RLS for authenticated dashboard reads. Writes via FastAPI (service_role).
-- **Routing:** All new pages live under the existing admin layout and are wrapped by the standard `ProtectedRoute`. No new role-based gating in Phase 6 — both `admin` and `project_manager` see the same surfaces.
-- **Charts library:** Recharts (added in Task 6.4).
+**Email sending pattern (matches existing callers like `bid_package_service`):**
+- All sends go through `EmailService.send_email()` — never `send_bulk_emails()`, which bypasses `email_log` entirely.
+- For batch sends, loop over recipients calling `send_email()` per recipient, wrapped in `asyncio.gather` with a semaphore (concurrency limit 10) for SES rate control.
+- `email_log` writes are handled internally by `EmailService` — callers do not touch `email_log` directly except for dedup-lookup reads.
+- `send_email()` returns an `EmailSendResult` (does not raise) — per-recipient failures are logged to `email_log` with `status='failed'` and `error_message` populated. The job logs the failure and continues processing remaining recipients.
 
+**Template loading pattern (matches `backend/app/services/template_renderer.py`):**
+- Templates live in `backend/app/templates/emails/` as paired `<name>.html` and `<name>.txt` files. A shared `base.html` provides layout.
+- Loaded via the module-level singleton `template_renderer` (Jinja2 with HTML autoescape on `.html`, off on `.txt`).
+- **Pre-existing templates Claude Code found:** three `bid_reminder_*` template files already exist in the templates directory (built but never wired up — `EMAIL_TYPES` enum has `bid_reminder` but no caller sends with it yet). Verify these match the T-7 / T-3 / T-0 tier needs and reuse them where they fit.
 
-### Task 6.1: Wire Up Real Dashboard Counts (~3–4h)
+**Recipient resolution pattern (no PM concept exists):**
+- There is no "assigned PM" or `get_project_pm()` helper in the codebase. Ownership is implicit via `created_by` columns.
+- For bid-related notifications, "the PM" is `bid_packages.created_by` looked up in `users` (matches existing inline pattern at `bid_package_service.py:277, 532` and `vendor_portal.py:925-942`).
+- For admin notifications, query `users WHERE role='admin' AND is_active=TRUE AND deleted_at IS NULL`.
 
-**Current state:** `frontend/src/features/dashboard/pages/DashboardPage.tsx` exists as a stub. It shows 4 stat cards — "Active Projects" and "Active Vendors" are wired via Supabase count queries; "Open Tasks" and "Pending Bids" are hardcoded to `--`. Three quick-nav cards link to Vendors, Projects, and Settings.
-
-**Goal:** Make every stat card show real data. Add one more card if the cleanup makes it natural.
-
-**Sub-tasks:**
-
-- **Open Tasks count.** A task is "open" if `tasks.deleted_at IS NULL` AND `tasks.status` is one of `bidding`, `evaluating`, or `awarded` (i.e., active work, not `draft`, `completed`, or `cancelled`). Use a Supabase `count` query, same pattern as the existing two cards.
-- **Pending Bids count.** A bid package is "pending" if `bid_packages.status = 'open'`. Count distinct bid packages, not invitations. (Alternative interpretation: count bid packages with at least one invitation in `sent` or `opened` state. Go with the simpler `status = 'open'` reading for v1.)
-- **Optional fourth metric: "Awards This Month."** Count of `awards` rows where `awarded_at >= start_of_current_month` and `status` in (`pending_acceptance`, `accepted`). Adds a forward-looking signal without much work. Include if it slots cleanly; skip if the layout fights it.
-- **Loading and empty states.** Each card shows a skeleton while loading; shows `0` (not `--`) when data resolves to zero. The hardcoded `--` placeholders go away.
-- **No clickability changes** — these are display-only stat cards. The quick-nav cards below already handle navigation.
-
-**Sub-task notes:**
-- All four counts run as parallel `useQuery` calls; React Query handles independent loading states naturally.
-- Use the existing `staleTime: 2min` default. Do not add `refetchInterval`. Stat cards refresh on tab focus, which is the right cadence.
-
----
- 
-### Task 6.2: PM Single Bid Detail View (~6–8h)
- 
-**Why this exists:** Currently a PM cannot inspect a submitted bid's contents from the Bid Package Detail page — only aggregate counts and totals are visible. This task closes that gap.
- 
-**Scope:** Single-bid inspection only. No draft visibility, no annotations, no comparison.
- 
-**Sub-task A: PM-side single submission endpoint**
- 
-- Implement the existing stub at `GET /api/v1/bid-submissions/{submission_id}` in `backend/app/routers/bid_submissions.py` (currently raises 501).
-- Returns full submission shape:
-  - Top-level: vendor company name, vendor contact (name, email), `total_amount`, `status`, `vendor_notes`, `submitted_at`, `is_direct_assign`, `bid_invitation_id`.
-  - Line items array: `description`, `item_type` (lump_sum / unit_price), `quantity`, `unit_of_measure`, `unit_price`, `lump_sum_amount`, `line_total`, `sort_order`.
-  - Attachments array: `file_name`, `file_size`, `file_type`, signed download URL.
-- Read-only. user-authed via existing `get_current_active_user`. 404 if submission missing.
-- Use the same Supabase Storage signed-URL pattern that the vendor portal uses for project documents — don't reinvent.
-
-**Sub-task B: "View Bid" quick action on invitations table**
- 
-- Add a "View Bid" button to the actions cell of the invitations row when `bid_invitations.status = 'submitted'`. Same actions cell that currently holds Resend Bid Link / Mark Declined.
-- Opens a modal (preferred over a dedicated route — keeps return-to-context flow tight on a page where the PM is comparing rows).
-- Modal layout (top to bottom):
-  - Header: vendor company name + contact name/email + status pill + total amount (large)
-  - Submission metadata: submitted_at timestamp, direct-assign indicator if applicable
-  - Line items: clean table matching the structure the vendor saw on the portal's pricing step (description, qty, UoM, unit price, lump sum amount, line total). Sorted by `sort_order`.
-  - Vendor notes: rendered as plain text in a bordered panel; hidden if empty.
-  - Attachments: list with file name, file size, file type icon, download button (signed URL). Hidden if no attachments.
-- Read-only. No edit / annotate / approve / reject actions inside the modal.
-- Mobile: modal becomes near-full-screen; line item table scrolls horizontally if columns overflow.
-**Out of scope:**
-- Cross-bid comparison (Phase 8)
-- PM annotations or notes on bids (Phase 8)
-- Editing, voiding, or invalidating submitted bids
-- Draft visibility / "vendor has a draft in progress" signals (vendor-private)
-- "View Bid" action on declined / expired / sent / opened rows (only `submitted` shows the button)
-**Acceptance criteria:**
-- `GET /v1/bid-submissions/{id}` returns full nested submission shape with signed attachment URLs; 404 if missing; admin-authed.
-- "View Bid" button appears in the actions cell of submitted-status invitations rows and nowhere else.
-- Modal opens with full submission contents; closes cleanly; works in mobile viewport.
-- Skeleton state while submission loads; empty states for "no notes" and "no attachments" handled silently (sections hidden, not shown empty).
+**Dedup pattern for bid reminders (no schema change required):**
+- `email_log` has no tier discriminator. Each tier (T-7 / T-3 / T-0) only matches today's date once in an invitation's lifecycle because the threshold is anchored to `bid_packages.deadline` (e.g., T-7 only matches when `deadline = today + 7 days`).
+- Dedup query: `SELECT 1 FROM email_log WHERE email_type='bid_reminder' AND reference_id = :invitation_id AND created_at::date = CURRENT_DATE`.
 
 ---
 
-### Task 6.3: Bid Package List View (~6–8h)
+### Task 7.1: Establish scheduler foundation and conventions for Phase 7 jobs - 4h
 
-**Goal:** Bid packages currently exist only as nested children of tasks — the only way to find them is to navigate Project → Task → Bid Packages section. As bids accumulate across multiple projects, PMs need a cross-task overview to see all in-flight bidding work in one place.
+* Add the four new Phase 7 job IDs (`daily_bid_reminders`, `daily_insurance_expiration`, `post_deadline_escalation`, `scheduler_self_check`) to the `KNOWN_JOB_IDS` tuple in `backend/app/jobs/scheduler.py`
+* Wire each new job's `register(scheduler)` call into `start_scheduler()` with a deferred import (matching the existing `revision_expiry` pattern)
+* Create `backend/app/jobs/README.md` documenting the job-authoring contract: must use `@tracked_job`, must include `id` and `replace_existing=True` and `**DEFAULT_JOB_KWARGS` in `add_job`, must wrap heavy work in `asyncio.gather` with a semaphore, must use UTC cron expressions with local-time comments, must return a JSON-serializable dict for the health endpoint
+* Verify `GET /api/v1/admin/scheduler-health` surfaces all new job IDs (null last-run records until first execution)
+* Tools: APScheduler, FastAPI lifespan hooks, Python logging
 
-**New page:** `/bid-packages` (route already-conceivable; sidebar nav addition needed)
+### Task 7.2: Build tiered email templates - 6h
 
-**Page layout:**
+* Verify and finalize the existing `bid_reminder_*` template trio in `backend/app/templates/emails/` for T-7 friendly reminder, T-3 urgent reminder, T-0 final call (Claude Code confirmed these files exist but were never wired up); update copy and styling as needed
+* Build the post-deadline admin escalation digest template (new): consolidated list of bid packages whose deadline passed in the last 24 hours, with non-responding vendors grouped by package, plus recommended actions
+* Build the insurance expiration admin digest template (new): consolidated list of vendors and `vendor_documents` insurance certificates expiring at T-30 and T-7, grouped by expiration tier
+* Every template requires both `.html` and `.txt` versions (the existing `EmailService` requires both bodies as positional arguments to `send_email()`)
+* All templates use the shared `base.html` layout, mobile-responsive HTML, BluOnX branding, and dynamic content placeholders rendered via the `template_renderer` singleton
+* Tools: Jinja2, HTML/CSS email design
 
-- Header: "Bid Packages"
-- Filter bar:
-  - Status filter (chips or dropdown): All / Open / Closed / Evaluating / Cancelled
-  - Project filter (dropdown of active projects)
-  - Sort: Deadline (default ascending), Created Date, Project Name
-- Main table (one row per bid package):
-  - Project name (clickable → project detail)
-  - Task name (clickable → task detail)
-  - Round number (badge — `R1`, `R2`, etc.)
-  - Deadline (with countdown — "in 3 days", "passed 2 days ago"). Reuse the existing countdown pattern from `BidPackageDetailPage`.
-  - Status badge
-  - Submission progress: `{submitted_count} / {total_invitations}` with a small inline bar
-  - Created Date (sortable)
-  - Click row → navigates to `BidPackageDetailPage`
+### Task 7.3: Implement bid reminder scheduling job - 10h
 
-**Data fetching:**
+* New module `backend/app/jobs/bid_reminders.py` with `register(scheduler)` exposing job ID `daily_bid_reminders`
+* APScheduler `CronTrigger` set to UTC, fires once daily at the UTC equivalent of 8:00 AM local time for the BluOnX team (document the exact UTC hour and local-time intent in a code comment)
+* SQL query identifies bid invitations needing a reminder today:
+  * Join `bid_invitations → bid_packages` on `bid_package_id`
+  * `bid_packages.status = 'open'`
+  * `bid_invitations.status NOT IN ('submitted', 'declined', 'expired', 'no_response')`
+  * `bid_packages.deadline::date IN (CURRENT_DATE + 7, CURRENT_DATE + 3, CURRENT_DATE)` to match T-7, T-3, T-0 thresholds
+  * Tier is derived from the day difference: T-7 → friendly template, T-3 → urgent template, T-0 → final call template
+* Per-invitation dedup before sending: `SELECT 1 FROM email_log WHERE email_type='bid_reminder' AND reference_id = :invitation_id AND created_at::date = CURRENT_DATE` — skip if any row found
+* Resolve recipient: `bid_invitations.vendor_contact_id → vendor_contacts.email, full_name`
+* Send via `EmailService.send_email(...)` with `email_type='bid_reminder'`, `recipient_type='vendor_contact'`, `reference_type='bid_invitations'`, `reference_id=invitation.id`
+* All sends dispatched via `asyncio.gather` with `asyncio.Semaphore(10)` to respect SES rate limits and keep the event loop responsive
+* Re-check `bid_invitations.status` inside each per-invitation coroutine to skip vendors who submitted between query time and send time
+* Job returns a JSON-serializable dict: `{"t_minus_7_sent": N, "t_minus_3_sent": N, "t_minus_0_sent": N, "failed": N, "skipped_already_sent": N}`
+* Tools: APScheduler, asyncio, EmailService, Supabase Python client
 
-- New endpoint: `GET /v1/bid-packages` with query params for `status`, `project_id`, `sort_by`, `sort_order`. Returns bid packages with denormalized project/task names and submission counts (compute counts in SQL — don't push that to the client).
-- Or, if the team prefers staying in Supabase JS client land: a view or RPC that returns the same denormalized shape. FastAPI is the more consistent choice given Phase 4's pattern.
-- Use a single hook `useBidPackagesList(filters)` with React Query.
+### Task 7.4: Implement insurance expiration monitoring job - 8h
 
-**Sidebar navigation:**
+* New module `backend/app/jobs/insurance_expiration.py` with `register(scheduler)` exposing job ID `daily_insurance_expiration`
+* APScheduler `CronTrigger` set to UTC, fires once daily at the UTC equivalent of 8:15 AM local time (offset from bid reminders to spread SES load and isolate logs)
+* **Scope: insurance only.** Two SQL queries unioned (or run sequentially) into one result set:
+  * `vendor_documents` where `document_type = 'insurance_certificate'` AND `status = 'valid'` AND `expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`
+  * `vendors` where `deleted_at IS NULL` AND `insurance_expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`
+* Resolve recipients: query `users WHERE role = 'admin' AND is_active = TRUE AND deleted_at IS NULL`
+* Build one consolidated digest per admin listing every expiring insurance item (T-30 and T-7 tiers grouped, with vendor name, company name, certificate expiration date, days remaining)
+* Skip the digest entirely if no items match (no empty emails)
+* Weekly dedup: `SELECT 1 FROM email_log WHERE email_type='general' AND recipient_type='user' AND reference_type='insurance_expiration_digest' AND created_at >= CURRENT_DATE - INTERVAL '6 days'` — if the same admin already received a digest this week, skip them (prevents daily spam when the same items keep matching the T-30 window for several days)
+* Send via `EmailService.send_email(...)` with `email_type='general'`, `recipient_type='user'`, `reference_type='insurance_expiration_digest'` (synthetic discriminator since no real source table — documented in the job comment), `reference_id=user.id`
+* **Frontend: dashboard badge.** Add an indicator to the vendor list view showing the count of vendors with insurance (from either `vendors.insurance_expiration_date` or matching `vendor_documents`) expiring within 30 days. Backed by a new FastAPI endpoint `GET /api/v1/vendors/insurance-expiring-count` returning a single integer count.
+* Job returns a JSON-serializable dict: `{"items_found": N, "admins_notified": N, "admins_skipped_weekly_dedup": N, "failed": N}`
+* Tools: APScheduler, EmailService, Supabase Python client, React for dashboard badge
 
-- Add a new top-level nav item: "Bids" (or "Bid Packages") with an appropriate icon. Position it between "Projects" and "Vendors" or similar — wherever it fits the existing visual flow.
+### Task 7.5: Implement post-deadline admin escalation job - 6h
 
-**Empty / loading states:**
+* New module `backend/app/jobs/post_deadline_escalation.py` with `register(scheduler)` exposing job ID `post_deadline_escalation`
+* APScheduler `CronTrigger` set to UTC, fires once daily at the UTC equivalent of 9:00 AM local time
+* SQL query identifies bid packages whose `deadline` fell within the last 24 hours and have at least one `bid_invitations.status IN ('sent', 'opened')` (no submission, no decline)
+* Group affected packages by `bid_packages.created_by` (the user who originated the bid round — matches the existing "the PM" pattern at `bid_package_service.py:277, 532`)
+* Look up each recipient in `users WHERE id = :created_by AND is_active = TRUE AND deleted_at IS NULL` — skip if user is inactive or deleted
+* Build one consolidated digest per recipient listing all their affected packages: project name (`projects.name`), task name (`tasks.name`), deadline, and a row per non-responding vendor (`vendors.company_name`, `vendor_contacts.full_name`, `vendor_contacts.email`, `vendor_contacts.phone`)
+* Body includes recommended actions ("Contact vendor directly", "Extend deadline and resend invitations via the existing Bid Revision flow", "Award based on submitted bids")
+* Skip the digest entirely if a recipient has no affected packages
+* Send via `EmailService.send_email(...)` with `email_type='general'`, `recipient_type='user'`, `reference_type='post_deadline_escalation'` (synthetic discriminator), `reference_id=recipient_user.id`
+* After successful digest delivery, update affected `bid_invitations.status` from `sent`/`opened` to `no_response` for cleaner dashboard reporting (one bulk UPDATE per package using the partial unique index on bid_package_id + vendor_id)
+* Job returns a JSON-serializable dict: `{"packages_affected": N, "recipients_notified": N, "invitations_marked_no_response": N, "failed": N}`
+* Tools: APScheduler, EmailService, Supabase Python client
 
-- Skeleton rows while loading
-- Empty state when no bid packages exist: "No bid packages yet. Start bidding on a task to create one." with a link back to projects.
-- Empty state with active filters: "No bid packages match these filters" with a "Clear filters" button.
+### Task 7.6: Build reminder/communication history view - 6h
 
-**Mobile:**
+* New FastAPI endpoints:
+  * `GET /api/v1/vendors/{vendor_id}/email-history` — paginated (default page size 50), returns `email_log` rows where `recipient_type='vendor_contact'` AND the recipient_email matches any `vendor_contacts.email` for this vendor, OR where `reference_type='bid_invitations'` AND `reference_id IN (SELECT id FROM bid_invitations WHERE vendor_id = :vendor_id)`
+  * `GET /api/v1/bid-packages/{bid_package_id}/email-history` — paginated, returns `email_log` rows where `reference_type='bid_invitations'` AND `reference_id IN (SELECT id FROM bid_invitations WHERE bid_package_id = :bid_package_id)`
+* Both endpoints admin-authed via existing `get_current_active_user` dependency
+* **Frontend — Vendor detail page (`VendorDetailPage.tsx`, tabbed layout):**
+  * Add `{ id: 'communication', label: \`Communication (${count})\` }` to the `tabDefs` array (matches the existing pattern at lines 120-126)
+  * Add a conditional block `{activeTab === 'communication' && (...)}` inside the `<Tabs>` children (matches lines 172-420)
+  * Render a paginated list with columns: timestamp (formatted), email type, subject, recipient email, status (color-coded badge)
+* **Frontend — Bid package detail page (`BidPackageDetailPage.tsx`, stacked-cards layout):**
+  * Add another `<Card>` inside the root `<div className="space-y-6">` (matches lines 143-326)
+  * Use the existing collapsible-section pattern from the Email Log card (lines 294-326): a header `<button>` toggling a `showCommunicationHistory` boolean to lazy-render its body
+  * Same column layout as the vendor view, scoped to this package's invitations
+* Status badge colors: green = `delivered`, blue = `sent`, amber = `queued`, red = `bounced` or `failed`
+* No manual resend action — automatic next-tier retry handles repeated outreach; manual resend creates duplicate-email risk
+* Tools: React, FastAPI, Supabase Python client, React Query
 
-- Table becomes a card list — each card shows project/task as the heading, with deadline + status + progress as bullets below.
-- Filter bar collapses into a single "Filters" button that opens a sheet/drawer.
+### Task 7.7: Build scheduler self-check job - 4h
 
-**Out of scope:**
-- Bulk actions on bid packages (cancel multiple, etc.) — not needed
-- Inline detail expansion — clicking the row goes to the detail page, that's enough
+* New module `backend/app/jobs/scheduler_self_check.py` with `register(scheduler)` exposing job ID `scheduler_self_check`
+* APScheduler `CronTrigger` set to UTC, fires once daily at the UTC equivalent of 8:45 AM local time (after all primary jobs have had a chance to run)
+* Reads the in-memory last-run state via `get_last_run(job_id)` from `scheduler.py` for every entry in `KNOWN_JOB_IDS` except `scheduler_self_check` itself
+* For each tracked job: define an expected interval (hourly for `revision_expiry`, daily for the four new jobs) and a 2-hour grace window. If `last_run_at` is `None` or older than `now - (expected_interval + grace)`, append the job to the failure summary with its job ID, expected interval, and last-run timestamp
+* If the failure summary is non-empty, resolve admin recipients (same query as Task 7.4: `users WHERE role = 'admin' AND is_active = TRUE AND deleted_at IS NULL`) and send one alert email per admin
+* Email body lists every stale job and links to `/api/v1/admin/scheduler-health` for inspection
+* Send via `EmailService.send_email(...)` with `email_type='general'`, `recipient_type='user'`, `reference_type='scheduler_self_check'` (synthetic discriminator), `reference_id=recipient_user.id`
+* This job's own failure is the only observability blind spot; that's acceptable because Sentry exception capture + ECS auto-restart + the `scheduler_running` flag on `/admin/scheduler-health` cover the case where the entire scheduler is down
+* Job returns a JSON-serializable dict: `{"stale_jobs": [...], "admins_notified": N}`
+* Tools: APScheduler, EmailService, Python logging
 
----
+### Acceptance Criteria
 
-### Task 6.4: Charts on Bid Package Detail (~6–7h)
-
-**Goal:** Add two charts to the bid package detail page — a small status pie centered below the stat cards row, and a full bid amount comparison bar chart between the invitations table and email log.
-
-**Library:** Recharts. Add to `frontend/package.json`.
-
-**Chart 1: Submission Status Pie (small, below stat cards)**
-
-- Placement: new row directly below the 4 stat cards, above the Instructions banner. Centered, compact width (roughly the size of two stat cards).
-- Acts as a quiet visual accent at small invitation counts (5–10 vendors), becomes the primary scanning tool at larger counts (20+ vendors).
-- Slices: sent, opened, submitted, declined, expired. Skip empty slices.
-- Reuse the same color palette as the StatusBadge component (sent = blue, opened = yellow, submitted = green, declined = red, expired = gray).
-- Tooltip: status name + count + percentage.
-- Always rendered when invitations exist. Hidden only if zero invitations (edge case — bid package with no vendors invited yet).
-
-**Chart 2: Bid Amount Comparison Bar (full section)**
-
-- Placement: new section between Invitations table and Email Log, titled "Submitted Bid Amounts."
-- Conditionally rendered: only when `submitted_count >= 1`. Section fully hidden when zero submitted.
-- Email Log remains the last collapsible section.
-
-**Bar chart shape:**
-- Horizontal bars, one per submitted bid, labeled with vendor company name.
-- X-axis: `total_amount` formatted as currency.
-- Sort ascending — lowest bid at top.
-- If `tasks.budget_estimate` is set, vertical dashed reference line labeled "Budget Estimate"; bars exceeding it rendered in a warning color.
-- Tooltip: vendor name + formatted amount.
-
-**Data fetching:**
-- Pie: uses the existing `invitation_summary` already returned by `GET /v1/bid-packages/{id}`. No backend change.
-- Bar: extend the same endpoint response with `submitted_bids` array (vendor company name + total_amount). Single fetch.
-
-**Mobile:**
-- Stat cards row stacks to 2-column or single-column.
-- Pie chart full-width below the cards.
-- Bar chart full-width; X-axis ticks may truncate.
-
-**Out of scope:**
-- Score-comparison radar (Phase 8)
-- Submission timeline chart
-- Export to image / PDF
-
----
-
-### Task 6.5: Polish — Skeletons, Empty States, Mobile Review (~3–4h)
-
-**Goal:** Catch the visual regressions and rough edges introduced by 6.1–6.4.
-
-**Sub-tasks:**
-
-- **Loading skeletons** for: dashboard stat cards (Task 6.1), Active Projects card (Task 6.2), bid packages list page (Task 6.3), both charts (Task 6.4). Reuse the existing skeleton primitives if they exist; create minimal new ones if needed.
-- **Empty states** for the same surfaces, with consistent voice and call-to-action style. Match the tone of existing empty states in the projects/vendors lists.
-- **Mobile pass.** Walk through dashboard, bid packages list, bid package detail (with charts) on a phone-width viewport. Adjust layout where things break.
-- **Responsive table → card transformations.** Bid packages list specifically — verify the card view on mobile is clean.
-- **Loading transitions.** No layout-shift between skeleton and real content. No flash-of-zero before the count loads.
-
-**Out of scope:**
-- Animations beyond the existing default transitions
-- Dark mode (not in MVP)
-- Accessibility audit (Phase 12 territory)
-
----
-
-## Phase 6 Acceptance Criteria
-
-- [ ] Magic link validation transitions `sent` → `opened` exactly once
-- [ ] Lazy `expired` transition applied when PM views a past-deadline bid package
-- [ ] "Mark No Response" no longer in the invitations table UI
-- [ ] `responded_at` populated when marking declined
-- [ ] `PUT /status` rejects overwrites of `submitted` invitations (409)
-- [ ] Resend rejects past-deadline attempts (400)
-- [ ] Dashboard stat cards all show real data, no `--` placeholders
-- [ ] Active Projects card on dashboard, sorted by recent activity, empty state handled
-- [ ] Bid Package list page accessible from sidebar, filters and sort working
-- [ ] Submission status pie chart displays on bid package detail with correct colors
-- [ ] Bid amount comparison bar chart displays once submissions exist; budget reference line if set
-- [ ] All new surfaces have skeletons and empty states
-- [ ] Mobile layout verified for dashboard, bid packages list, bid package detail with charts
-- [ ] No `refetchInterval` added; refresh model unchanged from prior phases
-- [ ] No Realtime subscriptions added; existing dormant hooks remain untouched
-- [ ] Recharts added to `package.json`; no other charting library introduced
-
----
-
-## What Phase 6 Intentionally Does NOT Include
- 
-- **No polling / `refetchInterval`.** The existing `staleTime + refetchOnWindowFocus + mutation invalidation` model is the right design for ≤10 PMs and low-frequency writes.
-- **No Supabase Realtime subscriptions.** Existing hooks remain dormant for post-MVP.
-- **No completeness checker.** The Phase 5 form prevents incomplete submissions structurally.
-- **No timeline / activity feed component.** Phase 10's notifications system will provide cross-project event visibility.
-- **No score-comparison radar chart.** Phase 8 owns that work.
-- **No draft visibility for PMs.** Drafts are vendor-private; PMs only care about submitted bids.
-- **No PM annotations on bids.** Phase 8 territory.
-- **No CSV / PDF exports.** Phase 8 / post-MVP.
-- **No "Cancel Bid Package" wiring.** The button is a TODO stub; deferred as a separate cleanup.
-
----
-
-## Next Phase Preview
-
-**Phase 7: Reminder & Alert System (44h)** — n8n workflows for bid reminders (T-7, T-3, T-0), document expiration monitoring (T-30, T-7), tiered email templates, escalation alerts.
-
-**Phase 8: Bid Comparison & Scoring (40h)** — Bid normalization across pricing formats, weighted scoring algorithm (50/5/20/10/15), side-by-side comparison UI with the Recharts foundation from Phase 6.
-
-**Phase 9: Award Decision & Contract Generation (40h)** — Pre-award validation, DocuSign integration, award/decline notifications, direct assign synthetic submission flow.
-
----
-
-## References
-
-- Full project plan: `docs/PROJECT_PLAN.pdf` (v2.1, 12 phases, ~718h)
-- Database schema: `database/bluonx_complete_schema_v2_2.sql`
-- RLS policies: `database/rls_policies.sql`
-- Storage policies: `database/storage_rls_policies.sql`
-- Handoff document: `docs/BluOnX_Context_Handoff.md`
-- Deferred tasks: `docs/DEFERRED.md`
+* APScheduler runs as a single in-process scheduler on a single ECS Fargate task; no external orchestration service introduced
+* All four new jobs (`daily_bid_reminders`, `daily_insurance_expiration`, `post_deadline_escalation`, `scheduler_self_check`) registered with explicit IDs, `replace_existing=True`, and the existing `DEFAULT_JOB_KWARGS` (`coalesce=True`, `misfire_grace_time=300`, `max_instances=1`)
+* All new job IDs added to `KNOWN_JOB_IDS`; `GET /api/v1/admin/scheduler-health` surfaces last-run timestamps and statuses for every job
+* All jobs decorated with `@tracked_job` and return JSON-serializable result dicts surfaced in the health endpoint
+* All jobs use UTC `CronTrigger` expressions (matching the existing `revision_expiry` job) with code comments documenting the equivalent local fire times
+* All email sends use `EmailService.send_email()` (never `send_bulk_emails`); `email_log` writes happen automatically inside the service
+* Per-recipient failures are isolated: one failed send never crashes the parent job; the job records the failure via the existing `EmailService` retry/log path and continues processing remaining recipients
+* Bid reminders sent automatically at T-7, T-3, and T-0 thresholds; vendors with status `submitted`, `declined`, `expired`, or `no_response` are excluded; the same tier is never sent twice for the same invitation (per-day dedup via `email_log` lookup)
+* Insurance expiration alerts cover both `vendor_documents` rows where `document_type='insurance_certificate'` AND `status='valid'` AND `expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`, and `vendors.insurance_expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`
+* Insurance digest delivered to all active admin users; weekly dedup prevents the same admin receiving multiple digests within a 7-day window for the same matched items
+* Vendor list dashboard shows a count badge for vendors with insurance expiring within 30 days, backed by `GET /api/v1/vendors/insurance-expiring-count`
+* Post-deadline escalation digest reaches each bid package creator (`bid_packages.created_by`) the morning after their packages closed with non-responders; one consolidated email per recipient, not one per package
+* After the post-deadline digest sends, affected `bid_invitations.status` is updated from `sent`/`opened` to `no_response`
+* Communication history visible from the vendor detail page (as a new tab) and the bid package detail page (as a new collapsible Card section), paginated, color-coded by `email_log.status`; no manual resend action exposed
+* Self-check job emails admins when any tracked job is stale beyond its expected interval + 2-hour grace window
+* Graceful shutdown via FastAPI lifespan (`scheduler.shutdown(wait=True)` in the existing pattern) so in-flight email batches finish during deploys
+* Unit tests for each job body using the established `FakeSupabase` pattern from `backend/tests/jobs/conftest.py`; integration test confirms the full pipeline (job runs → `EmailService.send_email` invoked → `email_log` row written)
+* Sentry captures any unhandled exceptions; structured logs record job start, end, duration, and per-job result counts via the existing `@tracked_job` decorator
