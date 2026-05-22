@@ -1,7 +1,7 @@
 {{ company_name | default("BluOnX Development LLC") }}
 ================================================================
 
-*** FINAL NOTICE — BID DUE TODAY ***
+*** FINAL NOTICE (BID DUE TODAY) ***
 
 Dear {{ vendor_contact_name }},
 

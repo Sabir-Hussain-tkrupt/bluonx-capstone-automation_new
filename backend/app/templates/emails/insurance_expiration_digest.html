@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Insurance Expiration Alert: {{ items_total }} vendor(s) need attention{% endblock %}
+
+{% block preheader %}{{ items_total }} vendor insurance record(s) are expiring soon and need follow-up.{% endblock %}
+
+{% block content %}
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ admin_full_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      <strong>{{ items_total }}</strong> vendor insurance record(s) are expiring soon and need
+      attention. Please review the details below and follow up to keep coverage current.
+    </td>
+  </tr>
+</table>
+
+{% if items_7day %}
+<!-- Expiring in 7 Days -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#c62828; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:10px;">
+      Expiring in 7 Days
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Vendor Company
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Vendor Contact
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Expiration Date
+          </td>
+        </tr>
+        {% for item in items_7day %}
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ item.company_name }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            <a href="mailto:{{ item.vendor_contact }}" style="color:#1a73e8; text-decoration:none; word-break:break-all;">{{ item.vendor_contact }}</a>
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#c62828; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ item.expiration_date_formatted }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+{% if items_30day %}
+<!-- Expiring in 30 Days -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:10px;">
+      Expiring in 30 Days
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Vendor Company
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Vendor Contact
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Expiration Date
+          </td>
+        </tr>
+        {% for item in items_30day %}
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ item.company_name }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            <a href="mailto:{{ item.vendor_contact }}" style="color:#1a73e8; text-decoration:none; word-break:break-all;">{{ item.vendor_contact }}</a>
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ item.expiration_date_formatted }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<!-- Closing -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; border-top:1px solid #eeeeee; padding-top:20px;">
+      Please follow up with these vendors to obtain updated insurance documentation.
+    </td>
+  </tr>
+</table>
+{% endblock %}

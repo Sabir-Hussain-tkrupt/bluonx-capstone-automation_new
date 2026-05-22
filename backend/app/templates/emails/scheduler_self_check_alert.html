@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Scheduler Alert: {{ stale_count }} job(s) have not run as expected{% endblock %}
+
+{% block preheader %}{{ stale_count }} scheduled job(s) are stale and have not run within their expected interval.{% endblock %}
+
+{% block content %}
+<!-- Alert Banner -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+  <tr>
+    <td style="background-color:#f8d7da; border-left:4px solid #dc3545; border-radius:0 4px 4px 0; padding:14px 16px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:15px; color:#721c24; font-weight:bold; line-height:1.4;">
+            &#9888; Scheduler Alert - {{ stale_count }} stale job(s)
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ admin_full_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      One or more scheduled jobs have not run within their expected interval. Stale jobs may
+      mean reminders or alerts are not being sent. The affected jobs are listed below.
+    </td>
+  </tr>
+</table>
+
+<!-- Stale Jobs Table -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Job ID
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Expected Interval
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Last Run
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Status
+          </td>
+        </tr>
+        {% for job in stale_jobs %}
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ job.job_id }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ job.expected_interval }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ job.last_run_at_formatted }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#c62828; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ job.status }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; border-top:1px solid #eeeeee; padding-top:20px;">
+      Visit <strong>/api/v1/admin/scheduler-health</strong> for current state, or check Sentry
+      for related errors.
+    </td>
+  </tr>
+</table>
+{% endblock %}
