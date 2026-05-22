@@ -1,0 +1,33 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+ACTION NEEDED: BID PACKAGES CLOSED WITH NON-RESPONDING VENDORS
+
+Dear {{ recipient_full_name }},
+
+{{ packages_count }} bid package(s) you created closed yesterday with one or more invited vendors who never submitted or declined. Their details are below so you can decide how to proceed.
+
+{% for pkg in packages %}
+{{ pkg.project_name }} - {{ pkg.task_name }}
+----------------------------------------------------------------
+Closed: {{ pkg.deadline_formatted }}
+
+Non-responding vendors:
+{% for vendor in pkg.non_responders %}
+  - {{ vendor.company_name }}
+    Contact:  {{ vendor.contact_name }}
+    Email:    {{ vendor.contact_email }}
+    Phone:    {{ vendor.contact_phone }}
+
+{% endfor %}
+{% endfor %}
+RECOMMENDED ACTIONS
+----------------------------------------------------------------
+  - Contact the vendor directly
+  - Extend the deadline and issue a new bid invitation
+  - Award based on submitted bids
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

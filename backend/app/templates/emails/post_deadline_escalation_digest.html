@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Action Needed: {{ packages_count }} bid package(s) closed with non-responding vendors{% endblock %}
+
+{% block preheader %}{{ packages_count }} bid package(s) closed yesterday with vendors who never responded.{% endblock %}
+
+{% block content %}
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ recipient_full_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      <strong>{{ packages_count }}</strong> bid package(s) you created closed yesterday with one
+      or more invited vendors who never submitted or declined. Their details are below so you
+      can decide how to proceed.
+    </td>
+  </tr>
+</table>
+
+{% for pkg in packages %}
+<!-- Package -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px 6px 0 0; padding:14px 16px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:bold; color:#1a73e8; line-height:1.4;">
+            {{ pkg.project_name }} - {{ pkg.task_name }}
+          </td>
+        </tr>
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-top:4px;">
+            Closed: {{ pkg.deadline_formatted }}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0; border-top:none;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Company
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Contact Name
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Email
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; background-color:#f8f9fa; padding:10px 12px; border-bottom:2px solid #e0e0e0; text-align:left;">
+            Phone
+          </td>
+        </tr>
+        {% for vendor in pkg.non_responders %}
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ vendor.company_name }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ vendor.contact_name }}
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            <a href="mailto:{{ vendor.contact_email }}" style="color:#1a73e8; text-decoration:none; word-break:break-all;">{{ vendor.contact_email }}</a>
+          </td>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding:10px 12px; border-bottom:1px solid #e0e0e0; vertical-align:top;">
+            {{ vendor.contact_phone }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </td>
+  </tr>
+</table>
+{% endfor %}
+
+<!-- Recommended Actions -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#333333; line-height:1.6; border-top:1px solid #eeeeee; padding-top:20px; padding-bottom:8px;">
+      Recommended actions
+    </td>
+  </tr>
+  <tr>
+    <td style="padding-left:8px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#555555; line-height:1.8; padding-left:8px;">
+            &#8226;&nbsp; Contact the vendor directly
+          </td>
+        </tr>
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#555555; line-height:1.8; padding-left:8px;">
+            &#8226;&nbsp; Extend the deadline and issue a new bid invitation
+          </td>
+        </tr>
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#555555; line-height:1.8; padding-left:8px;">
+            &#8226;&nbsp; Award based on submitted bids
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+{% endblock %}

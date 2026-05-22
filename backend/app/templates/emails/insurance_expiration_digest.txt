@@ -1,0 +1,35 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+INSURANCE EXPIRATION ALERT
+
+Dear {{ admin_full_name }},
+
+{{ items_total }} vendor insurance record(s) are expiring soon and need attention. Please review the details below and follow up to keep coverage current.
+
+{% if items_7day %}
+EXPIRING IN 7 DAYS
+----------------------------------------------------------------
+{% for item in items_7day %}
+  - {{ item.company_name }}
+    Contact:   {{ item.vendor_contact }}
+    Expires:   {{ item.expiration_date_formatted }}
+
+{% endfor %}
+{% endif %}
+{% if items_30day %}
+EXPIRING IN 30 DAYS
+----------------------------------------------------------------
+{% for item in items_30day %}
+  - {{ item.company_name }}
+    Contact:   {{ item.vendor_contact }}
+    Expires:   {{ item.expiration_date_formatted }}
+
+{% endfor %}
+{% endif %}
+Please follow up with these vendors to obtain updated insurance documentation.
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

@@ -1,0 +1,24 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+*** SCHEDULER ALERT - {{ stale_count }} STALE JOB(S) ***
+
+Dear {{ admin_full_name }},
+
+One or more scheduled jobs have not run within their expected interval. Stale jobs may mean reminders or alerts are not being sent. The affected jobs are listed below.
+
+STALE JOBS
+----------------------------------------------------------------
+{% for job in stale_jobs %}
+  - {{ job.job_id }}
+    Expected interval: {{ job.expected_interval }}
+    Last run:          {{ job.last_run_at_formatted }}
+    Status:            {{ job.status }}
+
+{% endfor %}
+Visit /api/v1/admin/scheduler-health for current state, or check Sentry for related errors.
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.
