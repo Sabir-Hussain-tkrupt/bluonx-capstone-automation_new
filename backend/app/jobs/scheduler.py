@@ -34,7 +34,13 @@ DEFAULT_JOB_KWARGS = {
 
 # Stable list of job ids — drives /admin/scheduler-health even when the
 # scheduler was never started (e.g. under pytest). Add new job ids here.
-KNOWN_JOB_IDS = ("revision_expiry",)
+KNOWN_JOB_IDS = (
+    "revision_expiry",
+    "daily_bid_reminders",
+    "daily_insurance_expiration",
+    "post_deadline_escalation",
+    "scheduler_self_check",
+)
 
 # job_id -> {"last_run_at", "status", "result", "error"}. In-memory only.
 _last_run: dict[str, dict] = {}
@@ -106,11 +112,21 @@ def start_scheduler() -> None:
         logger.info("Scheduler already running; start_scheduler() is a no-op")
         return
 
-    # Deferred import avoids an import cycle: revision_expiry imports
+    # Deferred import avoids an import cycle: job modules import
     # tracked_job / DEFAULT_JOB_KWARGS from this module.
-    from app.jobs import revision_expiry
+    from app.jobs import (
+        bid_reminders,
+        insurance_expiration,
+        post_deadline_escalation,
+        revision_expiry,
+        scheduler_self_check,
+    )
 
     revision_expiry.register(scheduler)
+    bid_reminders.register(scheduler)
+    insurance_expiration.register(scheduler)
+    post_deadline_escalation.register(scheduler)
+    scheduler_self_check.register(scheduler)
 
     scheduler.start()
     logger.info("Scheduler started (timezone=UTC)")
