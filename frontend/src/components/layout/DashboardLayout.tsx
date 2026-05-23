@@ -4,12 +4,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import { Sidebar } from '@/components/ui/Sidebar';
 import { TopHeader } from '@/components/ui/TopHeader';
-import { UserMenu } from '@/components/ui/UserMenu';
+import { UserMenuPanel, getInitials } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { NotificationBell } from '@/features/notifications/components/NotificationBell';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
 import type { SidebarSection } from '@/components/ui/Sidebar';
 import bluonxLogo from '@/assets/bluonx-logo.png';
+
+const SIDEBAR_COLLAPSED_KEY = 'bluonx:sidebar:collapsed';
 
 function NavIcon({ d }: { d: string }) {
   return (
@@ -23,8 +25,28 @@ export function DashboardLayout() {
   const location = useLocation();
   const { profile, signOut } = useAuth();
   const breadcrumbItems = useBreadcrumbs();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (stored !== null) return stored === 'true';
+    return window.innerWidth < 1024;
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarCollapsed((c) => !c);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Close mobile sidebar on navigation — setState here is intentional:
   // we reset UI state in response to route changes (an external system).
@@ -130,27 +152,29 @@ export function DashboardLayout() {
             ) : (
               <div className="flex items-center gap-2">
                 <img src={bluonxLogo} alt="" className="h-8 w-8" />
-                <span className="text-xl font-bold text-primary-600">BluOnX</span>
+                <span className="text-xl font-bold text-white">BluOnX</span>
               </div>
             )
+          }
+          user={profile ? { name: userName, role: userRole, initials: getInitials(userName) } : undefined}
+          userMenu={
+            <UserMenuPanel
+              userName={userName}
+              userEmail={userEmail}
+              onSignOut={signOut}
+              anchor="top-right"
+              onClose={() => {}}
+            />
           }
         />
       </div>
 
       {/* Main content area */}
-      <main className="flex-1 bg-secondary-50">
+      <main className="flex-1 bg-secondary-100">
         <TopHeader
           onMenuToggle={() => setMobileMenuOpen((o) => !o)}
           breadcrumbs={<Breadcrumbs items={breadcrumbItems} />}
           notificationBell={<NotificationBell />}
-          userMenu={
-            <UserMenu
-              userName={userName}
-              userEmail={userEmail}
-              userRole={userRole}
-              onSignOut={signOut}
-            />
-          }
         />
 
         {/* Page content rendered by child routes */}

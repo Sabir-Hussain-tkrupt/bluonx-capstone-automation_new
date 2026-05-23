@@ -4,6 +4,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import { supabase } from '@/lib/supabase';
 import { useDashboardCounts } from '@/features/dashboard/hooks/useDashboardCounts';
+import { StatCard } from '@/components/ui/StatCard';
+import { Card } from '@/components/ui/Card';
 
 function VendorsIcon() {
   return (
@@ -59,22 +61,9 @@ const QUICK_NAV_CARDS: QuickNavCard[] = [
   },
 ];
 
-interface StatPlaceholderProps {
-  label: string;
-  value: string;
-  isLoading?: boolean;
-}
-
-function StatPlaceholder({ label, value, isLoading = false }: StatPlaceholderProps) {
+function StatSkeleton() {
   return (
-    <div className="rounded-lg border border-secondary-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-secondary-500">{label}</p>
-      {isLoading ? (
-        <div className="mt-2 h-9 w-16 animate-pulse rounded bg-secondary-200" aria-hidden="true" />
-      ) : (
-        <p className="mt-2 text-3xl font-bold text-secondary-900">{value}</p>
-      )}
-    </div>
+    <span className="block h-9 w-16 animate-pulse rounded bg-secondary-200" aria-hidden="true" />
   );
 }
 
@@ -136,25 +125,41 @@ export function DashboardPage() {
 
       {/* Summary stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPlaceholder
+        <StatCard
           label="Active Projects"
-          value={activeProjectCount != null ? String(activeProjectCount) : ''}
-          isLoading={activeProjectsLoading && activeProjectCount == null}
+          accent="primary"
+          value={
+            activeProjectsLoading && activeProjectCount == null
+              ? <StatSkeleton />
+              : String(activeProjectCount ?? 0)
+          }
         />
-        <StatPlaceholder
+        <StatCard
           label="Open Tasks"
-          value={openTaskCount != null ? String(openTaskCount) : '0'}
-          isLoading={countsLoading && openTaskCount == null}
+          accent="warning"
+          value={
+            countsLoading && openTaskCount == null
+              ? <StatSkeleton />
+              : String(openTaskCount ?? 0)
+          }
         />
-        <StatPlaceholder
+        <StatCard
           label="Pending Bids"
-          value={pendingBidCount != null ? String(pendingBidCount) : '0'}
-          isLoading={countsLoading && pendingBidCount == null}
+          accent="info"
+          value={
+            countsLoading && pendingBidCount == null
+              ? <StatSkeleton />
+              : String(pendingBidCount ?? 0)
+          }
         />
-        <StatPlaceholder
+        <StatCard
           label="Active Vendors"
-          value={activeVendorCount != null ? String(activeVendorCount) : ''}
-          isLoading={activeVendorsLoading && activeVendorCount == null}
+          accent="success"
+          value={
+            activeVendorsLoading && activeVendorCount == null
+              ? <StatSkeleton />
+              : String(activeVendorCount ?? 0)
+          }
         />
       </div>
 
@@ -163,18 +168,16 @@ export function DashboardPage() {
         <h2 className="text-lg font-semibold text-secondary-900">Quick Access</h2>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {visibleCards.map((card) => (
-            <Link
-              key={card.title}
-              to={card.href}
-              className="group rounded-lg border border-secondary-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
-            >
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600 transition-colors group-hover:bg-primary-100">
-                  {card.icon}
-                </span>
-                <h3 className="text-base font-semibold text-secondary-900">{card.title}</h3>
-              </div>
-              <p className="mt-3 text-sm text-secondary-500">{card.description}</p>
+            <Link key={card.title} to={card.href} className="group block">
+              <Card padding="md" className="transition-shadow group-hover:shadow-md">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600 transition-colors group-hover:bg-primary-100">
+                    {card.icon}
+                  </span>
+                  <h3 className="text-base font-semibold text-secondary-900">{card.title}</h3>
+                </div>
+                <p className="mt-3 text-sm text-secondary-500">{card.description}</p>
+              </Card>
             </Link>
           ))}
         </div>
