@@ -9,11 +9,10 @@ Today is the LAST DAY to submit your bid for {{ task_name }} on the {{ project_n
 
 FINAL DEADLINE: {{ bid_deadline }}
 
-SUBMIT YOUR BID NOW
+HOW TO SUBMIT
 ----------------------------------------------------------------
-Click the link below to access the bid portal and submit your proposal:
-
-{{ magic_link_url }}
+To submit your bid, please use the secure link in your original
+bid invitation email for this project.
 
 QUESTIONS?
 ----------------------------------------------------------------
