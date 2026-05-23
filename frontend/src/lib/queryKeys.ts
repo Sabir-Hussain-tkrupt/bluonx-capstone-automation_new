@@ -168,10 +168,13 @@ export const queryKeys = {
   notifications: {
     all: ['notifications'] as const,
     lists: () => [...queryKeys.notifications.all, 'list'] as const,
-    list: (filters?: { userId?: string }) =>
+    list: (filters?: { unreadOnly?: boolean; limit?: number }) =>
       filters
         ? ([...queryKeys.notifications.lists(), filters] as const)
         : queryKeys.notifications.lists(),
+    page: (filters: { unreadOnly: boolean; limit: number; offset: number }) =>
+      [...queryKeys.notifications.all, 'page', filters] as const,
+    unreadCount: () => [...queryKeys.notifications.all, 'unreadCount'] as const,
   },
 
   dashboard: {

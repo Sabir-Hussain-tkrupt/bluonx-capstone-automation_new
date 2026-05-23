@@ -27,6 +27,7 @@ import { AwardPage } from '@/features/contracts/pages/AwardPage';
 import { BidTemplateListPage } from '@/features/bid-templates/pages/BidTemplateListPage';
 import { BidTemplateDetailPage } from '@/features/bid-templates/pages/BidTemplateDetailPage';
 import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateFormPage';
+import { NotificationsPage } from '@/features/notifications/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TradesSettingsPage } from '@/features/trades';
 import { NotFoundPage } from '@/pages/NotFoundPage';
@@ -93,6 +94,7 @@ export function AppRoutes() {
         <Route path={ROUTES.BID_TEMPLATE_NEW} element={<BidTemplateFormPage />} />
         <Route path={ROUTES.BID_TEMPLATE_DETAIL} element={<BidTemplateDetailPage />} />
         <Route path={ROUTES.BID_TEMPLATE_EDIT} element={<BidTemplateFormPage />} />
+        <Route path={ROUTES.NOTIFICATIONS} element={<NotificationsPage />} />
         <Route
           path={ROUTES.SETTINGS}
           element={

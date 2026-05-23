@@ -7,6 +7,7 @@ import {
   deleteProjectDocument,
   getProjectDocumentUrl,
 } from '@/features/projects/api/project-documents.mutations';
+import type { DocumentItem } from '@/components/ui/DocumentList/DocumentList';
 
 /** Fetch project documents directly from Supabase (read pattern). */
 async function fetchProjectDocuments(projectId: string) {
@@ -17,7 +18,7 @@ async function fetchProjectDocuments(projectId: string) {
     .order('uploaded_at', { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as unknown as DocumentItem[];
 }
 
 export function useProjectDocumentsList(projectId: string) {

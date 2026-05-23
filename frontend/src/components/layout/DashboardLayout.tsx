@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/ui/Sidebar';
 import { TopHeader } from '@/components/ui/TopHeader';
 import { UserMenu } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
+import { NotificationBell } from '@/features/notifications/components/NotificationBell';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
 import type { SidebarSection } from '@/components/ui/Sidebar';
 import bluonxLogo from '@/assets/bluonx-logo.png';
@@ -141,6 +142,7 @@ export function DashboardLayout() {
         <TopHeader
           onMenuToggle={() => setMobileMenuOpen((o) => !o)}
           breadcrumbs={<Breadcrumbs items={breadcrumbItems} />}
+          notificationBell={<NotificationBell />}
           userMenu={
             <UserMenu
               userName={userName}

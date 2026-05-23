@@ -92,7 +92,8 @@ export async function fetchBidTemplates(
   }
 
   // Transform: extract trade_name from joined trades, count items
-  const items = (data ?? []).map((row: Record<string, unknown>) => {
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  const items = rows.map((row) => {
     const trades = row.trades as { name: string } | null;
     const templateItems = row.bid_template_items as { id: string }[] | null;
     return {
@@ -136,7 +137,7 @@ export async function fetchBidTemplateById(id: string): Promise<BidTemplateDetai
     throw apiError;
   }
 
-  const row = data as Record<string, unknown>;
+  const row = data as unknown as Record<string, unknown>;
   const trades = row.trades as { name: string } | null;
   const items = (row.bid_template_items as BidTemplateItem[]) ?? [];
 
