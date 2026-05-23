@@ -28,7 +28,16 @@ describe('useNearbyVendors', () => {
 
   it('fetches nearby vendors for a project', async () => {
     const mockData = [
-      { id: 'v1', company_name: 'Test Vendor', distance_miles: 12.5 },
+      {
+        id: 'v1',
+        company_name: 'Test Vendor',
+        distance_miles: 12.5,
+        city: 'Phoenix',
+        state: 'AZ',
+        latitude: 33.4,
+        longitude: -112.1,
+        status: 'active',
+      },
     ];
     mockFetchNearbyVendors.mockResolvedValueOnce(mockData);
 

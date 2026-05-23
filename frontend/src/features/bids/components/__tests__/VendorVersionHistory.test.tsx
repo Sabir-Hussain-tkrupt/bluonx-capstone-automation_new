@@ -19,6 +19,7 @@ function makeSubmission(
     bid_invitation_id: 'inv-1',
     status: 'submitted',
     is_direct_assign: false,
+    is_draft: false,
     is_superseded: false,
     revision_number: 1,
     supersedes_submission_id: null,

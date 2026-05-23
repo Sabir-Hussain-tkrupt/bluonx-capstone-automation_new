@@ -59,7 +59,7 @@ export function TradeManagementPanel() {
           dismissible
           onDismiss={() => refetch()}
         >
-          {(error as ApiError)?.message ?? 'Please try again.'}
+          {(error as unknown as ApiError)?.message ?? 'Please try again.'}
         </Alert>
       )}
 

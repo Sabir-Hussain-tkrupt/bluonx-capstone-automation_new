@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Modal } from '@/components/ui/Modal';
@@ -21,11 +21,11 @@ const taskSchema = z.object({
     .optional()
     .or(z.literal('')),
   phase: z.enum(['due_diligence', 'development'], {
-    required_error: 'Phase is required',
+    message: 'Phase is required',
   }),
   trade_id: z.string().min(1, 'Trade is required'),
   bid_type: z.enum(['competitive', 'direct_assign', 'internal'], {
-    required_error: 'Bid type is required',
+    message: 'Bid type is required',
   }),
   budget_estimate: z.coerce
     .number()
@@ -57,7 +57,11 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
     setValue,
     control,
   } = useForm<TaskFormValues>({
-    resolver: zodResolver(taskSchema),
+    // zod v4's `.or(z.literal(''))` widens the inferred type to `unknown`,
+    // which breaks the Resolver<TaskFormValues> signature even though the
+    // runtime validation is correct. Cast through unknown to keep the
+    // form's call-site typing intact.
+    resolver: zodResolver(taskSchema) as unknown as Resolver<TaskFormValues>,
     defaultValues: {
       name: task?.name ?? '',
       description: task?.description ?? '',

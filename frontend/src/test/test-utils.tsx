@@ -3,6 +3,10 @@
  */
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+
+// MemoryRouter accepts strings OR partial Location objects ({ pathname, state, ... }).
+// Mirror that here so tests can pass either form.
+type InitialEntry = string | { pathname: string; search?: string; hash?: string; state?: unknown };
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui/Toast';
 
@@ -28,7 +32,7 @@ function AllProviders({ children }: { children: React.ReactNode }) {
  */
 export function renderWithRouter(
   ui: React.ReactElement,
-  { initialEntries = ['/'], ...options }: RenderOptions & { initialEntries?: string[] } = {},
+  { initialEntries = ['/'], ...options }: RenderOptions & { initialEntries?: InitialEntry[] } = {},
 ) {
   return render(
     <MemoryRouter initialEntries={initialEntries}>

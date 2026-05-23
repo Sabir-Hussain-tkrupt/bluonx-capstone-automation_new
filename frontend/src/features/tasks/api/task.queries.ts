@@ -89,7 +89,8 @@ export async function fetchTasks(filters: TaskListFilters): Promise<PaginatedTas
   }
 
   // Flatten trade join
-  const items = (data ?? []).map((row: Record<string, unknown>) => {
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  const items = rows.map((row) => {
     const trades = row.trades as { name: string } | null;
     const { trades: _trades, ...rest } = row;
     return { ...rest, trade_name: trades?.name ?? null } as unknown as Task;
@@ -122,8 +123,9 @@ export async function fetchTaskById(projectId: string, taskId: string): Promise<
     throw apiError;
   }
 
-  const trades = (data as Record<string, unknown>).trades as { name: string } | null;
-  const { trades: _trades, ...rest } = data as Record<string, unknown>;
+  const row = data as unknown as Record<string, unknown>;
+  const trades = row.trades as { name: string } | null;
+  const { trades: _trades, ...rest } = row;
   return { ...rest, trade_name: trades?.name ?? null } as unknown as Task;
 }
 

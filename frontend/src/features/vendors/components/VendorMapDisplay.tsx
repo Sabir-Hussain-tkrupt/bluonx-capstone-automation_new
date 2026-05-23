@@ -11,7 +11,7 @@
  * - API not loaded → "Map unavailable" message
  * - Vendors without coords → silently excluded
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { Map, AdvancedMarker, useApiIsLoaded, useMap } from '@vis.gl/react-google-maps';
 
 const METERS_PER_MILE = 1609.344;
