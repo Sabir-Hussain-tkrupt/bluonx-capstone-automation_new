@@ -9,12 +9,15 @@ the app lifespan, which these tests bypass.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.auth import get_current_active_user
 from app.jobs import scheduler as scheduler_module
 from app.main import app
+from app.services.email_service import EmailSendResult
 
 
 # ── FakeSupabase: a minimal double for the chains expire_revision_requests uses ──
@@ -113,6 +116,170 @@ def make_fake_db():
         return FakeSupabase(revision_rows=revision_rows, update_results=update_results)
 
     return _make
+
+
+# ── FakeReminderDB: double for the bid-reminders job (Task 7.3) ─────────────
+#
+# The bid-reminders job issues read chains the FakeSupabase above cannot
+# serve — a joined bid_invitations query, an email_log dedup query, and a
+# per-invitation status re-read — using operators (.in_, .not_.in_, .gte,
+# .maybe_single) it does not implement. FakeReminderDB is a separate,
+# self-contained double for that job.
+#
+# `invitation_rows` are PostgREST-joined shapes (top-level invitation fields
+# plus nested bid_packages -> tasks -> projects, bid_packages.users,
+# vendor_contacts, vendors). `email_log_rows` back the dedup query.
+# `status_overrides` (invitation id -> status) makes the per-invitation
+# re-read disagree with the bulk query, simulating a status change between
+# query and send.
+
+
+def _dotted_get(row: dict, col: str):
+    """Resolve a possibly-dotted column name against a (possibly nested) row."""
+    cur = row
+    for part in col.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _row_matches(row: dict, filters: list) -> bool:
+    """Evaluate the accumulated query predicates against one row."""
+    for kind, col, val in filters:
+        actual = _dotted_get(row, col)
+        if kind == "eq" and actual != val:
+            return False
+        if kind == "in" and actual not in val:
+            return False
+        if kind == "not_in" and actual in val:
+            return False
+        if kind == "gte" and (actual is None or actual < val):
+            return False
+        if kind == "lt" and (actual is None or actual >= val):
+            return False
+    return True
+
+
+class _ReminderResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class _ReminderNot:
+    """Captures `.not_.in_(...)` as a negated filter."""
+
+    def __init__(self, query: "_ReminderQuery"):
+        self._query = query
+
+    def in_(self, col, vals):
+        self._query._filters.append(("not_in", col, list(vals)))
+        return self._query
+
+
+class _ReminderQuery:
+    """Fluent stub for the supabase-py read chains run_daily_bid_reminders uses."""
+
+    def __init__(self, fake: "FakeReminderDB", table: str):
+        self._fake = fake
+        self._table = table
+        self._filters: list = []
+        self._single = False
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, col, val):
+        self._filters.append(("eq", col, val))
+        return self
+
+    def in_(self, col, vals):
+        self._filters.append(("in", col, list(vals)))
+        return self
+
+    def gte(self, col, val):
+        self._filters.append(("gte", col, val))
+        return self
+
+    def lt(self, col, val):
+        self._filters.append(("lt", col, val))
+        return self
+
+    @property
+    def not_(self):
+        return _ReminderNot(self)
+
+    def maybe_single(self):
+        self._single = True
+        return self
+
+    def single(self):
+        self._single = True
+        return self
+
+    def execute(self):
+        return self._fake._resolve(self._table, self._filters, self._single)
+
+
+class FakeReminderDB:
+    def __init__(self, invitation_rows=None, email_log_rows=None,
+                 status_overrides=None):
+        self.invitation_rows = invitation_rows or []
+        self.email_log_rows = email_log_rows or []
+        self.status_overrides = status_overrides or {}
+
+    def table(self, name):
+        return _ReminderQuery(self, name)
+
+    def _resolve(self, table, filters, single):
+        if table == "bid_invitations" and single:
+            # Per-invitation status re-read.
+            inv_id = next(
+                (v for k, c, v in filters if k == "eq" and c == "id"), None
+            )
+            row = next(
+                (r for r in self.invitation_rows if r.get("id") == inv_id), None
+            )
+            if row is None:
+                return _ReminderResult(None)
+            status = self.status_overrides.get(inv_id, row.get("status"))
+            return _ReminderResult({"status": status})
+
+        if table == "bid_invitations":
+            return _ReminderResult(
+                [r for r in self.invitation_rows if _row_matches(r, filters)]
+            )
+
+        if table == "email_log":
+            return _ReminderResult(
+                [r for r in self.email_log_rows if _row_matches(r, filters)]
+            )
+
+        return _ReminderResult([])
+
+
+@pytest.fixture()
+def make_reminder_db():
+    """Factory for a FakeReminderDB configured per test."""
+
+    def _make(invitation_rows=None, email_log_rows=None, status_overrides=None):
+        return FakeReminderDB(
+            invitation_rows=invitation_rows,
+            email_log_rows=email_log_rows,
+            status_overrides=status_overrides,
+        )
+
+    return _make
+
+
+@pytest.fixture()
+def mock_email_service() -> AsyncMock:
+    """AsyncMock EmailService whose send_email succeeds for every call."""
+    service = AsyncMock()
+    service.send_email.return_value = EmailSendResult(
+        message_id="mock-msg", status="sent", error=None
+    )
+    return service
 
 
 # ── Scheduler-health endpoint fixtures ──────────────────────────────────────
