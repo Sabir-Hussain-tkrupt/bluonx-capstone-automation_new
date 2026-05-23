@@ -4,6 +4,7 @@ export interface TopHeaderProps {
   title?: string;
   breadcrumbs?: React.ReactNode;
   actions?: React.ReactNode;
+  notificationBell?: React.ReactNode;
   userMenu?: React.ReactNode;
   onMenuToggle?: () => void;
   className?: string;
@@ -13,6 +14,7 @@ export function TopHeader({
   title,
   breadcrumbs,
   actions,
+  notificationBell,
   userMenu,
   onMenuToggle,
   className,
@@ -52,6 +54,7 @@ export function TopHeader({
       {/* Right side */}
       <div className="flex items-center gap-3">
         {actions}
+        {notificationBell}
         {userMenu}
       </div>
     </header>

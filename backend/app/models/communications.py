@@ -116,3 +116,12 @@ class NotificationResponse(BluOnXBase):
     reference_id: UUID | None = None
     is_read: bool
     created_at: datetime
+    deep_link_path: str | None = None
+
+
+class UnreadCountResponse(BluOnXBase):
+    count: int
+
+
+class MarkAllReadResponse(BluOnXBase):
+    updated_count: int

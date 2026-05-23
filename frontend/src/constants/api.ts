@@ -74,4 +74,7 @@ export const API_ENDPOINTS = {
 
   // Notifications
   NOTIFICATIONS: '/notifications',
+  NOTIFICATIONS_UNREAD_COUNT: '/notifications/unread-count',
+  NOTIFICATIONS_MARK_ALL_READ: '/notifications/mark-all-read',
+  NOTIFICATION_READ: (id: string) => `/notifications/${id}/read`,
 } as const;
