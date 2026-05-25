@@ -47,7 +47,7 @@ export function NotificationBell() {
         aria-haspopup="true"
         aria-expanded={isOpen}
         aria-label={count > 0 ? `Notifications (${count} unread)` : 'Notifications'}
-        className="relative rounded-lg p-1.5 text-secondary-400 hover:bg-secondary-50 hover:text-secondary-600 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+        className="relative cursor-pointer rounded-lg p-1.5 text-secondary-400 hover:bg-secondary-50 hover:text-secondary-600 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
       >
         <svg
           className="h-6 w-6"
