@@ -106,7 +106,7 @@ export function UserMenuPanel({
                 onClose();
               }}
               className={cn(
-                'flex w-full items-center gap-2 px-4 py-2 text-sm transition-colors',
+                'flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-sm transition-colors',
                 'hover:bg-secondary-50 focus-visible:bg-secondary-50 focus-visible:outline-none',
                 isSignOut
                   ? 'text-danger-600 hover:text-danger-700'
