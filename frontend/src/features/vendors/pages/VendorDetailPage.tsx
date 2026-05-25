@@ -391,6 +391,7 @@ export function VendorDetailPage() {
               vendorId={id!}
               isOpen={showUploadDoc}
               onClose={() => setShowUploadDoc(false)}
+              existingDocuments={vendor.vendor_documents}
             />
           </div>
         )}

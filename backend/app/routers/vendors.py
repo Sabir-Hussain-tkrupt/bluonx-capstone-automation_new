@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
 from app.services.geocoding import geocode_address
+from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
@@ -784,14 +785,28 @@ async def upload_vendor_document(
             detail="Failed to save document record.",
         )
 
-    # Side-effect: update vendors.insurance_expiration_date for insurance certs
-    if document_type == "insurance_certificate" and parsed_expiration:
+    # Recompute vendors.insurance_expiration_date from the full set of valid
+    # insurance certs. PostgREST has no multi-statement transaction, so the
+    # vendor_documents row above is already committed when this runs — we
+    # surface any failure to the caller rather than silently letting the
+    # vendor field drift from the documents table.
+    if document_type == "insurance_certificate":
         try:
-            db.table("vendors").update(
-                {"insurance_expiration_date": parsed_expiration.isoformat()}
-            ).eq("id", str(vendor_id)).execute()
+            recompute_vendor_insurance_expiration(db, vendor_id)
         except Exception as exc:
-            logger.warning("Failed to update vendor insurance date: %s", exc)
+            logger.error(
+                "Insurance recompute failed for vendor %s after upload: %s",
+                vendor_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Document saved, but the vendor's insurance date may "
+                    "not have updated. Please refresh and check the vendor "
+                    "record."
+                ),
+            ) from exc
 
     return response.data[0]
 
@@ -837,10 +852,10 @@ async def delete_vendor_document(
     """Delete a vendor document from storage and database."""
     _get_vendor_or_404(db, vendor_id)
 
-    # Fetch doc to get file_path before deleting
+    # Fetch doc to get file_path and document_type before deleting
     doc_resp = (
         db.table("vendor_documents")
-        .select("file_path")
+        .select("file_path, document_type")
         .eq("id", str(document_id))
         .eq("vendor_id", str(vendor_id))
         .single()
@@ -852,11 +867,34 @@ async def delete_vendor_document(
             detail="Document not found",
         )
 
+    deleted_doc_type = doc_resp.data.get("document_type")
+
     # Delete from storage first
     delete_file(db, VENDOR_BUCKET, doc_resp.data["file_path"])
 
     # Delete DB row
     db.table("vendor_documents").delete().eq("id", str(document_id)).execute()
+
+    # Recompute vendors.insurance_expiration_date when an insurance cert was
+    # removed. Same trade-off as upload: the documents delete is already
+    # committed; we surface recompute failures loudly rather than swallowing.
+    if deleted_doc_type == "insurance_certificate":
+        try:
+            recompute_vendor_insurance_expiration(db, vendor_id)
+        except Exception as exc:
+            logger.error(
+                "Insurance recompute failed for vendor %s after delete: %s",
+                vendor_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Document deleted, but the vendor's insurance date may "
+                    "not have updated. Please refresh and check the vendor "
+                    "record."
+                ),
+            ) from exc
 
 
 # ── CSV Import ───────────────────────────────────────────────────────────
