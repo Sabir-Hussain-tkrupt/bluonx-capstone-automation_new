@@ -6,6 +6,7 @@ import { DatePicker } from '@/components/ui/DatePicker';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useUploadVendorDocument } from '@/features/vendors/hooks/useVendorDocuments';
+import type { VendorDocument } from '@/features/vendors/api/vendor.queries';
 
 const DOC_TYPE_OPTIONS = [
   { value: 'w9', label: 'W-9' },
@@ -17,9 +18,15 @@ interface VendorDocumentUploadProps {
   vendorId: string;
   isOpen: boolean;
   onClose: () => void;
+  existingDocuments?: VendorDocument[];
 }
 
-export function VendorDocumentUpload({ vendorId, isOpen, onClose }: VendorDocumentUploadProps) {
+export function VendorDocumentUpload({
+  vendorId,
+  isOpen,
+  onClose,
+  existingDocuments,
+}: VendorDocumentUploadProps) {
   const { toast } = useToast();
   const uploadMutation = useUploadVendorDocument();
 
@@ -30,6 +37,10 @@ export function VendorDocumentUpload({ vendorId, isOpen, onClose }: VendorDocume
 
   const isInsurance = documentType === 'insurance_certificate';
   const canSubmit = documentType && selectedFile && (!isInsurance || expirationDate);
+  const hasExistingValidInsurance = (existingDocuments ?? []).some(
+    (doc) => doc.document_type === 'insurance_certificate' && doc.status === 'valid',
+  );
+  const showSupersedeHint = isInsurance && hasExistingValidInsurance;
 
   const resetForm = () => {
     setDocumentType('');
@@ -112,6 +123,11 @@ export function VendorDocumentUpload({ vendorId, isOpen, onClose }: VendorDocume
               onChange={(e) => setExpirationDate(e.target.value)}
               minDate={new Date().toISOString().split('T')[0]}
             />
+            {showSupersedeHint && (
+              <p className="mt-1 text-sm text-secondary-500" data-testid="supersede-hint">
+                This will become the active certificate. The previous one will remain on file as a historical record.
+              </p>
+            )}
           </div>
         )}
 

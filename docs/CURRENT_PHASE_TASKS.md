@@ -1,4 +1,4 @@
-## Phase 7: Automated Reminder & Alert System (53 Hours)
+## Phase 7: Automated Reminder & Alert System (55 Hours)
 
 Module 7: Deadline Reminders, Insurance Expiration Monitoring, Escalation & In-App Notifications
 
@@ -133,28 +133,39 @@ This task establishes the notification subsystem that Tasks 7.5, 7.6, and 7.8 de
 
 * Tools: FastAPI, Supabase Python client, React, React Query
 
-### Task 7.5: Implement insurance expiration monitoring job - 8h
 
-Replaces the no-op stub in `backend/app/jobs/insurance_expiration.py` with full implementation. Sends in-app notifications to admins via `NotificationService` (no email).
+### Task 7.4.5: Insurance sync hardening - 2h ✅ COMPLETED
+
+Foundation refactor for Task 7.5. Makes `vendors.insurance_expiration_date` a reliably-computed mirror of the latest valid insurance certificate, so Task 7.5 can trust a single field as the source of truth.
+
+* New helper `recompute_vendor_insurance_expiration(db, vendor_id)` in `backend/app/services/vendor_service.py`. Computes `MAX(expiration_date)` across `vendor_documents` rows where `vendor_id` matches AND `document_type='insurance_certificate'` AND `status='valid'`. Writes that value (or `NULL` if none exist) to `vendors.insurance_expiration_date`. Single source of truth for this field.
+* Refactor `upload_vendor_document` (insurance certs only): replace the inline swallowed-exception mirror with a call to the helper. Re-raise on failure as `HTTPException(500, "Document saved, but the vendor's insurance date may not have updated. Please refresh and check the vendor record.")` so operators see drift instead of discovering it weeks later.
+* Refactor `delete_vendor_document` (insurance certs only): pre-delete fetch grabs `document_type` alongside `file_path`. After successful delete, call the helper for insurance cert deletions. Same error-handling posture as upload.
+* No transaction wrapping is possible via PostgREST/supabase-py; the trade-off (cert row committed before recompute) is documented inline in the router.
+* Frontend soft-rule hint: when uploading an `insurance_certificate` AND the vendor already has at least one valid insurance cert, show an inline note ("This will become the active certificate. The previous one will remain on file as a historical record."). `VendorDetailPage` passes `vendor_documents` as an `existingDocuments` prop to `VendorDocumentUpload`; no new hook.
+* Tests: 5 service-level tests covering MAX semantics (null, multiple, ignores expired-status rows, ignores non-insurance document types, returns persisted value). 6 router tests covering upload-triggers-recompute, upload-of-non-insurance-does-not, upload-recompute-failure-surfaces-500, delete-triggers-recompute, delete-of-non-insurance-does-not, delete-recompute-failure-surfaces-500. 4 frontend hint-visibility tests.
+* Tools: FastAPI, Supabase Python client, React
+
+### Task 7.5: Implement insurance expiration monitoring job - 6h
+
+Replaces the no-op stub in `backend/app/jobs/insurance_expiration.py` with full implementation. Sends in-app notifications to admins via `NotificationService` (no email). Relies on the hardened sync from Task 7.4.5 — `vendors.insurance_expiration_date` is the trusted single source of truth.
 
 **Trigger:** APScheduler `CronTrigger` in UTC, fires once daily at 15:15 UTC (≈ 8:15 AM Mountain Time, offset 15 minutes from bid reminders to spread DB/network load and isolate logs).
 
-**Query — three categories, evaluated in code:**
+**Query — one query, three tiers derived in Python:**
 
-* **Lead-up to expiry (one-shot per tier):**
-  * `vendor_documents` where `document_type='insurance_certificate'` AND `status='valid'` AND `expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`
-  * `vendors` where `deleted_at IS NULL` AND `insurance_expiration_date IN (CURRENT_DATE + 30, CURRENT_DATE + 7)`
-  * Creates notifications of type `insurance_expiring`
-* **Expired but not acknowledged (recurring until acknowledged — Option B logic):**
-  * `vendor_documents` where `document_type='insurance_certificate'` AND `status='valid'` AND `expiration_date < CURRENT_DATE`
-  * `vendors` where `deleted_at IS NULL` AND `insurance_expiration_date < CURRENT_DATE`
-  * Creates notifications of type `insurance_expired`
+* `vendors` where `deleted_at IS NULL` AND `insurance_expiration_date IS NOT NULL` AND `insurance_expiration_date <= CURRENT_DATE + 30`
+* In Python, derive the tier per row:
+  * `expiration_date = CURRENT_DATE + 30` → `insurance_expiring` (T-30)
+  * `expiration_date = CURRENT_DATE + 7` → `insurance_expiring` (T-7)
+  * `expiration_date < CURRENT_DATE` → `insurance_expired`
+  * Any other date in the window → skip (no notification today; will match exactly on a future T-7 or T-30 day)
 
 **Per-target dedup:**
 
-* For `insurance_expiring`: the lead-up tier only matches on exact T-30 and T-7 dates, so it naturally fires at most twice per certificate lifecycle. `NotificationService.create_notification(dedupe=True)` adds a defensive guard against same-day duplicates if the job re-runs (server restart, manual trigger, etc.).
-* For `insurance_expired`: `NotificationService.create_notification(dedupe=True)` prevents stacking duplicate unread "expired" notifications. As long as the admin hasn't read or acted on the prior notification, no new one is created. Once they read it, a new daily notification appears — keeping pressure on without spamming.
-* **Acknowledgment to silence:** the admin updates `vendor_documents.status='expired'` (for certificate rows) or updates `vendors.insurance_expiration_date` to a new future date (for vendor-level insurance) → the next day's query no longer matches. The system actively pesters for the broken case and goes quiet for the on-track case.
+* For `insurance_expiring`: lead-up tier only matches on exact T-30 and T-7 dates, firing at most twice per vendor per cycle. `NotificationService.create_notification(dedupe=True)` guards against same-day duplicates if the job re-runs.
+* For `insurance_expired`: `dedupe=True` prevents stacking duplicate unread notifications. As long as the admin hasn't read or acted on the prior notification, no new one is created. Once read, a new daily notification appears.
+* **Acknowledgment to silence:** admin updates `vendor_documents.status='expired'` for the underlying cert (triggering the Task 7.4.5 recompute, which sets `vendors.insurance_expiration_date` to the next-latest valid cert or NULL) → the next day's query no longer matches.
 
 **Recipients:** All active admins (`users WHERE role='admin' AND is_active=TRUE AND deleted_at IS NULL`).
 
@@ -162,24 +173,21 @@ Replaces the no-op stub in `backend/app/jobs/insurance_expiration.py` with full 
 
 * `notification_type` — `insurance_expiring` or `insurance_expired`
 * `title` — e.g., "Insurance expiring in 7 days: ABC Excavation" or "Insurance expired: ABC Excavation"
-* `message` — Includes vendor company name, source (insurance certificate document vs vendor-level record), expiration date, and days until/past expiration
-* `reference_type='vendors'`, `reference_id=vendor.id` (deep-links to vendor detail page where admin can update the record)
+* `message` — Vendor company name, expiration date (formatted), days until/past expiration
+* `reference_type='vendors'`, `reference_id=vendor.id` (deep-links to vendor detail page where admin can review and update the underlying cert)
 
 **Frontend addition — dashboard badge:**
 
-* Vendor list view shows a count badge for vendors with insurance expiring within 30 days OR already expired. Backed by a new FastAPI endpoint `GET /api/v1/vendors/insurance-expiring-count` returning `{"count": int}`.
+* Vendor list view shows a count badge for vendors with insurance expiring within 30 days OR already expired. Backed by a new FastAPI endpoint `GET /api/v1/vendors/insurance-expiring-count` returning `{"count": int}`. Same single-query approach against `vendors.insurance_expiration_date`.
 
 **Job return value:**
-
-```
 {
-  "expiring_30day_notified": N,
-  "expiring_7day_notified": N,
-  "expired_notified": N,
-  "deduplicated_skipped": N,
-  "duration_seconds": float
+"expiring_30day_notified": N,
+"expiring_7day_notified": N,
+"expired_notified": N,
+"deduplicated_skipped": N,
+"duration_seconds": float
 }
-```
 
 * Tools: APScheduler, NotificationService, Supabase Python client, React for dashboard badge
 
