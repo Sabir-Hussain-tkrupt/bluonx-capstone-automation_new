@@ -1,6 +1,6 @@
 """Vendor endpoints — /api/v1/vendors"""
 
-from datetime import date
+from datetime import date, timedelta
 from uuid import UUID
 
 import logging
@@ -128,6 +128,30 @@ async def list_vendors(
         page=page,
         page_size=page_size,
     )
+
+
+# Static path — must be registered BEFORE /vendors/{vendor_id} so FastAPI
+# doesn't try to coerce "insurance-expiring-count" into a UUID path param.
+@router.get("/vendors/insurance-expiring-count")
+async def get_insurance_expiring_count(
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+) -> dict:
+    """Return the count of active vendors whose insurance expires in the
+    next 30 days or has already lapsed. Drives the amber badge on the
+    vendor list page.
+    """
+    today = date.today()
+    cutoff = today + timedelta(days=30)
+    resp = (
+        db.table("vendors")
+        .select("id", count="exact")
+        .is_("deleted_at", "null")
+        .not_.is_("insurance_expiration_date", "null")
+        .lte("insurance_expiration_date", cutoff.isoformat())
+        .execute()
+    )
+    return {"count": resp.count or 0}
 
 
 @router.get("/vendors/{vendor_id}", response_model=VendorDetailResponse)

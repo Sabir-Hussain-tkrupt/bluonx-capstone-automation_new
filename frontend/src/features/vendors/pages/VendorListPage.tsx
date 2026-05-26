@@ -12,6 +12,7 @@ import { useTrades } from '@/features/vendors/hooks/useTrades';
 import { useCreateVendor } from '@/features/vendors/hooks/useCreateVendor';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
 import { VendorCSVImport } from '@/features/vendors/components/VendorCSVImport';
+import { InsuranceExpiringBadge } from '@/features/vendors/components/InsuranceExpiringBadge';
 import type { Vendor, VendorListFilters } from '@/features/vendors/api/vendor.queries';
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
@@ -143,7 +144,10 @@ export function VendorListPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-secondary-900 sm:text-2xl">Vendors</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold text-secondary-900 sm:text-2xl">Vendors</h1>
+            <InsuranceExpiringBadge />
+          </div>
           <p className="mt-1 text-sm text-secondary-500">
             Manage vendor companies, contacts, and trade associations.
           </p>

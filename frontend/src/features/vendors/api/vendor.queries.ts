@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { api, type ApiError } from '@/lib/api';
+import { API_ENDPOINTS } from '@/constants/api';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -228,4 +229,20 @@ export async function fetchTrades(): Promise<Trade[]> {
   }
 
   return (data ?? []) as unknown as Trade[];
+}
+
+export interface InsuranceExpiringCountResponse {
+  count: number;
+}
+
+/**
+ * Fetch the count of active vendors whose insurance expires within 30
+ * days (or has already lapsed). Backend route — uses the FastAPI client,
+ * not Supabase, so the cutoff stays server-computed.
+ */
+export async function fetchInsuranceExpiringCount(): Promise<InsuranceExpiringCountResponse> {
+  const { data } = await api.get<InsuranceExpiringCountResponse>(
+    API_ENDPOINTS.VENDORS_INSURANCE_EXPIRING_COUNT,
+  );
+  return data;
 }
