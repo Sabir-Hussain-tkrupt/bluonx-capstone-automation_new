@@ -14,6 +14,7 @@ export const API_ENDPOINTS = {
   VENDOR_TRADES_ENDPOINT: (vendorId: string) => `/vendors/${vendorId}/trades`,
   VENDOR_TRADE: (vendorId: string, tradeId: string) => `/vendors/${vendorId}/trades/${tradeId}`,
   VENDOR_IMPORT: '/vendors/import',
+  VENDORS_INSURANCE_EXPIRING_COUNT: '/vendors/insurance-expiring-count',
 
   // Projects
   PROJECTS: '/projects',

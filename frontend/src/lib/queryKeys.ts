@@ -29,6 +29,8 @@ export const queryKeys = {
         : queryKeys.vendors.lists(),
     details: () => [...queryKeys.vendors.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.vendors.details(), id] as const,
+    insuranceExpiringCount: () =>
+      [...queryKeys.vendors.all, 'insuranceExpiringCount'] as const,
   },
 
   projects: {
