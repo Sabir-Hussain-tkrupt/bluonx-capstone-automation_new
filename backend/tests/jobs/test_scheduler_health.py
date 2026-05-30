@@ -77,9 +77,10 @@ def test_all_phase7_jobs_present(authed_client, clear_last_run):
 
 async def test_start_scheduler_registers_jobs():
     """start_scheduler() runs every job's register() without raising.
-    revision_expiry, daily_bid_reminders, and daily_insurance_expiration
-    have real triggers today; the remaining Phase 7 stubs are no-ops, so
-    scheduler.get_jobs() returns exactly those three entries after start.
+    revision_expiry, daily_bid_reminders, daily_insurance_expiration, and
+    post_deadline_escalation have real triggers today; remaining Phase 7
+    stubs are no-ops, so scheduler.get_jobs() returns exactly those four
+    entries after start.
 
     Async so AsyncIOScheduler.start() has a running event loop to bind to.
     """
@@ -93,6 +94,7 @@ async def test_start_scheduler_registers_jobs():
             "revision_expiry",
             "daily_bid_reminders",
             "daily_insurance_expiration",
+            "post_deadline_escalation",
         }
     finally:
         # Leave the scheduler stopped — the session `client` fixture's
