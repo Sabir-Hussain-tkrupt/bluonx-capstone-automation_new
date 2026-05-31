@@ -479,24 +479,110 @@ async def update_invitation_status(
 
 
 async def get_bid_package_email_log(*, bid_package_id: UUID, db) -> list[dict]:
-    """Return email_log rows for invitations in the given bid package."""
+    """Return every email_log row tied to invitations in the given package.
+
+    Walks the invitation graph and unions email_log rows across three
+    reference_types so the PM sees every email sent for this package:
+      * bid_invitations       — initial invite + bid_reminder sends
+      * bid_revision_requests — PM revision request emails
+      * bid_submissions       — vendor receipt + revision-receipt emails
+
+    The graph walk is the only correct scoping today: email_log has no
+    vendor_id column, and the three flows above each pin reference_id
+    to a different table.
+    """
     bid_package = _fetch_bid_package(db, bid_package_id)
     if bid_package is None:
         raise BidPackageNotFoundError()
 
     invitations = _fetch_invitations(db, bid_package_id)
-    if not invitations:
-        return []
-
     invitation_ids = [inv["id"] for inv in invitations if inv.get("id")]
+    return _collect_email_log_rows(db, invitation_ids)
+
+
+async def get_vendor_email_log(*, vendor_id: UUID, db) -> list[dict]:
+    """Return every email_log row tied to any invitation this vendor received.
+
+    Same union-of-three-reference_types as get_bid_package_email_log, but
+    scoped via bid_invitations.vendor_id instead of bid_package_id —
+    surfaces a vendor's full outbound communication history across every
+    bid package they've ever been invited to.
+    """
+    resp = (
+        db.table("bid_invitations")
+        .select("id")
+        .eq("vendor_id", str(vendor_id))
+        .execute()
+    )
+    invitation_ids = [
+        row["id"] for row in _unwrap_list(resp.data) if row.get("id")
+    ]
+    return _collect_email_log_rows(db, invitation_ids)
+
+
+def _collect_email_log_rows(db, invitation_ids: list[str]) -> list[dict]:
+    """Walk invitations → revision_requests / submissions, union the three
+    email_log queries, dedupe by id, sort newest-first by created_at.
+
+    Three separate queries instead of a single .or_() filter: supabase-py's
+    OR-with-IN syntax is awkward and three small lookups stay readable.
+    Each branch is skipped entirely when its ID list is empty.
+    """
     if not invitation_ids:
         return []
 
+    revision_request_ids = _fetch_child_ids(
+        db, "bid_revision_requests", "bid_invitation_id", invitation_ids
+    )
+    submission_ids = _fetch_child_ids(
+        db, "bid_submissions", "bid_invitation_id", invitation_ids
+    )
+
+    rows: list[dict] = []
+    rows.extend(_query_email_log(db, "bid_invitations", invitation_ids))
+    rows.extend(_query_email_log(db, "bid_revision_requests", revision_request_ids))
+    rows.extend(_query_email_log(db, "bid_submissions", submission_ids))
+
+    # Dedupe by id — guards against a future flow mis-pinning a single
+    # email_log row to two reference_types.
+    seen: set = set()
+    unique: list[dict] = []
+    for row in rows:
+        row_id = row.get("id")
+        if row_id is not None and row_id in seen:
+            continue
+        if row_id is not None:
+            seen.add(row_id)
+        unique.append(row)
+
+    unique.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return unique
+
+
+def _fetch_child_ids(
+    db, table: str, fk_column: str, parent_ids: list[str]
+) -> list[str]:
+    if not parent_ids:
+        return []
+    resp = (
+        db.table(table)
+        .select("id")
+        .in_(fk_column, parent_ids)
+        .execute()
+    )
+    return [row["id"] for row in _unwrap_list(resp.data) if row.get("id")]
+
+
+def _query_email_log(
+    db, reference_type: str, reference_ids: list[str]
+) -> list[dict]:
+    if not reference_ids:
+        return []
     resp = (
         db.table("email_log")
         .select("*")
-        .eq("reference_type", "bid_invitations")
-        .in_("reference_id", invitation_ids)
+        .eq("reference_type", reference_type)
+        .in_("reference_id", reference_ids)
         .execute()
     )
     return _unwrap_list(resp.data)

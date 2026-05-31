@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { api, type ApiError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
+import type { EmailLogResponse } from '@/features/bids/types';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -243,6 +244,13 @@ export interface InsuranceExpiringCountResponse {
 export async function fetchInsuranceExpiringCount(): Promise<InsuranceExpiringCountResponse> {
   const { data } = await api.get<InsuranceExpiringCountResponse>(
     API_ENDPOINTS.VENDORS_INSURANCE_EXPIRING_COUNT,
+  );
+  return data;
+}
+
+export async function fetchVendorEmailLog(vendorId: string): Promise<EmailLogResponse> {
+  const { data } = await api.get<EmailLogResponse>(
+    API_ENDPOINTS.VENDOR_EMAIL_LOG(vendorId),
   );
   return data;
 }

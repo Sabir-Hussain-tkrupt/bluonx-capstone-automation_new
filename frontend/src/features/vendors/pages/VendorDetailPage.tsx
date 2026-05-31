@@ -15,6 +15,8 @@ import { useDeleteVendor } from '@/features/vendors/hooks/useDeleteVendor';
 import { useCreateContact, useUpdateContact, useDeleteContact } from '@/features/vendors/hooks/useVendorContacts';
 import { useAddVendorTrades, useRemoveVendorTrade } from '@/features/vendors/hooks/useVendorTrades';
 import { useDeleteVendorDocument, useVendorDocumentDownload } from '@/features/vendors/hooks/useVendorDocuments';
+import { useVendorEmailLog } from '@/features/vendors/hooks/useVendorEmailLog';
+import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
 import { ContactForm } from '@/features/vendors/components/ContactForm';
 import { TradeMultiSelect } from '@/features/vendors/components/TradeMultiSelect';
@@ -59,6 +61,10 @@ export function VendorDetailPage() {
   const { download: downloadDoc, downloadingId } = useVendorDocumentDownload();
 
   const [activeTab, setActiveTab] = useState('overview');
+  const { data: emailLog, isLoading: emailLogLoading } = useVendorEmailLog(
+    id!,
+    activeTab === 'communication',
+  );
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAddContact, setShowAddContact] = useState(false);
@@ -117,12 +123,14 @@ export function VendorDetailPage() {
 
   const existingTradeIds = trades.map((t) => t.trade_id);
 
+  const emailLogCount = emailLog?.items.length ?? 0;
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
     { id: 'contacts', label: `Contacts (${contacts.length})` },
     { id: 'trades', label: `Trades (${trades.length})` },
     { id: 'documents', label: `Documents (${documents.length})` },
     { id: 'flags', label: `Flags (${flags.length})` },
+    { id: 'communication', label: `Communication (${emailLogCount})` },
   ];
 
   const unresolvedFlagCount = flags.filter((f) => !f.is_resolved).length;
@@ -417,6 +425,10 @@ export function VendorDetailPage() {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'communication' && (
+          <EmailLogTable items={emailLog?.items ?? []} isLoading={emailLogLoading} />
         )}
       </Tabs>
 

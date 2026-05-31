@@ -17,7 +17,12 @@ from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
+from app.models.bid_packages import EmailLogResponse
 from app.models.common import SignedUrlResponse
+from app.services.invitation_tracking_service import (
+    InvitationTrackingError,
+    get_vendor_email_log,
+)
 from app.models.vendors import (
     VendorBulkTradeCreate,
     VendorContactCreateInline,
@@ -919,6 +924,32 @@ async def delete_vendor_document(
                     "record."
                 ),
             ) from exc
+
+
+# ── Email Log ────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/vendors/{vendor_id}/email-log",
+    response_model=EmailLogResponse,
+)
+async def get_vendor_email_log_endpoint(
+    vendor_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Return all email_log rows tied to this vendor's invitations.
+
+    Unions email_log rows across bid_invitations, bid_revision_requests,
+    and bid_submissions reference_types — see invitation_tracking_service
+    for filter rationale.
+    """
+    _get_vendor_or_404(db, vendor_id)
+    try:
+        items = await get_vendor_email_log(vendor_id=vendor_id, db=db)
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {"items": items}
 
 
 # ── CSV Import ───────────────────────────────────────────────────────────
