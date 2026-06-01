@@ -45,6 +45,12 @@ KNOWN_JOB_IDS = (
 # job_id -> {"last_run_at", "status", "result", "error"}. In-memory only.
 _last_run: dict[str, dict] = {}
 
+# When the running scheduler last entered start_scheduler(). Drives the
+# cold-start grace window in scheduler_self_check — a job that has never
+# fired isn't stale until the scheduler has been up long enough for it
+# to have had a real chance to run.
+_started_at: datetime | None = None
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -63,6 +69,11 @@ def record_last_run(job_id: str, *, status: str, result=None, error=None) -> Non
 def get_last_run(job_id: str) -> dict | None:
     """Return the last-run record for a job, or None if it never ran."""
     return _last_run.get(job_id)
+
+
+def get_scheduler_started_at() -> datetime | None:
+    """When the running scheduler last entered start_scheduler() (UTC), or None if stopped."""
+    return _started_at
 
 
 def is_running() -> bool:
@@ -128,6 +139,8 @@ def start_scheduler() -> None:
     post_deadline_escalation.register(scheduler)
     scheduler_self_check.register(scheduler)
 
+    global _started_at
+    _started_at = datetime.now(timezone.utc)
     scheduler.start()
     logger.info("Scheduler started (timezone=UTC)")
 
@@ -137,3 +150,5 @@ def stop_scheduler() -> None:
     if scheduler.running:
         scheduler.shutdown(wait=True)
         logger.info("Scheduler stopped")
+    global _started_at
+    _started_at = None
