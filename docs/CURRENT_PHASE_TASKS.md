@@ -65,7 +65,7 @@ These notes capture conventions that already exist in the codebase. New jobs mus
 
 ---
 
-### Task 7.1: Establish scheduler foundation and conventions for Phase 7 jobs - 4h ✅ COMPLETED
+### Task 7.1: Establish scheduler foundation and conventions for Phase 7 jobs - 4h
 
 * Add the four new Phase 7 job IDs (`daily_bid_reminders`, `daily_insurance_expiration`, `post_deadline_escalation`, `scheduler_self_check`) to the `KNOWN_JOB_IDS` tuple in `backend/app/jobs/scheduler.py`
 * Wire each new job's `register(scheduler)` call into `start_scheduler()` with a deferred import (matching the existing `revision_expiry` pattern)
@@ -73,7 +73,7 @@ These notes capture conventions that already exist in the codebase. New jobs mus
 * Verify `GET /api/v1/admin/scheduler-health` surfaces all new job IDs (null last-run records until first execution)
 * Tools: APScheduler, FastAPI lifespan hooks, Python logging
 
-### Task 7.2: Build tiered email templates - 3h ✅ COMPLETED
+### Task 7.2: Build tiered email templates - 3h
 
 *(Scope reduced from the originally-planned 6h. The three `bid_reminder_*` template pairs are the only Phase 7 templates needed because admin/PM communications use in-app notifications instead of email digests. The originally-planned post-deadline escalation digest template and insurance expiration digest template are no longer required.)*
 
@@ -82,7 +82,7 @@ These notes capture conventions that already exist in the codebase. New jobs mus
 * All templates use the shared `base.html` layout, mobile-responsive HTML, BluOnX branding, and dynamic content placeholders rendered via the `template_renderer` singleton
 * Tools: Jinja2, HTML/CSS email design
 
-### Task 7.3: Implement bid reminder scheduling job - 10h ✅ COMPLETED
+### Task 7.3: Implement bid reminder scheduling job - 10h
 
 * New module `backend/app/jobs/bid_reminders.py` with `register(scheduler)` exposing job ID `daily_bid_reminders`
 * APScheduler `CronTrigger` set to UTC, fires once daily at the UTC equivalent of 8:00 AM local time for the BluOnX team (document the exact UTC hour and local-time intent in a code comment)
@@ -134,7 +134,7 @@ This task establishes the notification subsystem that Tasks 7.5, 7.6, and 7.8 de
 * Tools: FastAPI, Supabase Python client, React, React Query
 
 
-### Task 7.4.5: Insurance sync hardening - 2h ✅ COMPLETED
+### Task 7.4.5: Insurance sync hardening - 2h
 
 Foundation refactor for Task 7.5. Makes `vendors.insurance_expiration_date` a reliably-computed mirror of the latest valid insurance certificate, so Task 7.5 can trust a single field as the source of truth.
 
@@ -197,29 +197,31 @@ Replaces the no-op stub in `backend/app/jobs/post_deadline_escalation.py` with f
 
 **Trigger:** APScheduler `CronTrigger` in UTC, fires once daily at 16:00 UTC (≈ 9:00 AM Mountain Time).
 
-**Query:** bid packages whose `deadline` fell within the last 24 hours AND have at least one `bid_invitations.status IN ('sent', 'opened')` (no submission, no decline).
+**Query:** bid packages whose `deadline` fell within the last 24 hours AND have at least one `bid_invitations.status IN ('sent', 'opened')` (no submission, no decline). Enrich each affected package with task and project context via PostgREST embedded resource select (`tasks(name, project_id, projects(name))`).
 
 **Logic:**
 
 * Group affected packages by `bid_packages.created_by` (the user who originated the bid round — matches the existing "the PM" pattern at `bid_package_service.py:277, 532`).
-* Look up each recipient in `users WHERE id=:created_by AND is_active=TRUE AND deleted_at IS NULL`. Skip if recipient is inactive or deleted (rare edge case for archived users).
+* Look up each recipient in `users WHERE id=:created_by AND is_active=TRUE AND deleted_at IS NULL`. Skip with `skipped_inactive_creator` counter increment if recipient is inactive or deleted (rare edge case for archived users; distinct from dedupe-skip for observability).
+* **Pre-query dedupe** (matches Task 7.5 pattern): before fan-out, query `notifications` for unread rows with `notification_type='post_deadline_non_responders'` AND `reference_id IN (affected_package_ids)`. Build a set of `(user_id, bid_package_id)` pairs that already have an unread notification. Skip those during dispatch (count toward `deduplicated_skipped`). All `create_notification(...)` calls pass `dedupe=False` — the in-job pre-query is the source of truth for the counter.
 * For each affected package, create one notification for the package creator:
   * `notification_type='post_deadline_non_responders'`
   * `title` — e.g., "3 vendors did not respond: Sunset Hills / Excavation"
-  * `message` — Lists non-responding vendor company names and contact emails (newline-separated, kept short — full table on the deep-linked bid package page). Recommended actions live on the bid package detail page, not in the notification body.
-  * `reference_type='bid_packages'`, `reference_id=bid_package.id` (deep-links to bid package detail page)
-* Dedupe via `NotificationService` — if an unread notification of the same type for the same package already exists for this recipient, skip.
-* After notifications are created successfully, update affected `bid_invitations.status` from `sent`/`opened` to `no_response` for cleaner dashboard reporting (one bulk UPDATE per package).
+  * `message` — Lists non-responding vendor company names and contact details (newline-separated, max 5 listed; if more, append "...and N more."). Recommended actions live on the bid package detail page, not in the notification body.
+  * `reference_type='bid_packages'`, `reference_id=bid_package.id` (deep-links to bid package detail page; the deep-link helper joins `bid_packages → tasks → projects` to build the nested route)
+* Sequential fan-out with per-recipient try/except.
+* **Status transition is per-package and gated:** after notifications dispatch for a given package, IF at least one notification succeeded (not necessarily all admins), bulk-UPDATE that package's affected `bid_invitations` from status `sent`/`opened` → `no_response`. If notification dispatch failed for ALL recipients on a package, skip that package's status update — the escalation didn't actually reach anyone, so the invitations shouldn't be flipped.
 
 **Job return value:**
 
 ```
 {
-  "packages_affected": N,
-  "notifications_created": N,
-  "invitations_marked_no_response": N,
-  "deduplicated_skipped": N,
-  "duration_seconds": float
+"packages_affected": int,
+"notifications_created": int,
+"invitations_marked_no_response": int,
+"deduplicated_skipped": int,
+"skipped_inactive_creator": int,
+"duration_seconds": float
 }
 ```
 
@@ -227,22 +229,37 @@ Replaces the no-op stub in `backend/app/jobs/post_deadline_escalation.py` with f
 
 ### Task 7.7: Build reminder/communication history view - 6h
 
-Read-only `email_log`-backed view on vendor detail and bid package detail pages. Unchanged scope from prior plan — this surfaces the vendor email audit trail that Task 7.3 (bid reminders) and other vendor email flows write into.
+Read-only `email_log`-backed view scoped to either a bid package or a vendor. Two pieces of work shipped together: a fix to broaden the existing bid-package Email Log filter (which previously missed three flows), and a new vendor-level endpoint plus Communication tab on the vendor detail page.
 
-* New FastAPI endpoints:
-  * `GET /api/v1/vendors/{vendor_id}/email-history` — paginated (default page size 50), returns `email_log` rows where `recipient_type='vendor_contact'` AND the recipient_email matches any `vendor_contacts.email` for this vendor, OR where `reference_type='bid_invitations'` AND `reference_id IN (SELECT id FROM bid_invitations WHERE vendor_id = :vendor_id)`
-  * `GET /api/v1/bid-packages/{bid_package_id}/email-history` — paginated, returns `email_log` rows where `reference_type='bid_invitations'` AND `reference_id IN (SELECT id FROM bid_invitations WHERE bid_package_id = :bid_package_id)`
-* Both endpoints admin-authed via existing `get_current_active_user` dependency
-* **Frontend — Vendor detail page (`VendorDetailPage.tsx`, tabbed layout):**
-  * Add `{ id: 'communication', label: \`Communication (${count})\` }` to the `tabDefs` array (matches the existing pattern at lines 120-126)
-  * Add a conditional block `{activeTab === 'communication' && (...)}` inside the `<Tabs>` children (matches lines 172-420)
-  * Render a paginated list with columns: timestamp (formatted), email type, subject, recipient email, status (color-coded badge)
-* **Frontend — Bid package detail page (`BidPackageDetailPage.tsx`, stacked-cards layout):**
-  * Add another `<Card>` inside the root `<div className="space-y-6">` (matches lines 143-326)
-  * Use the existing collapsible-section pattern from the Email Log card (lines 294-326): a header `<button>` toggling a `showCommunicationHistory` boolean to lazy-render its body
-  * Same column layout as the vendor view, scoped to this package's invitations
-* Status badge colors: green = `delivered`, blue = `sent`, amber = `queued`, red = `bounced` or `failed`
-* No manual resend action — automatic next-tier retry handles repeated outreach; manual resend creates duplicate-email risk
+**Broader filter — used by both endpoints:**
+
+The `email_log` table has no `vendor_id` column, and Phase 7 vendor-facing flows write rows under three distinct `reference_type` values: `bid_invitations`, `bid_revision_requests`, `bid_submissions`. A complete history must union across all three. The shipped implementation runs three small queries (one per `reference_type`) and merges the results in Python sorted by `created_at DESC` — cleaner than a single `.or_()` call with nested IN clauses, and skips empty branches when an ID list would be empty.
+
+**Bid-package side (fix to existing endpoint):**
+
+* Existing endpoint `GET /api/v1/bid-packages/{bid_package_id}/email-log` (`invitation_tracking_service.py:get_bid_package_email_log`) previously filtered only `reference_type='bid_invitations'`, missing PM revision requests, initial bid receipts, and revision receipts.
+* Updated logic: walk `bid_package → invitations`, then derive `revision_request_ids` (tied to those invitations) and `submission_ids` (tied to those invitations). Run three `email_log` queries with the respective ID lists, merge and sort.
+* No frontend change required — `BidPackageDetailPage`'s existing `EmailLogTable` already renders whatever rows the endpoint returns.
+
+**Vendor side (new endpoint):**
+
+* New endpoint `GET /api/v1/vendors/{vendor_id}/email-log`, admin-authed via existing `get_current_active_user`.
+* Backed by a new function in `invitation_tracking_service.py`. Walks `vendor → invitations` (all invitations for this vendor across every bid package), then derives revision and submission IDs the same way. Same three-query merge.
+* Response shape matches the bid-package endpoint exactly so the same `EmailLogTable` component renders both.
+
+**No pagination** in either endpoint — matches the existing pattern; volume is bounded for an internal tool.
+
+**Frontend — Vendor detail page (`VendorDetailPage.tsx`, tabbed layout):**
+
+* Add `{ id: 'communication', label: \`Communication (${count})\` }` to the `tabDefs` array (matches the existing label-with-count pattern used by Contacts/Trades/Documents/Flags).
+* Conditional render block uses the existing `EmailLogTable` component as-is — no duplication, no new table component.
+* New `useVendorEmailLog(vendorId)` hook follows the existing pattern of the bid-package email log hook.
+
+**Out of scope (acknowledged limitations):**
+
+* Future email flows that write to `email_log` with a `reference_type` outside the three handled here (e.g., a hypothetical `awards` or `milestones` reference) will be invisible to these endpoints. When new types are added, the filter is extended at that time.
+* No manual resend action — automatic next-tier retry handles repeated outreach; manual resend creates duplicate-email risk.
+
 * Tools: React, FastAPI, Supabase Python client, React Query
 
 ### Task 7.8: Build scheduler self-check job - 4h
@@ -251,27 +268,52 @@ Replaces the no-op stub in `backend/app/jobs/scheduler_self_check.py` with full 
 
 **Trigger:** APScheduler `CronTrigger` in UTC, fires once daily at 15:45 UTC (≈ 8:45 AM Mountain Time, after all primary jobs have had a chance to run).
 
-**Logic:**
+**Scheduler module addition:** `backend/app/jobs/scheduler.py` exposes `_started_at: datetime | None` alongside `_last_run`. Set to `datetime.now(timezone.utc)` in `start_scheduler()` and to `None` in `stop_scheduler()`. Read by the self-check via `get_scheduler_started_at()` for cold-start grace.
 
-* Reads the in-memory last-run state via `get_last_run(job_id)` from `scheduler.py` for every entry in `KNOWN_JOB_IDS` except `scheduler_self_check` itself.
-* For each tracked job, define an expected interval (hourly for `revision_expiry`, daily for the four Phase 7 jobs) and a 2-hour grace window. If `last_run_at` is `None` or older than `now - (expected_interval + grace)`, append the job to the failure summary with its job ID, expected interval, and last-run timestamp.
-* If the failure summary is non-empty, resolve admin recipients (same query as Task 7.5: `users WHERE role='admin' AND is_active=TRUE AND deleted_at IS NULL`) and create one notification per admin:
-  * `notification_type='scheduler_alert'`
-  * `title` — e.g., "Scheduler alert: 1 job stale" or "Scheduler alert: 3 jobs stale"
-  * `message` — Lists each stale job_id with its expected interval and last-run timestamp
-  * `reference_type=NULL`, `reference_id=NULL` (no deep-link target; admin can hit `/api/v1/admin/scheduler-health` directly if needed)
-* Dedupe via `NotificationService` — if the same admin has an unread `scheduler_alert` notification, skip creating a new one (avoids stacking daily alerts when the underlying issue persists).
-* This job's own failure is the only observability blind spot. Sentry + ECS auto-restart + the `scheduler_running` flag on `/admin/scheduler-health` cover the case where the entire scheduler is down.
+**Expected intervals (configured constant at top of the job module — opt-in by inclusion):**
+
+EXPECTED_INTERVALS = {
+"revision_expiry": timedelta(hours=1),
+"daily_bid_reminders": timedelta(days=1),
+"daily_insurance_expiration": timedelta(days=1),
+"post_deadline_escalation": timedelta(days=1),
+}
+
+GRACE_WINDOW = timedelta(hours=2)
+
+`scheduler_self_check` is intentionally excluded — it can't usefully self-evaluate, and that's an accepted blind spot covered by Sentry + ECS health checks. Future jobs added to `KNOWN_JOB_IDS` are NOT auto-watched; they must be added to `EXPECTED_INTERVALS` explicitly. This is intentional: the watcher fails closed (silent non-watching) rather than open (false positives on unconfigured jobs).
+
+**Staleness logic per job:**
+
+* If `last_run_at is None`:
+  * If the scheduler has been running for less than `expected_interval + GRACE_WINDOW`, skip this job (cold-start grace — it hasn't had a chance to fire yet).
+  * Otherwise, flag as stale with "last ran: never".
+* If `last_run_at is not None` and `last_run_at < now - (expected_interval + GRACE_WINDOW)`, flag as stale.
+
+**Dedupe** (pre-query, matches Tasks 7.5 / 7.6 pattern):
+
+* Pre-query `notifications` for unread `scheduler_alert` rows for the candidate admin set. Build a set of `user_ids` to skip.
+* All `create_notification(...)` calls pass `dedupe=False`; the in-job pre-query is the source of truth for `deduplicated_skipped`.
+* Consequence: a persistent scheduler problem produces one alert per admin until they read it, not one per day.
+
+**Recipients:** All active admins (`users WHERE role='admin' AND is_active=TRUE AND deleted_at IS NULL`). Skip the entire dispatch if either the stale list is empty (no notification, healthy state is silence) or no active admins exist (log a warning; nothing actionable).
+
+**Notification content — one consolidated notification per admin, not one per stale job:**
+
+* `notification_type='scheduler_alert'`
+* `title` — "Scheduler alert: 1 job stale" or "Scheduler alert: {N} jobs stale"
+* `message` — Newline-separated list, one line per stale job: `"{job_id}: expected every {interval}, last ran {last_run_or_never}"`. Final line: `"Check /api/v1/admin/scheduler-health for current state."`
+* `reference_type=NULL`, `reference_id=NULL` — no deep-link target (the admin opens the health endpoint or Sentry directly).
+
+This job's own failure is the only observability blind spot. Sentry + ECS auto-restart + the `scheduler_running` flag on `/admin/scheduler-health` cover the case where the entire scheduler is down.
 
 **Job return value:**
-
-```
 {
-  "stale_jobs": [list of stale job_ids],
-  "admins_notified": N,
-  "deduplicated_skipped": N
+"stale_jobs": [list of stale job_id strings],
+"admins_notified": int,
+"deduplicated_skipped": int,
+"duration_seconds": float
 }
-```
 
 * Tools: APScheduler, NotificationService, Python logging
 
@@ -294,8 +336,8 @@ Replaces the no-op stub in `backend/app/jobs/scheduler_self_check.py` with full 
 * Insurance expiration job (Task 7.5): lead-up notifications fire on exact T-30 and T-7 dates; expired-but-unacknowledged notifications fire daily until the admin updates the document status to `expired` or refreshes the vendor's `insurance_expiration_date`; dedupe prevents stacking unread duplicates
 * Vendor list dashboard shows count badge for vendors with insurance expiring within 30 days OR expired, backed by `GET /api/v1/vendors/insurance-expiring-count`
 * Post-deadline escalation job (Task 7.6): notifications reach the bid package creator (`bid_packages.created_by`) the morning after their packages closed with non-responders; one notification per affected package per recipient; affected `bid_invitations.status` transitions `sent`/`opened` → `no_response` after notifications are created
-* Communication history visible from vendor detail page (as new tab) and bid package detail page (as new collapsible card), paginated, color-coded by `email_log.status`; no manual resend action exposed
-* Scheduler self-check (Task 7.8) creates `scheduler_alert` notifications for admins when any tracked job is stale beyond `expected_interval + 2-hour grace`; dedupe prevents stacking unread alerts
+* Communication history visible from vendor detail page (as new Communication tab) and from the existing bid-package detail page Email Log (filter broadened in-place to include `bid_invitations`, `bid_revision_requests`, and `bid_submissions` reference types). Both endpoints return the same response shape; the existing `EmailLogTable` component renders both. Color-coded by `email_log.status`; not paginated (bounded volume for an internal tool); no manual resend action exposed.
+* Scheduler self-check (Task 7.8) creates one consolidated `scheduler_alert` notification per admin listing every stale job, when any tracked job is stale beyond its configured `EXPECTED_INTERVALS` entry + 2-hour grace window. Cold-start grace is honored via `get_scheduler_started_at()`. Pre-query dedupe prevents stacking unread alerts; admins receive a fresh alert only after reading or acting on the prior one. Jobs not present in `EXPECTED_INTERVALS` are intentionally not watched (fail-closed semantics).
 * RLS policies on `notifications` enforce per-user isolation: `notifications_select_own` and `notifications_update_own` prevent users from seeing or modifying other users' notifications
 * Per-recipient failures are isolated: one failed send/notification-create never crashes the parent job
 * Graceful shutdown via FastAPI lifespan (`scheduler.shutdown(wait=True)`) so in-flight job runs finish during deploys
