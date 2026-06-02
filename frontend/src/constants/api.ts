@@ -34,6 +34,7 @@ export const API_ENDPOINTS = {
   // Bid Templates
   BID_TEMPLATES: '/bid-templates',
   BID_TEMPLATE: (id: string) => `/bid-templates/${id}`,
+  BID_TEMPLATE_DUPLICATE: (id: string) => `/bid-templates/${id}/duplicate`,
 
   // Qualified Vendors
   TASK_QUALIFIED_VENDORS: (taskId: string) => `/tasks/${taskId}/qualified-vendors`,

@@ -9,9 +9,11 @@ import { Select } from '@/components/ui/Select';
 import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { ROUTES } from '@/constants/routes';
+import { Alert } from '@/components/ui/Alert';
 import { useBidTemplate } from '@/features/bid-templates/hooks/useBidTemplate';
 import { useCreateBidTemplate } from '@/features/bid-templates/hooks/useCreateBidTemplate';
 import { useUpdateBidTemplate } from '@/features/bid-templates/hooks/useUpdateBidTemplate';
+import { useDuplicateBidTemplate } from '@/features/bid-templates/hooks/useDuplicateBidTemplate';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
 import { LineItemsEditor } from '@/features/bid-templates/components/LineItemsEditor';
 import { BidTemplatePreview } from '@/features/bid-templates/components/BidTemplatePreview';
@@ -69,7 +71,39 @@ export function BidTemplateFormPage() {
 
   const createMutation = useCreateBidTemplate();
   const updateMutation = useUpdateBidTemplate();
+  const duplicateMutation = useDuplicateBidTemplate();
   const isPending = createMutation.isPending || updateMutation.isPending;
+
+  // Locked when editing a template that a live (non-cancelled) bid_package
+  // references. Backend will 409 the PUT, so we surface it pre-emptively.
+  // Task 8.1 freeze guards.
+  const isLocked = isEdit && template?.is_in_use === true;
+  const blocker = template?.referencing_packages?.[0];
+  // Use the server-reported total, not array length: the array is capped.
+  const blockerCount =
+    template?.referencing_packages_total ??
+    template?.referencing_packages?.length ??
+    0;
+
+  const handleDuplicate = () => {
+    if (!id) return;
+    duplicateMutation.mutate(id, {
+      onSuccess: (newTemplate) => {
+        toast({
+          variant: 'success',
+          message: `Created "${newTemplate.name}". Editing the copy.`,
+        });
+        navigate(ROUTES.BID_TEMPLATE_EDIT.replace(':id', newTemplate.id));
+      },
+      onError: (error) => {
+        const apiError = error as { message?: string };
+        toast({
+          variant: 'danger',
+          message: apiError.message || 'Failed to duplicate template.',
+        });
+      },
+    });
+  };
 
   const methods = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -206,6 +240,19 @@ export function BidTemplateFormPage() {
         </div>
       </div>
 
+      {isLocked && blocker && (
+        <Alert variant="info" title="In use - locked">
+          This template is in use by a live bid package
+          {' '}
+          <span className="font-medium">
+            ({blocker.task_name}, {blocker.status}
+            {blockerCount > 1 ? `, +${blockerCount - 1} more` : ''})
+          </span>
+          {' '}
+          and is locked to keep all vendor bids comparable. Duplicate to change.
+        </Alert>
+      )}
+
       <FormProvider {...methods}>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
           {/* Section 1: Template Metadata */}
@@ -284,11 +331,25 @@ export function BidTemplateFormPage() {
               type="button"
               variant="ghost"
               onClick={() => navigate(ROUTES.BID_TEMPLATES)}
-              disabled={isPending}
+              disabled={isPending || duplicateMutation.isPending}
             >
               Cancel
             </Button>
-            <Button type="submit" isLoading={isPending}>
+            {isLocked && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleDuplicate}
+                isLoading={duplicateMutation.isPending}
+              >
+                Duplicate
+              </Button>
+            )}
+            <Button
+              type="submit"
+              isLoading={isPending}
+              disabled={isLocked || duplicateMutation.isPending}
+            >
               {isEdit ? 'Save Changes' : 'Create Template'}
             </Button>
           </div>
