@@ -106,18 +106,11 @@ export function BidTemplateListPage() {
       onError: (error) => {
         setDeleteTarget(null);
         const apiError = error as { status?: number; message?: string };
-        if (apiError.status === 409) {
-          toast({
-            variant: 'danger',
-            message:
-              'This template is in use by one or more bid packages and cannot be deleted.',
-          });
-        } else {
-          toast({
-            variant: 'danger',
-            message: apiError.message || 'Failed to delete template.',
-          });
-        }
+        // Backend's 409 now names the referencing package(s); surface it verbatim.
+        toast({
+          variant: 'danger',
+          message: apiError.message || 'Failed to delete template.',
+        });
       },
     });
   }, [deleteTarget, deleteMutation, toast]);
@@ -128,7 +121,19 @@ export function BidTemplateListPage() {
       {
         id: 'name',
         header: 'Template Name',
-        accessor: 'name',
+        accessor: (row: BidTemplate) => (
+          <div className="flex items-center gap-2">
+            <span>{row.name}</span>
+            {row.is_in_use && (
+              <span
+                className="rounded-full bg-info-50 px-2 py-0.5 text-xs font-medium text-info-700"
+                title="Locked: in use by a live bid package"
+              >
+                In use
+              </span>
+            )}
+          </div>
+        ),
         sortable: true,
       },
       {

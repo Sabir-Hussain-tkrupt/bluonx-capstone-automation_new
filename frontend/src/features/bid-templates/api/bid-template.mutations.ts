@@ -39,3 +39,12 @@ export async function updateBidTemplate({ id, ...input }: UpdateBidTemplateInput
 export async function deleteBidTemplate(id: string): Promise<void> {
   await api.delete(API_ENDPOINTS.BID_TEMPLATE(id));
 }
+
+/**
+ * Deep-copy a template + all its items into a new template. The escape
+ * hatch when the source is locked by a live bid package (Task 8.1).
+ */
+export async function duplicateBidTemplate(id: string) {
+  const { data } = await api.post(API_ENDPOINTS.BID_TEMPLATE_DUPLICATE(id));
+  return data as { id: string; name: string };
+}

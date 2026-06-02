@@ -72,6 +72,18 @@ class BidTemplateUpdate(BluOnXBase):
         return self
 
 
+class ReferencingPackageSummary(BluOnXBase):
+    """Lightweight summary of a bid_package that references a template.
+
+    Used to tell the PM exactly *which* package(s) lock a template, so
+    the 409 message and the locked-state banner can name the blocker.
+    """
+
+    id: UUID
+    task_name: str
+    status: str
+
+
 class BidTemplateResponse(BluOnXBase):
     id: UUID
     name: str
@@ -82,10 +94,17 @@ class BidTemplateResponse(BluOnXBase):
     updated_at: datetime
     trade_name: str | None = None
     item_count: int = 0
+    is_in_use: bool = False
 
 
 class BidTemplateDetailResponse(BidTemplateResponse):
     items: list[BidTemplateItemResponse] = []
+    # Live (non-cancelled) packages locking this template. Capped server-side
+    # at a small number so a heavily-used template doesn't ship thousands of
+    # rows the UI never renders. Use `referencing_packages_total` for the
+    # honest count when displaying "+N more" overflow.
+    referencing_packages: list[ReferencingPackageSummary] = []
+    referencing_packages_total: int = 0
 
 
 class BidTemplateListResponse(BluOnXBase):
