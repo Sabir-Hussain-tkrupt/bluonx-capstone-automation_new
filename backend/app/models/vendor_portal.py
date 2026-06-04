@@ -8,7 +8,7 @@ backend response is a drop-in replacement for the Task 5.1 mock.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -62,6 +62,7 @@ class PortalBidPackageModel(BluOnXBase):
     round_number: int
     deadline: datetime
     instructions: str
+    desired_start_date: date | None = None
 
 
 class PortalTemplateItemModel(BluOnXBase):
@@ -100,6 +101,7 @@ class BidDraftModel(BluOnXBase):
     line_items: list[BidDraftLineItemModel]
     attachment_ids: list[UUID]
     last_saved_at: datetime
+    proposed_start_date: date | None = None
 
 
 class RevisionPrefillLineItem(BluOnXBase):
@@ -126,6 +128,7 @@ class RevisionPrefillResponse(BluOnXBase):
     vendor_notes: str
     line_items: list[RevisionPrefillLineItem]
     attachment_ids: list[UUID]
+    proposed_start_date: date | None = None
 
 
 class VendorRevisionContextModel(BluOnXBase):
@@ -183,6 +186,7 @@ class DraftPayload(BluOnXBase):
     total_amount: Decimal | None = Field(default=None, ge=0)
     line_items: list[DraftLineItemInput] = Field(default_factory=list)
     attachment_ids: list[UUID] = Field(default_factory=list)
+    proposed_start_date: date | None = None
 
 
 # ── Submit response ──────────────────────────────────────────────────────
@@ -242,6 +246,7 @@ class SubmissionResponse(BluOnXBase):
     updated_at: datetime
     line_items: list[SubmissionLineItemResponse]
     attachments: list[AttachmentResponse]
+    proposed_start_date: date | None = None
 
 
 # ── Validation error surface (422 on submit) ─────────────────────────────

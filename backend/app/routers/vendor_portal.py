@@ -98,7 +98,8 @@ def _fetch_owned_submission(
         db.table("bid_submissions")
         .select(
             "id, bid_invitation_id, vendor_id, status, is_draft,"
-            " total_amount, vendor_notes, submitted_at, updated_at"
+            " total_amount, vendor_notes, proposed_start_date,"
+            " submitted_at, updated_at"
         )
         .eq("id", str(submission_id))
         .eq("bid_invitation_id", str(ctx.bid_invitation_id))
@@ -304,6 +305,11 @@ async def create_draft(
             str(payload.total_amount) if payload.total_amount is not None else None
         ),
         "vendor_notes": payload.vendor_notes,
+        "proposed_start_date": (
+            payload.proposed_start_date.isoformat()
+            if payload.proposed_start_date is not None
+            else None
+        ),
         "status": "draft",
         "is_draft": True,
         "is_direct_assign": False,
@@ -410,6 +416,11 @@ async def update_draft(
                 str(payload.total_amount) if payload.total_amount is not None else None
             ),
             "vendor_notes": payload.vendor_notes,
+            "proposed_start_date": (
+                payload.proposed_start_date.isoformat()
+                if payload.proposed_start_date is not None
+                else None
+            ),
         }
     ).eq("id", str(submission_id)).execute()
 
@@ -464,6 +475,22 @@ async def submit_bid(
     template_meta = fetch_template_metadata(db, template_id)
     template_items = list(fetch_template_items_map(db, template_id).values())
 
+    # Task 8.1.5: timeline rule — proposed_start_date is required iff the
+    # package has a desired_start_date. Read the package row directly so
+    # this works on both the initial and revision branches (revisions
+    # inherit the package's desired date — it stays pinned on rebid).
+    pkg_resp = (
+        db.table("bid_packages")
+        .select("desired_start_date")
+        .eq("id", str(ctx.bid_package_id))
+        .single()
+        .execute()
+    )
+    pkg_data = pkg_resp.data or {}
+    if isinstance(pkg_data, list):
+        pkg_data = pkg_data[0] if pkg_data else {}
+    package_has_desired_date = bool(pkg_data.get("desired_start_date"))
+
     li_resp = (
         db.table("bid_line_items")
         .select(
@@ -481,6 +508,7 @@ async def submit_bid(
         line_items=line_items,
         template_items=template_items,
         is_lump_sum_template=bool(template_meta["is_lump_sum"]),
+        package_has_desired_date=package_has_desired_date,
     )
     if errors:
         raise HTTPException(

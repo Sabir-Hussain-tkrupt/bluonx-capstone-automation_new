@@ -14,6 +14,7 @@ type Action =
   | { type: 'SET_STEP'; step: StepIndex }
   | { type: 'MARK_COMPLETED'; step: StepIndex }
   | { type: 'UPDATE_COMPANY_NOTES'; value: string }
+  | { type: 'UPDATE_PROPOSED_START_DATE'; value: string | null }
   | { type: 'SET_LUMP_TOTAL'; value: number | null }
   | {
       type: 'UPDATE_LINE_ITEM';
@@ -36,6 +37,8 @@ type Action =
 export interface PrefillHydration {
   vendor_notes: string;
   total_amount: number | null;
+  /** Vendor's prior proposed start date (Task 8.1.5). */
+  proposed_start_date: string | null;
   line_items: Array<{
     template_item_id: string;
     quantity: number | null;
@@ -46,7 +49,10 @@ export interface PrefillHydration {
 
 // ─── Initial state from template ────────────────────────────────────
 
-export function buildInitialFormState(template: PortalBidTemplate): BidFormState {
+export function buildInitialFormState(
+  template: PortalBidTemplate,
+  initialProposedStartDate: string | null = null,
+): BidFormState {
   const line_items: FormLineItem[] = template.is_lump_sum
     ? []
     : [...template.items]
@@ -66,7 +72,12 @@ export function buildInitialFormState(template: PortalBidTemplate): BidFormState
     step: 1,
     completedSteps: [],
     dirty: false,
-    companyInfo: { vendor_notes: '' },
+    // Task 8.1.5 "calendar-invite" prefill: the vendor's proposed date
+    // starts at the PM's desired date (if any); the vendor can edit it.
+    companyInfo: {
+      vendor_notes: '',
+      proposed_start_date: initialProposedStartDate,
+    },
     pricing: {
       total_amount: null,
       line_items,
@@ -107,7 +118,17 @@ function reducer(state: BidFormState, action: Action): BidFormState {
       return {
         ...state,
         dirty: true,
-        companyInfo: { vendor_notes: action.value },
+        companyInfo: { ...state.companyInfo, vendor_notes: action.value },
+      };
+
+    case 'UPDATE_PROPOSED_START_DATE':
+      return {
+        ...state,
+        dirty: true,
+        companyInfo: {
+          ...state.companyInfo,
+          proposed_start_date: action.value,
+        },
       };
 
     case 'SET_LUMP_TOTAL':
@@ -162,7 +183,10 @@ function reducer(state: BidFormState, action: Action): BidFormState {
         ...state,
         submissionId: action.draft.id,
         dirty: false,
-        companyInfo: { vendor_notes: action.draft.vendor_notes },
+        companyInfo: {
+          vendor_notes: action.draft.vendor_notes,
+          proposed_start_date: action.draft.proposed_start_date,
+        },
         pricing: { total_amount: action.draft.total_amount, line_items: lineItems },
       };
     }
@@ -185,7 +209,10 @@ function reducer(state: BidFormState, action: Action): BidFormState {
         // submissionId intentionally untouched (stays null → a fresh
         // revision draft is created on first save/submit).
         dirty: true,
-        companyInfo: { vendor_notes: action.prefill.vendor_notes },
+        companyInfo: {
+          vendor_notes: action.prefill.vendor_notes,
+          proposed_start_date: action.prefill.proposed_start_date,
+        },
         pricing: { total_amount: action.prefill.total_amount, line_items: lineItems },
       };
     }
@@ -205,6 +232,7 @@ export interface UseBidFormStateResult {
   setStep: (step: StepIndex) => void;
   markCompleted: (step: StepIndex) => void;
   updateCompanyNotes: (value: string) => void;
+  updateProposedStartDate: (value: string | null) => void;
   setLumpTotal: (value: number | null) => void;
   updateLineItem: (
     template_item_id: string,
@@ -218,8 +246,15 @@ export interface UseBidFormStateResult {
   markClean: () => void;
 }
 
-export function useBidFormState(template: PortalBidTemplate): UseBidFormStateResult {
-  const [state, dispatch] = useReducer(reducer, template, buildInitialFormState);
+export function useBidFormState(
+  template: PortalBidTemplate,
+  initialProposedStartDate: string | null = null,
+): UseBidFormStateResult {
+  const [state, dispatch] = useReducer(
+    reducer,
+    undefined,
+    () => buildInitialFormState(template, initialProposedStartDate),
+  );
 
   return {
     state,
@@ -227,6 +262,10 @@ export function useBidFormState(template: PortalBidTemplate): UseBidFormStateRes
     markCompleted: useCallback((step) => dispatch({ type: 'MARK_COMPLETED', step }), []),
     updateCompanyNotes: useCallback(
       (value) => dispatch({ type: 'UPDATE_COMPANY_NOTES', value }),
+      [],
+    ),
+    updateProposedStartDate: useCallback(
+      (value) => dispatch({ type: 'UPDATE_PROPOSED_START_DATE', value }),
       [],
     ),
     setLumpTotal: useCallback(

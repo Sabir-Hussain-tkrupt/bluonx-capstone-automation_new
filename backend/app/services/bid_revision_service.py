@@ -26,7 +26,10 @@ from app.models.bids import (
     BidRevisionRequestCreateResponse,
     BidRevisionRequestResponse,
 )
-from app.services.bid_package_service import _generate_magic_link_token
+from app.services.bid_package_service import (
+    _format_date_only,
+    _generate_magic_link_token,
+)
 from app.services.vendor_portal_service import _format_submitted_at
 
 logger = logging.getLogger(__name__)
@@ -418,6 +421,7 @@ async def send_revision_request_email(
                 " vendor_contacts(full_name, email),"
                 " vendors(company_name),"
                 " bid_packages!inner("
+                "   desired_start_date,"
                 "   tasks!inner("
                 "     name,"
                 "     projects(name)"
@@ -458,6 +462,10 @@ async def send_revision_request_email(
         "pm_note": pm_note,
         "revision_deadline_formatted": _format_submitted_at(revision_deadline),
         "portal_url": portal_url,
+        # Task 8.1.5 — template renders a "Desired Start" row only when truthy.
+        # `_format_date_only` returns "" when the package has no desired date,
+        # which Jinja treats as falsy → the row is omitted cleanly.
+        "desired_start_date": _format_date_only(pkg.get("desired_start_date")),
     }
 
     try:

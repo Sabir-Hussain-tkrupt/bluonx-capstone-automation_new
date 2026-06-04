@@ -5,7 +5,7 @@ and invitation sending (Task 4.4).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -29,6 +29,7 @@ class BidPackageCreateRequest(BluOnXBase):
     project_document_ids: list[UUID] = Field(default_factory=list)
     vendor_selections: list[VendorSelection] = Field(..., min_length=1)
     instructions: str | None = Field(default=None, max_length=2000)
+    desired_start_date: date | None = None
 
 
 class FailedVendor(BluOnXBase):
@@ -48,6 +49,7 @@ class BidPackageCreateResponse(BluOnXBase):
     failed_vendors: list[FailedVendor]
     deadline: str
     instructions: str | None = None
+    desired_start_date: date | None = None
 
 
 class ResendBidLinkResponse(BluOnXBase):
@@ -120,6 +122,7 @@ class BidPackageDetailResponse(BluOnXBase):
     deadline: datetime
     status: str
     instructions: str | None = None
+    desired_start_date: date | None = None
     bid_template: BidTemplateSummary | None = None
     documents: list[BidPackageDocumentItem] = Field(default_factory=list)
     invitation_summary: InvitationSummary

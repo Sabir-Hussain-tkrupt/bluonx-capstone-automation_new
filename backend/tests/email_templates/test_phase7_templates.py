@@ -238,12 +238,15 @@ def test_self_check_alert_txt_renders():
 
 # ── existing bid_reminder tiers (regression smoke) ──────────────────────────
 
+# Reminders intentionally do NOT mint a new magic link (Task 7.3 design):
+# they point vendors back to their original invitation email, so the three
+# bid_reminder_* templates do not reference `magic_link_url`. Don't add it
+# back to the context — keep this in sync with the templates' actual surface.
 _REMINDER_CTX = {
     "vendor_contact_name": "Marcus Delgado",
     "task_name": "Site Grading & Earthwork",
     "project_name": "Phoenix Logistics Park — Building C",
     "bid_deadline": "May 29, 2026 at 05:00 PM UTC",
-    "magic_link_url": "http://localhost:5173/bid/raw-token-abc123",
     "pm_name": "Priya Nair",
     "pm_email": "priya@bluonx.example",
     "company_name": "BluOnX Development LLC",
@@ -258,6 +261,5 @@ def test_bid_reminder_tier_renders(tier):
     for rendered in (html, txt):
         assert "Marcus Delgado" in rendered
         assert "May 29, 2026 at 05:00 PM UTC" in rendered
-        assert "http://localhost:5173/bid/raw-token-abc123" in rendered
         assert "Priya Nair" in rendered
         _assert_no_placeholders(rendered)

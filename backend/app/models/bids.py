@@ -8,7 +8,7 @@ Pydantic models for bid lifecycle tables:
   - magic_link_tokens (model only, no router)
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -256,6 +256,9 @@ class PMBidSubmissionDetailResponse(BluOnXBase):
     total_amount: Decimal | None = None
     vendor_notes: str | None = None
     submitted_at: datetime | None = None
+    # Task 8.1.5 — vendor's committed start date. Surfaced in the PM
+    # "View Bid" modal so the PM can compare against bid_packages.desired_start_date.
+    proposed_start_date: date | None = None
     vendor_company_name: str | None = None
     vendor_contact_name: str | None = None
     vendor_contact_email: str | None = None

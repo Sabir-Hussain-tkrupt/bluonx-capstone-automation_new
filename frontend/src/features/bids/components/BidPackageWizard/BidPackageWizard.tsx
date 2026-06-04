@@ -43,6 +43,7 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
     documentIds: [],
     vendorSelections: [],
     instructions: '',
+    desiredStartDate: null,
   });
 
   const updateData = (partial: Partial<WizardData>) => {
@@ -59,6 +60,9 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
         project_document_ids: wizardData.documentIds,
         vendor_selections: wizardData.vendorSelections,
         ...(wizardData.instructions.trim() ? { instructions: wizardData.instructions.trim() } : {}),
+        ...(wizardData.desiredStartDate
+          ? { desired_start_date: wizardData.desiredStartDate }
+          : {}),
       },
       {
         onSuccess: (response) => {

@@ -126,6 +126,7 @@ def build_bid_context(
             round_number=pkg["round_number"],
             deadline=pkg["deadline"],
             instructions=pkg.get("instructions") or "",
+            desired_start_date=pkg.get("desired_start_date"),
         ),
         bid_template=PortalBidTemplateModel(
             id=template["id"],
@@ -152,6 +153,7 @@ def _fetch_invitation_tree(db, bid_invitation_id: UUID) -> dict:
             " vendor_contacts(id, full_name, email, phone),"
             " bid_packages("
             "   id, round_number, deadline, instructions, bid_template_id, task_id,"
+            "   desired_start_date,"
             "   tasks("
             "     id, name, description,"
             "     projects(id, name, city, address),"
@@ -268,7 +270,10 @@ def _fetch_existing_draft(
     """
     query = (
         db.table("bid_submissions")
-        .select("id, vendor_notes, total_amount, updated_at, is_draft")
+        .select(
+            "id, vendor_notes, total_amount, updated_at, is_draft,"
+            " proposed_start_date"
+        )
         .eq("bid_invitation_id", str(bid_invitation_id))
         .eq("is_draft", True)
         .eq("is_superseded", False)
@@ -337,6 +342,7 @@ def _fetch_existing_draft(
         line_items=line_items,
         attachment_ids=attachment_ids,
         last_saved_at=draft["updated_at"],
+        proposed_start_date=draft.get("proposed_start_date"),
     )
 
 
@@ -352,7 +358,7 @@ def build_revision_prefill(
     """
     sub_resp = (
         db.table("bid_submissions")
-        .select("id, vendor_notes, total_amount")
+        .select("id, vendor_notes, total_amount, proposed_start_date")
         .eq("id", str(original_submission_id))
         .limit(1)
         .execute()
@@ -419,6 +425,7 @@ def build_revision_prefill(
         vendor_notes=sub.get("vendor_notes") or "",
         line_items=line_items,
         attachment_ids=attachment_ids,
+        proposed_start_date=sub.get("proposed_start_date"),
     )
 
 
@@ -611,7 +618,7 @@ def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
     sub_resp = (
         db.table("bid_submissions")
         .select(
-            "id, vendor_notes, total_amount, updated_at,"
+            "id, vendor_notes, total_amount, updated_at, proposed_start_date,"
             " bid_invitations!inner(bid_packages!inner(bid_template_id))"
         )
         .eq("id", bid_submission_id)
@@ -665,6 +672,7 @@ def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
         line_items=line_items,
         attachment_ids=attachment_ids,
         last_saved_at=row["updated_at"],
+        proposed_start_date=row.get("proposed_start_date"),
     )
 
 
@@ -674,7 +682,7 @@ def fetch_submission_detail(db, bid_submission_id: str) -> SubmissionResponse:
         db.table("bid_submissions")
         .select(
             "id, status, is_draft, total_amount, vendor_notes,"
-            " submitted_at, updated_at"
+            " submitted_at, updated_at, proposed_start_date"
         )
         .eq("id", bid_submission_id)
         .single()
@@ -711,6 +719,7 @@ def fetch_submission_detail(db, bid_submission_id: str) -> SubmissionResponse:
         updated_at=sub["updated_at"],
         line_items=line_items,
         attachments=attachments,
+        proposed_start_date=sub.get("proposed_start_date"),
     )
 
 
