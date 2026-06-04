@@ -20,6 +20,7 @@ import { CancelRevisionDialog } from '@/features/bids/components/CancelRevisionD
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { SubmissionStatusPie } from '@/features/bids/components/SubmissionStatusPie';
 import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
+import { formatDateOnly } from '@/lib/format';
 import { cn } from '@/utils/cn';
 import type { BidInvitation, BidRevisionRequest } from '@/features/bids/types';
 
@@ -232,6 +233,22 @@ export function BidPackageDetailPage() {
           </h3>
           <p className="whitespace-pre-line text-sm text-info-800">
             {bp.instructions}
+          </p>
+        </div>
+      )}
+
+      {/* Desired Start Date (Task 8.1.5) */}
+      {bp.desired_start_date && (
+        <div className="rounded-lg border border-secondary-200 bg-white p-4">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-secondary-500">
+            Desired Start Date
+          </h3>
+          <p className="text-sm font-semibold text-secondary-900">
+            {formatDateOnly(bp.desired_start_date)}
+          </p>
+          <p className="mt-1 text-xs text-secondary-500">
+            Target start communicated to vendors. Vendors&apos; proposed start
+            dates are shown on each submitted bid.
           </p>
         </div>
       )}

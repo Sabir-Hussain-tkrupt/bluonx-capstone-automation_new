@@ -2,7 +2,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useBidSubmissionDetail } from '@/features/bids/hooks/useBidSubmissionDetail';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, formatDateOnly } from '@/lib/format';
 import { cn } from '@/utils/cn';
 import type { BidSubmissionLineItem } from '@/features/bids/types';
 
@@ -220,6 +220,11 @@ export function BidSubmissionDetailModal({
                 <span className="text-xs text-secondary-500">
                   Submitted {formatDateTime(data.submitted_at)}
                 </span>
+                {data.proposed_start_date && (
+                  <span className="text-xs text-secondary-500">
+                    · Proposed start {formatDateOnly(data.proposed_start_date)}
+                  </span>
+                )}
               </div>
             </div>
             <div className="shrink-0 text-right">
@@ -227,6 +232,11 @@ export function BidSubmissionDetailModal({
               <p className="text-2xl font-bold text-secondary-900">
                 {formatCurrency(data.total_amount)}
               </p>
+              {data.proposed_start_date && (
+                <p className="mt-1 text-xs text-secondary-500">
+                  Start: {formatDateOnly(data.proposed_start_date)}
+                </p>
+              )}
             </div>
           </div>
 

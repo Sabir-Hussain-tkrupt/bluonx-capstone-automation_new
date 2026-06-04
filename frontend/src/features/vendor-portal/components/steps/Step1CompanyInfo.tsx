@@ -1,4 +1,4 @@
-import { Button, Card, useToast } from '@/components/ui';
+import { Button, Card, FormField, TextInput, useToast } from '@/components/ui';
 import { useBidContext } from '../../hooks/useBidContext';
 import { downloadProjectDocument } from '../../services/portalApi';
 import { ProjectContextPanel } from '../ProjectContextPanel';
@@ -12,14 +12,21 @@ function formatBytes(bytes: number): string {
 export interface Step1CompanyInfoProps {
   onNext: () => void;
   onSaveDraft: () => void;
+  /** Vendor's proposed start date (Task 8.1.5). ISO date string or null. */
+  proposedStartDate: string | null;
+  /** Sent on every keystroke — empty string is normalized to null. */
+  onUpdateProposedStartDate: (value: string | null) => void;
 }
 
 export function Step1CompanyInfo({
   onNext,
   onSaveDraft,
+  proposedStartDate,
+  onUpdateProposedStartDate,
 }: Step1CompanyInfoProps) {
   const { vendor, project, task, bid_package, project_documents } = useBidContext();
   const { toast } = useToast();
+  const requiredStart = !!bid_package.desired_start_date;
 
   async function handleDownload(documentId: string, fileName: string) {
     try {
@@ -75,6 +82,38 @@ export function Step1CompanyInfo({
       </Card>
 
       <ProjectContextPanel project={project} task={task} bidPackage={bid_package} />
+
+      <Card
+        title="Project Timing"
+        subtitle={
+          requiredStart
+            ? 'Required: the project manager has set a target start date for this bid'
+            : 'Optional: when you could realistically begin work'
+        }
+        padding="md"
+      >
+        <FormField
+          label="Proposed start date"
+          htmlFor="proposed-start-date"
+          required={requiredStart}
+          hint={
+            requiredStart
+              ? 'Pre-filled with the desired date; change it if you cannot hit that target.'
+              : 'If you have a target start in mind, share it here.'
+          }
+        >
+          <TextInput
+            type="date"
+            id="proposed-start-date"
+            value={proposedStartDate ?? ''}
+            required={requiredStart}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdateProposedStartDate(v === '' ? null : v);
+            }}
+          />
+        </FormField>
+      </Card>
 
       <Card
         title="Project Documents"

@@ -72,6 +72,10 @@ async def create_bid_package_endpoint(
     }
     if body.instructions is not None:
         payload["instructions"] = body.instructions
+    # Date is serialized to "YYYY-MM-DD" for DB + email context.
+    payload["desired_start_date"] = (
+        body.desired_start_date.isoformat() if body.desired_start_date else None
+    )
 
     try:
         result = await create_bid_package_with_invitations(

@@ -43,6 +43,7 @@ function prefillToHydration(pf: RevisionPrefillResponse) {
   return {
     vendor_notes: pf.vendor_notes,
     total_amount: toNum(pf.total_amount),
+    proposed_start_date: pf.proposed_start_date,
     line_items: pf.line_items.map((li) => ({
       template_item_id: li.template_item_id,
       quantity: toNum(li.quantity),
@@ -59,6 +60,8 @@ function prefillToHydration(pf: RevisionPrefillResponse) {
  * the first error in the list.
  */
 function stepForField(field: string): StepIndex {
+  // Task 8.1.5: proposed_start_date lives on Step 1 alongside vendor info.
+  if (field.startsWith('proposed_start_date')) return 1;
   if (field.startsWith('vendor_notes')) return 3;
   if (field.startsWith('line_items') || field.startsWith('total_amount')) return 2;
   return 2;
@@ -68,7 +71,14 @@ export function BidFormPage() {
   const bidContext = useBidContext();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const form = useBidFormState(bidContext.bid_template);
+  // Seed proposed_start_date with the package's desired_start_date —
+  // calendar-invite prefill (Task 8.1.5). HYDRATE_FROM_DRAFT /
+  // _PREFILL will overwrite this when an existing draft or revision
+  // prefill loads.
+  const form = useBidFormState(
+    bidContext.bid_template,
+    bidContext.bid_package.desired_start_date,
+  );
   const revision = bidContext.revision_context ?? null;
   const isRevision = !!revision;
   const [previouslyUploaded, setPreviouslyUploaded] = useState<
@@ -124,6 +134,7 @@ export function BidFormPage() {
     const { state } = form;
     return {
       vendor_notes: state.companyInfo.vendor_notes,
+      proposed_start_date: state.companyInfo.proposed_start_date,
       total_amount: bidContext.bid_template.is_lump_sum
         ? state.pricing.total_amount
         : computeGrandTotal(state.pricing.line_items),
@@ -434,6 +445,8 @@ export function BidFormPage() {
           <Step1CompanyInfo
             onNext={() => handleNextFromStep(1)}
             onSaveDraft={handleManualSave}
+            proposedStartDate={form.state.companyInfo.proposed_start_date}
+            onUpdateProposedStartDate={form.updateProposedStartDate}
           />
         )}
         {form.state.step === 2 && (

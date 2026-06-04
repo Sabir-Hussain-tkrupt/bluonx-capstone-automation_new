@@ -34,6 +34,8 @@ export interface PortalBidPackage {
   round_number: number;
   deadline: string;
   instructions: string;
+  /** PM-set target start date (Task 8.1.5). ISO date string or null. */
+  desired_start_date: string | null;
 }
 
 export interface PortalTemplateItem {
@@ -72,6 +74,8 @@ export interface BidDraft {
   line_items: BidDraftLineItem[];
   attachment_ids: string[];
   last_saved_at: string;
+  /** Vendor's committed start date (Task 8.1.5). ISO date string or null. */
+  proposed_start_date: string | null;
 }
 
 /**
@@ -118,6 +122,8 @@ export interface RevisionPrefillResponse {
   vendor_notes: string;
   line_items: RevisionPrefillLineItem[];
   attachment_ids: string[];
+  /** Carry the prior submission's proposed_start_date forward (Task 8.1.5). */
+  proposed_start_date: string | null;
 }
 
 /** Metadata for the original submission's attachments (read-only display). */
@@ -205,6 +211,8 @@ export interface BidFormState {
   dirty: boolean;
   companyInfo: {
     vendor_notes: string;
+    /** Vendor's proposed start date (Task 8.1.5). ISO date string or null. */
+    proposed_start_date: string | null;
   };
   pricing: {
     total_amount: number | null;

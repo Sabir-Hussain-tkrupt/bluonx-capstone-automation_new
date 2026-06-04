@@ -40,8 +40,14 @@ def validate_for_submit(
     line_items: list[dict],
     template_items: list[dict],
     is_lump_sum_template: bool,
+    package_has_desired_date: bool = False,
 ) -> list[FieldError]:
-    """Return an empty list if the submission is valid, else field-level errors."""
+    """Return an empty list if the submission is valid, else field-level errors.
+
+    `package_has_desired_date` toggles the timeline rule (Task 8.1.5):
+    when the package has a desired start date, the submission MUST carry
+    a proposed_start_date; otherwise the field is informational.
+    """
     errors: list[FieldError] = []
 
     # 1. vendor_notes length
@@ -50,6 +56,20 @@ def validate_for_submit(
         errors.append(
             FieldError(field="vendor_notes", message="Notes exceed 2000 characters")
         )
+
+    # 1b. proposed_start_date required when package has a desired date
+    if package_has_desired_date:
+        proposed = submission.get("proposed_start_date")
+        if proposed in (None, ""):
+            errors.append(
+                FieldError(
+                    field="proposed_start_date",
+                    message=(
+                        "Proposed start date is required when the package "
+                        "has a desired start date"
+                    ),
+                )
+            )
 
     # 2. total_amount > 0
     total = _as_decimal(submission.get("total_amount"))

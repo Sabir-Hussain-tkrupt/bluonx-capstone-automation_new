@@ -102,6 +102,8 @@ export interface BidPackageDetail {
   deadline: string;
   status: string;
   instructions: string | null;
+  /** PM-set target start date (Task 8.1.5). ISO date string or null. */
+  desired_start_date: string | null;
   bid_template: BidTemplateRef | null;
   documents: BidDocument[];
   invitation_summary: InvitationSummary;
@@ -145,6 +147,8 @@ export interface BidSubmissionDetail {
   total_amount: number | null;
   vendor_notes: string | null;
   submitted_at: string | null;
+  /** Vendor's committed start date (Task 8.1.5). ISO date string or null. */
+  proposed_start_date: string | null;
   vendor_company_name: string | null;
   vendor_contact_name: string | null;
   vendor_contact_email: string | null;
@@ -201,6 +205,8 @@ export interface CreateBidPackageRequest {
   project_document_ids: string[];
   vendor_selections: VendorSelection[];
   instructions?: string;
+  /** Optional PM target start date (Task 8.1.5). ISO date (YYYY-MM-DD). */
+  desired_start_date?: string;
 }
 
 export interface FailedVendor {
@@ -216,6 +222,7 @@ export interface CreateBidPackageResponse {
   failed_vendors: FailedVendor[];
   deadline: string;
   instructions?: string | null;
+  desired_start_date?: string | null;
 }
 
 // ─── Resend Bid Link (POST /v1/bid-invitations/{id}/resend-link) ────
@@ -283,4 +290,6 @@ export interface WizardData {
   documentIds: string[];
   vendorSelections: VendorSelection[];
   instructions: string;
+  /** Optional PM-set desired start date (Task 8.1.5). ISO date or "". */
+  desiredStartDate: string | null;
 }

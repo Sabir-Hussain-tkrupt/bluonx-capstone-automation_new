@@ -73,6 +73,16 @@
                   {{ submitted_at_formatted }}
                 </td>
               </tr>
+              {% if proposed_start_date %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:160px; vertical-align:top;">
+                  Proposed Start:
+                </td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">
+                  {{ proposed_start_date }}
+                </td>
+              </tr>
+              {% endif %}
             </table>
           </td>
         </tr>

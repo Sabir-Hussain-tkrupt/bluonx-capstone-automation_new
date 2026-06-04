@@ -117,6 +117,30 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
         </div>
       </Card>
 
+      {/* Desired Start Date (Task 8.1.5) */}
+      <Card>
+        <div className="p-6">
+          <h3 className="mb-4 text-sm font-semibold text-secondary-900">
+            Desired Start Date
+          </h3>
+          <FormField
+            label="Desired start date"
+            htmlFor="desired-start-date"
+            hint="Optional — target start date you'd like vendors to bid against. Leave blank to keep timing flexible."
+          >
+            <TextInput
+              id="desired-start-date"
+              type="date"
+              value={data.desiredStartDate ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                onUpdate({ desiredStartDate: v === '' ? null : v });
+              }}
+            />
+          </FormField>
+        </div>
+      </Card>
+
       {/* Template Selection */}
       <Card>
         <div className="p-6">

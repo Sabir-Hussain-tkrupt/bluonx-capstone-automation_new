@@ -69,6 +69,11 @@ const SEED_CONTEXT: VendorBidContext = {
     deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     instructions:
       'Please include mobilization as a separate line item. Unit prices should be all-inclusive (labor, equipment, fuel, overhead). Bid must be held firm for 30 days.',
+    // Task 8.1.5: demo target start ~21 days out so the calendar-invite
+    // prefill UX is visible in mock mode.
+    desired_start_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10),
   },
   bid_template: {
     id: 'tpl-grading-001',
@@ -207,6 +212,7 @@ async function createDraft(payload: DraftPayload): Promise<BidDraft> {
     line_items: payload.line_items,
     attachment_ids: payload.attachment_ids,
     last_saved_at: new Date().toISOString(),
+    proposed_start_date: payload.proposed_start_date,
   };
   // eslint-disable-next-line no-console
   console.log('[portalApi:mock] createDraft →', draft);
@@ -222,6 +228,7 @@ async function updateDraft(id: string, payload: DraftPayload): Promise<BidDraft>
     line_items: payload.line_items,
     attachment_ids: payload.attachment_ids,
     last_saved_at: new Date().toISOString(),
+    proposed_start_date: payload.proposed_start_date,
   };
   // eslint-disable-next-line no-console
   console.log('[portalApi:mock] updateDraft →', id, draft);
@@ -294,6 +301,11 @@ async function getRevisionPrefill(
       sort_order: it.sort_order,
     })),
     attachment_ids: ['att-orig-000', 'att-orig-001'],
+    // Mirror the desired_start_date so the revision-prefill UX
+    // demos the carry-forward behavior.
+    proposed_start_date: new Date(Date.now() + 24 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10),
   };
 }
 

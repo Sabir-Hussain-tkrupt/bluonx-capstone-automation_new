@@ -58,6 +58,19 @@ def _format_deadline(deadline_str: str) -> str:
         return deadline_str
 
 
+def _format_date_only(value) -> str:
+    """Format a date / ISO date string as 'September 15, 2026'. None → ''."""
+    if value in (None, ""):
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%B %d, %Y")
+    try:
+        dt = datetime.fromisoformat(str(value))
+        return dt.strftime("%B %d, %Y")
+    except (ValueError, TypeError):
+        return str(value)
+
+
 def _query_one(db, table_name: str, record_id: str | UUID) -> dict | None:
     """Fetch a single record by ID. Returns None if not found or empty."""
     resp = (
@@ -112,6 +125,7 @@ async def create_bid_package_with_invitations(
     bid_template_id = payload["bid_template_id"]
     project_document_ids = payload.get("project_document_ids", [])
     vendor_selections = payload.get("vendor_selections", [])
+    desired_start_date = payload.get("desired_start_date")
 
     # ── 2. Fetch task (if available) ─────────────────────────────────────
     task = _query_one(db, "tasks", task_id)
@@ -238,6 +252,10 @@ async def create_bid_package_with_invitations(
     instructions = payload.get("instructions")
     if instructions is not None:
         bp_row["instructions"] = instructions
+    # Always set desired_start_date so an explicit None overrides any
+    # default the DB might apply; both the column default and the
+    # spec's "NULL = flexible" reading are preserved.
+    bp_row["desired_start_date"] = desired_start_date
     bp_resp = db.table("bid_packages").insert(bp_row).execute()
     bp_data = bp_resp.data
     if isinstance(bp_data, list):
@@ -294,6 +312,10 @@ async def create_bid_package_with_invitations(
     formatted_deadline = _format_deadline(deadline_str)
     task_name = task.get("name", "") if isinstance(task, dict) else ""
     task_description = task.get("description", "") if isinstance(task, dict) else ""
+
+    # Human-format the desired start date for the email; None → "" so the
+    # template's {% if desired_start_date %} branch omits the row cleanly.
+    formatted_desired_start = _format_date_only(desired_start_date)
 
     # ── 10. Create invitations + tokens + send emails ────────────────────
     invitations_sent = 0
@@ -364,6 +386,7 @@ async def create_bid_package_with_invitations(
             "magic_link_url": magic_link_url,
             "pm_name": pm_name,
             "pm_email": pm_email,
+            "desired_start_date": formatted_desired_start,
         }
 
         # Render email templates
@@ -422,6 +445,7 @@ async def create_bid_package_with_invitations(
         "failed_vendors": failed_vendors,
         "deadline": deadline_str,
         "instructions": payload.get("instructions"),
+        "desired_start_date": desired_start_date,
     }
 
 
@@ -564,6 +588,7 @@ async def resend_bid_link(
         "magic_link_url": magic_link_url,
         "pm_name": pm_name,
         "pm_email": pm_email,
+        "desired_start_date": _format_date_only(bid_package.get("desired_start_date")),
     }
 
     html_body = template_renderer.render("bid_invitation.html", context)

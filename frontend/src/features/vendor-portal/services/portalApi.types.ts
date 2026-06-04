@@ -22,6 +22,8 @@ export interface DraftPayload {
   total_amount: number | null;
   line_items: BidDraftLineItem[];
   attachment_ids: string[];
+  /** Vendor's proposed start date (Task 8.1.5). ISO date string or null. */
+  proposed_start_date: string | null;
 }
 
 /**

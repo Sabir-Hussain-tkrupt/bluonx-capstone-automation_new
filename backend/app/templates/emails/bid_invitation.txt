@@ -20,6 +20,9 @@ Scope:       {{ task_name }}
 Details:     {{ task_description }}
 {% endif %}
 Deadline:    {{ bid_deadline }}
+{% if desired_start_date %}
+Desired Start: {{ desired_start_date }}
+{% endif %}
 Bid Format:  {{ bid_format }}
 {% if document_names %}
 Documents:   {{ document_names | length }} file{{ "s" if document_names | length != 1 }} included

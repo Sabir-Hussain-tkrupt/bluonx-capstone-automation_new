@@ -78,6 +78,14 @@ export function Step4Review({
             <dt className="text-xs text-secondary-500">Task</dt>
             <dd className="font-medium text-secondary-900">{task.name}</dd>
           </div>
+          {state.companyInfo.proposed_start_date && (
+            <div>
+              <dt className="text-xs text-secondary-500">Proposed start</dt>
+              <dd className="font-medium text-secondary-900">
+                {state.companyInfo.proposed_start_date}
+              </dd>
+            </div>
+          )}
         </dl>
       </Card>
 

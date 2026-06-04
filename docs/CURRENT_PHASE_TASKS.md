@@ -83,6 +83,39 @@ EXISTS (SELECT 1 FROM bid_packages
 **Scoping note:** This is technically Phase-3 (template management) debt. Doing it as 8.1 is deliberate — it's the invariant Phase 8's comparison rests on, so we pay it down right before leaning on it. Equally valid to log it as a 3.x fix; either way it does not change the work.
 
 ---
+### Task 8.1.5: Timeline Data — Start Dates (precursor to 8.2 scoring) (~6h)
+
+**Why:** The 15% timeline weight (8.2), the Phase 9 start-date pre-award check, and the core "can the vendor actually start on time" promise all assume structured start-date data that was never built into the collection pipeline. This is timeline debt — paid down right before 8.2 leans on it. Free-text `instructions` is not scoreable; a scored dimension must come from a structured field.
+
+**Schema (already applied — DB v2.32):**
+- `bid_packages.desired_start_date DATE` (nullable) — PM-communicated target start for the round. NULL = flexible/none.
+- `bid_submissions.proposed_start_date DATE` (nullable) — vendor's committed start date.
+
+**Model: calendar-invite pattern.** Vendor form pre-fills `proposed_start_date` with the package's `desired_start_date`. Leaving it = "yes, I can hit your date"; changing it to a later date = "no, here's my earliest." The yes/no is *derived* (`proposed <= desired` → on time), never stored separately. "Can't do it at all" = a declined invitation, not a date.
+
+**Locked decisions:**
+- **Start date only.** No duration/end date in MVP (overlaps capacity; defer).
+- **Required-when-present:** `proposed_start_date` is required on submit *when* the package has a `desired_start_date`; optional otherwise. Enforced server-side in `validate_for_submit` (applies to initial *and* revision submit branches).
+- **No-desired-date scoring (8.2):** weights stay constant at 50/5/20/10/15 always; `timeline_score = 100` for every vendor when the package has no desired date (package-wide constant → cancels out of ranking, zero renormalization code). Record `basis: "no_desired_date"` in `scoring_metadata`. *(Consumed by 8.2, not built here.)*
+- **Revision prefill:** carry the vendor's *prior* `proposed_start_date` forward (mirrors `vendor_notes` / `total_amount`); editable.
+
+**Touchpoints:**
+- *Backend models:* `desired_start_date` on bid-package create/update/response models; `proposed_start_date` on submission draft/response models, `PortalBidPackageModel`, and `RevisionPrefillResponse`.
+- *Backend write paths:* persist `desired_start_date` in package create; persist `proposed_start_date` in submission draft create/update (initial + revision share the insert); include in `build_revision_prefill` SELECT + return; include in submission/draft read selects.
+- *Validation:* required-when-desired-present in `validate_for_submit` (both submit branches).
+- *Email:* desired-date row in `bid_invitation` + `bid_revision_request`; proposed-date row in `bid_revision_submitted` (mirrors initial confirmation). Revision *request* endpoint needs no change — date stays pinned to the original package.
+- *Frontend:* PM package form date picker (next to deadline); display in invitation email + `ProjectContextPanel`; proposed-date picker in `Step1CompanyInfo` (pre-filled, required-when-desired-present); plumb through `useBidFormState` (`companyInfo`), `DraftPayload`, `Step4Review`, and the revision prefill path (`RevisionPrefillResponse` type, `prefillToHydration`, `HYDRATE_FROM_PREFILL`).
+
+**Out of scope:** all scoring logic (8.2); end-date/duration; any index/trigger change (none needed).
+
+**Acceptance:**
+- [ ] PM can set an optional desired start date on a bid package; it shows in the invitation email and vendor portal.
+- [ ] Vendor form pre-fills proposed start date from the desired date; editable.
+- [ ] Submit rejects null `proposed_start_date` when the package has a desired date; allows null when it doesn't — initial and revision.
+- [ ] Revision prefill carries the vendor's prior proposed date forward.
+- [ ] Both dates round-trip through draft save, submit, and read endpoints.
+
+---
 
 ### Task 8.2: Weighted Scoring Algorithm (~10h) — 📋 PLANNED (detail in later pass)
 
