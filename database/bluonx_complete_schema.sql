@@ -297,6 +297,7 @@ CREATE TABLE bid_packages (
   round_number  INTEGER       NOT NULL DEFAULT 1,
   deadline      TIMESTAMPTZ   NOT NULL,
   instructions  TEXT,
+  desired_start_date  DATE,
   status        VARCHAR(20)   NOT NULL DEFAULT 'open'
                               CHECK (status IN ('open', 'closed', 'evaluating', 'cancelled')),
 
@@ -309,7 +310,7 @@ CREATE TABLE bid_packages (
 COMMENT ON TABLE  bid_packages              IS 'A bidding round for a task. Multiple rounds via round_number for rebidding. RULE: must not be created for tasks with bid_type = internal (enforced at application layer).';
 COMMENT ON COLUMN bid_packages.round_number IS 'Auto-set by trigger: round 1 = first attempt, round 2 = rebid, etc.';
 COMMENT ON COLUMN bid_packages.instructions IS 'Optional PM-supplied bid-submission instructions shown to vendors in the bid portal and invitation email. Distinct from tasks.description (scope of work). Examples: include mobilization as separate line item, bid held firm for 30 days, unit prices all-inclusive.';
-
+COMMENT ON COLUMN bid_packages.desired_start_date IS 'PM-communicated target start date for this bidding round. NULL = flexible/none; timeline dimension neutralized in scoring when NULL.';
 
 -- Junction: project documents shared with a bid package
 CREATE TABLE bid_package_documents (
@@ -380,6 +381,7 @@ CREATE TABLE bid_submissions (
   is_direct_assign    BOOLEAN       NOT NULL DEFAULT FALSE,
   submitted_at        TIMESTAMPTZ,
   vendor_notes        TEXT,
+  proposed_start_date  DATE,
   supersedes_submission_id UUID    REFERENCES bid_submissions(id) ON DELETE RESTRICT,
   is_superseded       BOOLEAN       NOT NULL DEFAULT FALSE,
   revision_number     INTEGER       NOT NULL DEFAULT 1 CHECK (revision_number >= 1),
@@ -397,7 +399,7 @@ COMMENT ON COLUMN bid_submissions.vendor_id    IS 'Denormalized for query perf. 
 COMMENT ON COLUMN bid_submissions.supersedes_submission_id IS 'Chain pointer to the predecessor submission this row supersedes. NULL = original. RESTRICT delete (audit chain).';
 COMMENT ON COLUMN bid_submissions.is_superseded IS 'TRUE when a newer revision exists. Trigger-maintained by fn_flip_superseded_on_revision_finalize.';
 COMMENT ON COLUMN bid_submissions.revision_number IS 'Human-visible version number. 1 = original. Each revision increments by 1 (enforced by fn_enforce_supersession_chain).';
-
+COMMENT ON COLUMN bid_submissions.proposed_start_date IS 'Vendor''s committed start date. Pre-filled with bid_packages.desired_start_date in the form; required on submit when a desired date exists. proposed <= desired = on time.';
 
 -- Bid line items: pricing breakdown within a submission
 CREATE TABLE bid_line_items (
