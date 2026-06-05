@@ -115,6 +115,14 @@ def test_happy_path_returns_200_with_enriched_cohort(client_factory):
         ):
             assert field in row
 
+    # Task 8.4: recommendation envelope is populated by GET (POST leaves None).
+    rec = body["recommendation"]
+    assert rec is not None
+    assert rec["recommended_bid_submission_id"] == rec["ranking"][0]["bid_submission_id"]
+    assert len(rec["ranking"]) == 3
+    assert [r["rank"] for r in rec["ranking"]] == [1, 2, 3]
+    assert isinstance(rec["justification"], str) and rec["justification"]
+
 
 # ── 2. Live-cohort filter — superseded gate is present in the query ──────
 
@@ -182,6 +190,8 @@ def test_never_computed_returns_200_empty_scores_with_live_count(client_factory)
     assert body["valid_submission_count"] == 3
     assert body["budget_estimate"] == "500000.00"
     assert body["rubric_version"] == "v1.0"
+    # Task 8.4: empty cohort → recommendation is null (frontend renders CTA).
+    assert body["recommendation"] is None
 
 
 # ── 4. No invitations → 200 empty (NOT 422) ──────────────────────────────

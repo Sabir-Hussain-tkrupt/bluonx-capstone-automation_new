@@ -305,13 +305,32 @@ class BidScoreResponse(BluOnXBase):
     vendor_company_name: str | None = None
 
 
+class RankedVendor(BluOnXBase):
+    """One row in the Task 8.4 ranking — pure-derived from a scored cohort."""
+
+    rank: int
+    bid_submission_id: UUID
+    vendor_company_name: str | None = None
+    total_weighted_score: Decimal | None = None
+    this_total: Decimal | None = None
+    warning_flags: list[str] = Field(default_factory=list)
+
+
+class BidRecommendationResponse(BluOnXBase):
+    """Task 8.4: pure-derived verdict over an enriched scored cohort."""
+
+    recommended_bid_submission_id: UUID
+    justification: str
+    ranking: list[RankedVendor]
+
+
 class BidScoreCohortResponse(BluOnXBase):
     """Return shape for POST and GET /bid-packages/{id}/scores.
 
     POST (8.2) leaves the enrichment fields unset; GET (8.3/8.4 seam) populates
-    `budget_estimate` from `tasks.budget_estimate` and the two staleness fields
+    `budget_estimate` from `tasks.budget_estimate`, the two staleness fields
     so the compare page can render "K new bids since last scored" without a
-    second round-trip.
+    second round-trip, and the 8.4 `recommendation` verdict over the cohort.
     """
 
     bid_package_id: UUID
@@ -321,6 +340,7 @@ class BidScoreCohortResponse(BluOnXBase):
     budget_estimate: Decimal | None = None
     valid_submission_count: int | None = None
     latest_submission_at: datetime | None = None
+    recommendation: BidRecommendationResponse | None = None
 
 
 # ── bid_revision_requests ────────────────────────────────────────────────

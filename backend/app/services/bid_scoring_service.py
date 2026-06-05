@@ -487,6 +487,11 @@ async def get_bid_package_scores(
         for sr in score_rows:
             scores.append({**sr, "vendor_company_name": company_name})
 
+    # Lazy import — bid_recommendation_service imports INSURANCE_HORIZON_DAYS
+    # from this module, so a top-level import would be circular.
+    from app.services.bid_recommendation_service import build_recommendation
+    recommendation = build_recommendation(scores, budget_estimate)
+
     return {
         "bid_package_id": bid_package_id_str,
         "rubric_version": RUBRIC_VERSION,
@@ -495,4 +500,5 @@ async def get_bid_package_scores(
         "budget_estimate": budget_estimate,
         "valid_submission_count": len(valid_live),
         "latest_submission_at": latest_submission_at,
+        "recommendation": recommendation,
     }
