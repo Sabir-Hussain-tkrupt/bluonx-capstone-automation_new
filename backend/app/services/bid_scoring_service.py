@@ -374,3 +374,125 @@ async def score_bid_package(
         "cohort_size": cohort_size,
         "scores": manual_rows + upserted,
     }
+
+
+# ── Read seam (Task 8.3/8.4): GET /bid-packages/{id}/scores ──────────────
+
+
+def _empty_scores_response(bid_package_id_str: str, budget_estimate: Any) -> dict:
+    return {
+        "bid_package_id": bid_package_id_str,
+        "rubric_version": RUBRIC_VERSION,
+        "cohort_size": 0,
+        "scores": [],
+        "budget_estimate": budget_estimate,
+        "valid_submission_count": 0,
+        "latest_submission_at": None,
+    }
+
+
+async def get_bid_package_scores(
+    bid_package_id: UUID,
+    *,
+    db: Client,
+) -> dict:
+    """Read persisted weighted scores for a competitive bid package, joined to
+    the live non-superseded cohort. No recompute, no writes.
+
+    Live-cohort join: query `bid_submissions` with `is_superseded=False,
+    is_draft=False, status IN COHORT_STATUSES` and pull the embedded
+    `bid_scores` relation. Score rows for now-superseded / draft / wrong-status
+    submissions are never selected — orphan cleanup happens for free.
+
+    Errors mirror POST's gates: 404 unknown package, 400 non-competitive.
+    Diverges from POST on empty cohort: returns 200 with `scores: []` so the
+    compare page can render its "Compute Rankings" CTA.
+    """
+    bid_package_id_str = str(bid_package_id)
+
+    pkg_resp = (
+        db.table("bid_packages")
+        .select("id, tasks!inner(bid_type, budget_estimate)")
+        .eq("id", bid_package_id_str)
+        .maybe_single()
+        .execute()
+    )
+    pkg = _unwrap_single(pkg_resp.data)
+    if pkg is None:
+        raise BidScoringError(404, "Bid package not found")
+
+    task = pkg.get("tasks") or {}
+    if isinstance(task, list):
+        task = task[0] if task else {}
+    bid_type = task.get("bid_type")
+    if bid_type != "competitive":
+        raise BidScoringError(
+            400,
+            f"Bid package is not competitive (bid_type={bid_type!r}); "
+            "scoring is only meaningful for competitive packages.",
+        )
+    budget_estimate = task.get("budget_estimate")
+
+    inv_resp = (
+        db.table("bid_invitations")
+        .select("id")
+        .eq("bid_package_id", bid_package_id_str)
+        .execute()
+    )
+    invitation_ids = [row["id"] for row in (inv_resp.data or [])]
+    if not invitation_ids:
+        return _empty_scores_response(bid_package_id_str, budget_estimate)
+
+    sub_resp = (
+        db.table("bid_submissions")
+        .select(
+            "id, total_amount, submitted_at,"
+            " vendors!inner(company_name),"
+            " bid_scores(*)"
+        )
+        .in_("bid_invitation_id", invitation_ids)
+        .eq("is_superseded", False)
+        .eq("is_draft", False)
+        .in_("status", list(COHORT_STATUSES))
+        .execute()
+    )
+    live = sub_resp.data or []
+
+    valid_live: list[dict] = []
+    latest_submission_at: str | None = None
+    for s in live:
+        amt = s.get("total_amount")
+        if amt is None:
+            continue
+        try:
+            if Decimal(str(amt)) <= 0:
+                continue
+        except Exception:
+            continue
+        valid_live.append(s)
+        sub_at = s.get("submitted_at")
+        if sub_at and (latest_submission_at is None or sub_at > latest_submission_at):
+            latest_submission_at = sub_at
+
+    scores: list[dict] = []
+    for s in valid_live:
+        vendor = s.get("vendors") or {}
+        if isinstance(vendor, list):
+            vendor = vendor[0] if vendor else {}
+        company_name = vendor.get("company_name")
+
+        score_rows = s.get("bid_scores") or []
+        if isinstance(score_rows, dict):
+            score_rows = [score_rows]
+        for sr in score_rows:
+            scores.append({**sr, "vendor_company_name": company_name})
+
+    return {
+        "bid_package_id": bid_package_id_str,
+        "rubric_version": RUBRIC_VERSION,
+        "cohort_size": len(scores),
+        "scores": scores,
+        "budget_estimate": budget_estimate,
+        "valid_submission_count": len(valid_live),
+        "latest_submission_at": latest_submission_at,
+    }

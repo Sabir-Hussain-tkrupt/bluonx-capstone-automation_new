@@ -200,13 +200,89 @@ idempotency, metadata snapshot; endpoint tested for the three error codes + happ
 
 ---
 
-### Task 8.3: Side-by-Side Comparison UI (~12h) — 📋 PLANNED (detail in later pass)
 
-Responsive comparison table across all submitted bids in a package, sortable by price/score/timeline, color-coded indicators, expandable line-item detail (works *because* the structure is shared — per 8.1), recommended vendor highlighted, print-friendly view, export to Excel/PDF. Builds on the Recharts foundation from Phase 6. *To be specced in detail before implementation.*
+### Task 8.3 / 8.4: Bid Comparison & Recommendation
 
-### Task 8.4: Recommendation Engine (~8h) — 📋 PLANNED (detail in later pass)
+**Build order:** 8.4 logic first (it produces the verdict the page renders), then 8.3 UI on top. They do not overlap — 8.4 decides *what to say*, 8.3 decides *how to show it*. The only seam is the page highlighting 8.4's pick.
 
-Identify the highest-scoring vendor (recommendation only — **never auto-award**, award is 100% manual per Handoff §7.5). Justification report, 2nd/3rd alternatives, warning flags (over budget, late start, missing docs, expired insurance), PM override path with required justification. *To be specced in detail before implementation.*
+---
+
+#### Shared backend seam: enriched `GET /scores`
+
+8.2 left only `POST /bid-packages/{id}/scores` (compute/recompute). 8.3 needs to *read* without recomputing.
+
+**New:** `GET /api/v1/bid-packages/{id}/scores` → returns the persisted scored cohort, read-only, no recalculation.
+- **Joins to the live non-superseded cohort** (`is_superseded = FALSE AND is_draft = FALSE`). Stale score rows for superseded submissions are simply not selected — this is where the orphan-row cleanup (decision #3) lands for free. No cleanup job needed.
+- **Enriched, self-sufficient payload** so the recommendation layer never client-side-joins across arrays:
+  - each row = the existing `BidScoreResponse` fields **+ `vendor_company_name`**
+  - payload level **+ `budget_estimate`** (task budget, constant across cohort; sourced from `tasks.budget_estimate`, which is *not* currently in any payload — add the plumbing here)
+- Empty/never-computed → 200 with empty `scores: []` (not 404) so the page can show its "Compute Rankings" CTA. 404 only for unknown package; 400 non-competitive.
+- POST stays exactly as-is (the deliberate compute lever).
+
+**Staleness signal:** the page compares `scored_at` (max across rows) against submission count / latest submission time to surface "K new bids since last scored." Expose whatever the read needs for that (e.g., current valid-submission count alongside the scores).
+
+---
+
+### Task 8.4: Recommendation Logic (~8h)
+
+**Objective:** A pure recommendation builder over the enriched scored cohort. No UI, no new I/O beyond reading what `GET /scores` already returns. Deterministic, fully unit-testable.
+
+**Input:** the enriched scored cohort (rows with sub-scores, `total_weighted_score`, `scoring_metadata`, `vendor_company_name`) + payload `budget_estimate`.
+
+**Output: a recommendation object:**
+- **Ranking:** all scored vendors ordered by `total_weighted_score` desc; `#1` is the recommended vendor; `#2` / `#3` surfaced as alternatives. Tie-break: lower `this_total` (price) wins; document the rule.
+- **Justification:** a generated string for the #1 pick — plain-language "recommended on overall weighted score (X), lowest price in cohort / strong timeline / etc." Derived from sub-scores, not hand-waved.
+- **Warning flags (per vendor):** derived from `scoring_metadata.inputs` + `budget_estimate`. Four flags:
+  1. **over_budget** — `inputs.this_total > budget_estimate` (skip when budget_estimate NULL).
+  2. **late_start** — `inputs.proposed_start_date > inputs.desired_start_date` (skip when `basis = "no_desired_date"` or either date null). 8.4 recomputes `days_late` from the two stored dates (not stored).
+  3. **insurance_window** — `inputs.insurance_expiration < inputs.deadline`, or expiration within deadline+30d (insurance lapses during/near the work window). NULL expiration → flag.
+  4. **onboarding_incomplete** — `inputs.onboarding_status != 'complete'`. (Labeled "onboarding incomplete," NOT "missing docs" — metadata has only the status enum, not a per-document list. Truthful to the data.)
+
+**Critical framing:** recommendation only, **never auto-award** (Handoff §7.5; award is 100% manual, Phase 9). The justification and flags inform the PM; they do not gate or trigger anything.
+
+**Out of scope / deferred:**
+- Per-document "missing docs" warning (needs vendor-document plumbing; `onboarding_incomplete` covers the MVP need). Log in DEFERRED.md.
+- Manual score adjustment — confirmed NOT built (PM discretion lives at award via Phase 9 `override_justification`; `scored_by` stays the dormant seam). Log in DEFERRED.md.
+
+**Files:** new pure module under `backend/app/services/` (e.g. `bid_recommendation_service.py`); response model under `backend/app/models/`. Surfaced either as a field on the `GET /scores` response or a sibling `GET /bid-packages/{id}/recommendation` — audit and pick the simpler wiring; the recommendation is pure-derived from the same data either way.
+
+**Acceptance:** ranking order + tie-break unit-tested; each of the four flags tested at boundary (over/under budget, on-time/late, insurance before/within/after window, each onboarding status); `no_desired_date` suppresses late_start; NULL budget suppresses over_budget; justification references the actual winning dimensions; lone-bidder cohort recommends the one vendor with no false alternatives.
+
+---
+
+### Task 8.3: Compare / Rankings Route (~12h)
+
+**Objective:** A dedicated PM workspace for side-by-side comparison and the recommendation, reached from the bid package detail page. Renders 8.4's verdict over 8.2's scores.
+
+**Gating (decision #1 — data-driven, deadline is a banner not a gate):**
+- Entry shown when: competitive package + ≥1 valid submitted bid. Available regardless of package status (open / closed / evaluating) and regardless of deadline.
+- Round still open with pending vendors → non-blocking banner: *"Round still open — N of M responded. Rankings shift as bids arrive."*
+- Cancelled or non-competitive → no compare entry.
+- Comparing is non-destructive and stays separate from "Close Bidding" and from awarding.
+
+**Surface (decision #2 — dedicated route, not modal):**
+- New route off `BidPackageDetailPage` (follow `ROUTES` + React Router v6 convention; e.g. `.../bid-packages/:bidPackageId/compare`). "Compare Bids" button mounts in the detail page header action area, next to Close Bidding / Cancel.
+- "View Bid" stays the existing modal (`BidSubmissionDetailModal`). The "Submitted Bid Amounts" bar chart **moves** from the detail page onto this route.
+
+**Scores fetch (decision #3 — GET to read, POST to compute):**
+- On open → `GET /scores`.
+- No scores yet → **"Compute Rankings" CTA** → `POST /scores` → render.
+- Scores exist → render + staleness hint: *"Scored {scored_at} · {K} new bids since"* with a **Recompute** action (`POST`). PM controls when the acknowledged-unstable recompute runs (per 8.2's manual-trigger design).
+
+**Page content:**
+- **Recommendation panel** (top): 8.4's #1 pick highlighted with justification + its warning flags; #2/#3 as alternatives.
+- **Comparison table:** one column/row per submitted vendor — `vendor_company_name`, total, five sub-scores, `total_weighted_score`, proposed start date, warning-flag chips. Sortable by price / total score / timeline. Color-coded indicators (green/amber/red) for flags and score bands. Recommended vendor visually highlighted.
+- **Expandable line items** per vendor (reuse the submission-detail shape; works because the cohort shares one template structure — per 8.1).
+- **Score visualization:** recharts, reusing the Phase 6 scaffold (`BidAmountBarChart` / `SubmissionStatusPie` pattern — named imports, `ResponsiveContainer`, array-of-objects, Tailwind palette).
+- **Deadline banner** when round still open (above).
+
+**Export (confirmed MVP path):** print-friendly stylesheet on the route → browser Print-to-PDF. No export library. (xlsx skill available later if true Excel is wanted; log as possible enhancement.)
+
+**Loading / empty / error:** skeletons on GET; the empty-scores CTA state; graceful non-competitive / cancelled handling; mobile-readable (table → stacked cards on phone width, matching prior responsive pattern).
+
+**Files (audit before assuming):** new route page under `frontend/src/features/bid-packages/` (or wherever the detail page lives); reuse `Modal` only for View Bid; reuse recharts components; new query hook for `GET /scores` + mutation for `POST /scores`; recommendation rendering from 8.4's output.
+
+**Acceptance:** compare entry appears only under the gating rule; route loads via GET with skeleton; empty state shows Compute CTA that POSTs and renders; staleness hint + Recompute work; table sorts and color-codes; recommended vendor highlighted with 8.4 justification + flags; line items expand; recharts viz renders; open-round banner shows when applicable; print-to-PDF produces a clean sheet; superseded submissions never appear (live-cohort join); award is reached separately (no auto-award from this page).
 
 ---
 
