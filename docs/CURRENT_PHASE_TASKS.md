@@ -117,9 +117,88 @@ EXISTS (SELECT 1 FROM bid_packages
 
 ---
 
-### Task 8.2: Weighted Scoring Algorithm (~10h) — 📋 PLANNED (detail in later pass)
+### Task 8.2: Weighted Scoring Engine — 10h
 
-Client-confirmed weights (fixed for MVP): **50% price** (inverse curve, lowest scores highest), **5% compliance** (insurance validity, required docs, onboarding status), **20% past performance** (milestone on-time rate + vendor flag history; new vendors get a neutral baseline), **10% capacity** (active vs max jobs), **15% timeline alignment**. Writes to `bid_scores`; `scored_by` NULL = system-generated, non-NULL = PM-adjusted. Full breakdown + weights snapshotted into `bid_scores.scoring_metadata` (JSONB). Edge cases: new vendors, missing data, mixed item types. *To be specced in detail before implementation.*
+**Objective:** Compute a 0–100 weighted score per bid submission for a competitive
+bid package, persist one `bid_scores` row per submission, and expose a
+compute/recompute endpoint. Scoring is the data layer for the 8.3 comparison UI.
+
+**Engine shape (cohort scorer):**
+Price is relative (needs the whole set); the other four are absolute (per-submission).
+So the unit is one bid package's current submissions, scored together.
+- Five PURE per-dimension functions, each returning a 0–100 float, each independently testable.
+- One orchestrator `score_bid_package(bid_package_id)` that loads the cohort, calls the
+  five functions, applies weights, upserts `bid_scores`, snapshots metadata, returns the set.
+
+**Cohort selection:** submissions on the package where
+`is_superseded = FALSE AND is_draft = FALSE AND status IN ('submitted','under_review')`
+AND `total_amount IS NOT NULL AND total_amount > 0`. Incomplete submissions (null/zero
+total) are excluded — no score row written.
+
+**Run semantics:**
+- Competitive packages ONLY. Reject direct_assign / internal (single/synthetic submission,
+  no competition → meaningless price score).
+- On-demand (PM triggers at/after deadline), not on every submission — each new bid changes
+  every price score, so mid-round scoring is unstable.
+- Idempotent recompute: overwrites system-generated rows. (Manual-adjustment preservation,
+  where `scored_by` is non-NULL, is handled when that feature lands later in Phase 8 — out
+  of scope here; document the seam.)
+
+**Weights (fixed, client-confirmed):** price 0.50, compliance 0.05, performance 0.20,
+capacity 0.10, timeline 0.15. `total_weighted_score = Σ(weight × dimension)`, rounded to
+2 dp, fits `DECIMAL(5,2)`.
+
+**Dimension rubrics:**
+
+- **Price (50%):** `price_score = (lowest_valid_total / this_total) × 100`, clamp ≤ 100.
+  Lone valid bid → 100.
+
+- **Compliance (5%):** mean of two components.
+  - onboarding_status: complete=100, partial=50, pending=0
+  - insurance vs the package `deadline` as horizon:
+    `expiration_date >= deadline + 30d` → 100; `deadline <= expiration_date < deadline + 30d`
+    → 50; expired (`< deadline`) or NULL → 0
+  (Low-variance dimension by design: filter 7.4 + pre-award validation already block expired
+  insurance, so most of the cohort will sit at/near 100. Expected, not a bug.)
+
+- **Performance (20%):** `score_performance(vendor_id)` returns the constant
+  `NEUTRAL_PERFORMANCE_SCORE = 75.0` for now. Real calc (on-time milestone rate + flag
+  history) is Phase 10 — see /docs/DEFERRED.md. Function signature and call site are final;
+  only the body changes later. Today every vendor is unproven → everyone gets 75, which is
+  correct intended behavior.
+
+- **Capacity (10%):** `available = max(max_active_jobs − current_active_jobs, 0)`;
+  `capacity_score = available / max_active_jobs × 100`.
+  - `max_active_jobs` NULL → `NEUTRAL_CAPACITY_SCORE = 75.0` (can't penalize uncollected data)
+  - `max_active_jobs = 0` → 0 (no capacity)
+
+- **Timeline (15%):** `proposed_start_date` (submission) vs `desired_start_date` (package).
+  - package `desired_start_date` NULL → constant 100 for the whole cohort (neutralized; can't
+    shift relative ranking). No weight renormalization for MVP.
+  - else `days_late = proposed − desired`: ≤0 → 100; 1–7 → 75; 8–14 → 50; 15–30 → 25; >30 → 0
+  - desired present but proposed NULL (shouldn't occur — required on submit) → guard to 0
+
+**`scoring_metadata` (JSONB) snapshot per row:** rubric version string, the weights dict used,
+per-dimension raw inputs + computed sub-scores, cohort size, computed_at. Keeps old rows
+interpretable if weights ever change and makes the future manual-adjust path auditable.
+
+**Endpoint:** `POST /v1/bid-packages/{bid_package_id}/scores` → compute + persist + return
+scored cohort. Admin-authed via existing user middleware.
+404 unknown package; 400 non-competitive package; 422 no valid submissions to score.
+
+**Files (audit before assuming):** new scoring module under `backend/app/services/`;
+`bid_scores` Pydantic models under `backend/app/models/`; endpoint on
+`backend/app/routers/bid_packages.py`; tests under `backend/tests/scoring/`.
+Reuses `vendors.insurance_expiration_date`, `vendors.max_active_jobs`,
+`vendors.current_active_jobs`, `vendors.onboarding_status`,
+`bid_submissions.total_amount` / `proposed_start_date`, `bid_packages.deadline` /
+`desired_start_date`.
+
+**Acceptance:** five pure dimension fns unit-tested in isolation incl. every edge case above;
+orchestrator tested for competitive-only gate, cohort filtering, weight math, upsert/recompute
+idempotency, metadata snapshot; endpoint tested for the three error codes + happy path.
+
+---
 
 ### Task 8.3: Side-by-Side Comparison UI (~12h) — 📋 PLANNED (detail in later pass)
 

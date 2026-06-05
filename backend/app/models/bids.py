@@ -304,6 +304,15 @@ class BidScoreResponse(BluOnXBase):
     scored_by: UUID | None = None
 
 
+class BidScoreCohortResponse(BluOnXBase):
+    """Return shape for POST /bid-packages/{id}/scores — Task 8.2."""
+
+    bid_package_id: UUID
+    rubric_version: str
+    cohort_size: int
+    scores: list[BidScoreResponse]
+
+
 # ── bid_revision_requests ────────────────────────────────────────────────
 
 BID_REVISION_REQUEST_STATUSES = Literal[
