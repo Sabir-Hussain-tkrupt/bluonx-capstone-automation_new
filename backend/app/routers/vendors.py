@@ -243,9 +243,17 @@ async def create_vendor(
             detail="At least one contact with an email address is required.",
         )
 
-    # Ensure exactly one primary contact (first contact if none marked)
-    has_primary = any(c.is_primary for c in contacts_data)
-    if not has_primary:
+    # Enforce a single primary contact.
+    #   >1 marked primary  → ambiguous conflict, reject (let the user decide).
+    #   exactly 1          → use it.
+    #   0 marked primary   → auto-promote the first (unambiguous default).
+    primary_count = sum(1 for c in contacts_data if c.is_primary)
+    if primary_count > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only one contact can be marked as primary.",
+        )
+    if primary_count == 0:
         contacts_data[0].is_primary = True
 
     # Build vendor insert data (exclude contacts and trade_ids)
