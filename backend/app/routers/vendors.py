@@ -47,16 +47,22 @@ router = APIRouter()
 
 
 def _get_vendor_or_404(db: Client, vendor_id: UUID) -> dict:
-    """Fetch a vendor by ID, raise 404 if not found or soft-deleted."""
+    """Fetch a vendor by ID, raise 404 if not found or soft-deleted.
+
+    Uses maybe_single(), not single(): PostgREST's single() raises an
+    APIError (PGRST116) on zero rows, which would surface as a 500. With
+    maybe_single() a missing row returns data=None (and the response object
+    itself may be None), which we translate into a clean 404.
+    """
     response = (
         db.table("vendors")
         .select("*")
         .eq("id", str(vendor_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vendor not found",
@@ -579,10 +585,10 @@ async def delete_vendor_contact(
         .select("id, is_primary")
         .eq("id", str(contact_id))
         .eq("vendor_id", str(vendor_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not target.data:
+    if not target or not target.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contact not found",
@@ -866,10 +872,10 @@ async def get_vendor_document_url(
         .select("file_path")
         .eq("id", str(document_id))
         .eq("vendor_id", str(vendor_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not doc_resp.data:
+    if not doc_resp or not doc_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
@@ -895,10 +901,10 @@ async def delete_vendor_document(
         .select("file_path, document_type")
         .eq("id", str(document_id))
         .eq("vendor_id", str(vendor_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not doc_resp.data:
+    if not doc_resp or not doc_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
