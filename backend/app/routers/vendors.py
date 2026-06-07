@@ -70,6 +70,62 @@ def _get_vendor_or_404(db: Client, vendor_id: UUID) -> dict:
     return response.data
 
 
+# ── Helper: block deletion of a vendor with live engagements ─────────────
+#
+# Soft-deleting a vendor preserves every referencing row (all FKs are
+# ON DELETE RESTRICT), so historical involvement — declined/expired
+# invitations, cancelled awards, completed contracts — survives the delete
+# and never needs to block it. Only *active* (in-flight) relationships do:
+# deleting a vendor mid-bid or mid-contract would orphan a live record and
+# make the vendor vanish from pickers while obligations remain.
+_ACTIVE_INVITATION_STATUSES = ("sent", "opened")
+_ACTIVE_SUBMISSION_STATUSES = ("draft", "submitted", "under_review")
+_ACTIVE_AWARD_STATUSES = ("pending_acceptance", "accepted")
+_ACTIVE_CONTRACT_STATUSES = ("draft", "sent_for_signature", "executed", "active")
+
+
+def _count_active(db: Client, table: str, vendor_id: UUID, statuses: tuple[str, ...]) -> int:
+    """Count rows in `table` for this vendor whose status is in `statuses`."""
+    resp = (
+        db.table(table)
+        .select("id", count="exact")
+        .eq("vendor_id", str(vendor_id))
+        .in_("status", list(statuses))
+        .execute()
+    )
+    return resp.count or 0
+
+
+def _assert_vendor_deletable(db: Client, vendor_id: UUID) -> None:
+    """Raise 409 if the vendor has any active engagement in the bid pipeline.
+
+    A vendor whose involvement is entirely terminal (or who has none) can be
+    soft-deleted; its historical rows remain intact for audit.
+    """
+    blockers: list[str] = []
+    checks = (
+        ("bid_invitations", _ACTIVE_INVITATION_STATUSES, "bid invitation"),
+        ("bid_submissions", _ACTIVE_SUBMISSION_STATUSES, "bid submission"),
+        ("awards", _ACTIVE_AWARD_STATUSES, "award"),
+        ("contracts", _ACTIVE_CONTRACT_STATUSES, "contract"),
+    )
+    for table, statuses, label in checks:
+        n = _count_active(db, table, vendor_id, statuses)
+        if n:
+            blockers.append(f"{n} active {label}{'s' if n != 1 else ''}")
+
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete vendor — it has "
+                + ", ".join(blockers)
+                + ". Set the vendor's status to 'inactive' to stop inviting it to "
+                "new bids while preserving these records."
+            ),
+        )
+
+
 # ── Vendors CRUD ─────────────────────────────────────────────────────────
 
 
@@ -421,8 +477,14 @@ async def delete_vendor(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Soft-delete a vendor (sets deleted_at)."""
+    """Soft-delete a vendor (sets deleted_at).
+
+    Blocked with 409 if the vendor has any active engagement (live bid
+    invitation, in-flight submission, pending/accepted award, or active
+    contract). Historical/terminal involvement does not block deletion.
+    """
     _get_vendor_or_404(db, vendor_id)
+    _assert_vendor_deletable(db, vendor_id)
 
     response = (
         db.table("vendors")
