@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
+from pydantic import ValidationError
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ from app.models.vendors import (
     VendorImportError,
     VendorImportRequest,
     VendorImportResponse,
+    VendorImportRow,
     VendorListResponse,
     VendorResponse,
     VendorTradeWithNameResponse,
@@ -285,15 +287,20 @@ async def get_vendor(
     }
 
 
-@router.post("/vendors", response_model=VendorDetailResponse, status_code=status.HTTP_201_CREATED)
-async def create_vendor(
-    vendor: VendorCreate,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """Create a new vendor with contacts and optional trade associations.
+async def _create_vendor_with_contacts(
+    db: Client, vendor: VendorCreate, *, geocode: bool = True
+) -> dict:
+    """Create a vendor with its contacts and trade associations.
 
-    At least one contact with an email address is required.
+    Shared by POST /vendors and POST /vendors/import so both paths enforce
+    identical rules: at least one contact, exactly one primary contact, and
+    every VendorCreate field validation (lengths, EmailStr, enums, decimals).
+    Raises HTTPException(422) on the contact rules or DB rejection; batch
+    callers (import) translate those into per-row errors.
+
+    geocode controls the address→lat/lng lookup. Both create and import pass
+    True so vendors are usable by the distance filter immediately; the flag
+    exists so callers can opt out when coordinates aren't needed.
     """
     contacts_data = vendor.contacts or []
     trade_ids = vendor.trade_ids or []
@@ -331,17 +338,18 @@ async def create_vendor(
         vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
 
     # Auto-geocode if address fields are provided
-    address_fields = (vendor.address, vendor.city, vendor.state, vendor.zip_code)
-    if any(f for f in address_fields):
-        try:
-            lat, lng = await geocode_address(
-                vendor.address, vendor.city, vendor.state, vendor.zip_code,
-            )
-            if lat is not None and lng is not None:
-                vendor_data["latitude"] = str(lat)
-                vendor_data["longitude"] = str(lng)
-        except Exception as exc:
-            logger.warning("Geocoding failed for vendor %s: %s", vendor.company_name, exc)
+    if geocode:
+        address_fields = (vendor.address, vendor.city, vendor.state, vendor.zip_code)
+        if any(f for f in address_fields):
+            try:
+                lat, lng = await geocode_address(
+                    vendor.address, vendor.city, vendor.state, vendor.zip_code,
+                )
+                if lat is not None and lng is not None:
+                    vendor_data["latitude"] = str(lat)
+                    vendor_data["longitude"] = str(lng)
+            except Exception as exc:
+                logger.warning("Geocoding failed for vendor %s: %s", vendor.company_name, exc)
 
     try:
         response = db.table("vendors").insert(vendor_data).execute()
@@ -361,7 +369,7 @@ async def create_vendor(
     new_vendor = response.data[0]
     new_vendor_id = new_vendor["id"]
 
-    # Create contacts if provided
+    # Create contacts
     created_contacts = []
     for contact in contacts_data:
         contact_data = contact.model_dump()
@@ -402,6 +410,19 @@ async def create_vendor(
         "documents": [],
         "flags": [],
     }
+
+
+@router.post("/vendors", response_model=VendorDetailResponse, status_code=status.HTTP_201_CREATED)
+async def create_vendor(
+    vendor: VendorCreate,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Create a new vendor with contacts and optional trade associations.
+
+    At least one contact with an email address is required.
+    """
+    return await _create_vendor_with_contacts(db, vendor, geocode=True)
 
 
 @router.patch("/vendors/{vendor_id}", response_model=VendorResponse)
@@ -1031,66 +1052,96 @@ async def get_vendor_email_log_endpoint(
 # ── CSV Import ───────────────────────────────────────────────────────────
 
 
+def _clean(value: str | None) -> str | None:
+    """Trim a CSV cell; collapse blanks to None so required-field validation
+    fires (e.g. a whitespace-only company_name becomes None → rejected)."""
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _import_row_to_vendor_create(row: VendorImportRow) -> VendorCreate:
+    """Map a CSV row to a VendorCreate, running the full validation suite.
+
+    A contact is built whenever any contact_* cell is present; VendorCreate /
+    VendorContactCreateInline then require both a name and a valid email, so a
+    half-filled contact becomes a row error rather than a silent drop. Rows
+    with no contact cells produce an empty contacts list, which
+    _create_vendor_with_contacts rejects (>=1 contact required).
+
+    Raises pydantic.ValidationError for the caller to convert to a row error.
+    """
+    name = _clean(row.contact_name)
+    email = _clean(row.contact_email)
+    phone = _clean(row.contact_phone)
+    title = _clean(row.contact_title)
+
+    contacts: list[VendorContactCreateInline] = []
+    if any((name, email, phone, title)):
+        contacts.append(
+            VendorContactCreateInline(
+                full_name=name,
+                email=email,
+                phone=phone,
+                title=title,
+                is_primary=True,
+            )
+        )
+
+    return VendorCreate(
+        company_name=_clean(row.company_name),
+        address=_clean(row.address),
+        city=_clean(row.city),
+        state=_clean(row.state),
+        zip_code=_clean(row.zip_code),
+        notes=_clean(row.notes),
+        contacts=contacts,
+    )
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Render a Pydantic ValidationError as a compact, human-readable message."""
+    parts = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err.get("loc", ()) if p != "__root__")
+        parts.append(f"{loc}: {err['msg']}" if loc else err["msg"])
+    return "; ".join(parts) or "Invalid row"
+
+
 @router.post("/vendors/import", response_model=VendorImportResponse)
 async def import_vendors(
     payload: VendorImportRequest,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Bulk import vendors from parsed CSV data."""
+    """Bulk import vendors from parsed CSV data.
+
+    Each row is validated and created through the same path as POST /vendors,
+    so every VendorCreate rule applies (company-name length, >=1 contact,
+    single primary, EmailStr, enum/decimal checks). Failures are reported
+    per row in `errors`; valid rows are still imported (partial success).
+
+    Rows with address fields are geocoded so imported vendors are immediately
+    usable by the distance filter; geocoding failures are non-fatal (the
+    vendor is still created without coordinates).
+    """
     created = 0
     errors: list[dict] = []
 
     for idx, row in enumerate(payload.rows):
         try:
-            vendor_data = {
-                "company_name": row.company_name.strip(),
-                "status": "active",
-                "onboarding_status": "pending",
-            }
-
-            # Add optional fields
-            if row.address:
-                vendor_data["address"] = row.address.strip()
-            if row.city:
-                vendor_data["city"] = row.city.strip()
-            if row.state:
-                vendor_data["state"] = row.state.strip()
-            if row.zip_code:
-                vendor_data["zip_code"] = row.zip_code.strip()
-            if row.notes:
-                vendor_data["notes"] = row.notes.strip()
-
-            vendor_resp = db.table("vendors").insert(vendor_data).execute()
-
-            if not vendor_resp.data:
-                errors.append({"row": idx + 1, "message": "Failed to create vendor"})
-                continue
-
-            new_vendor_id = vendor_resp.data[0]["id"]
-
-            # Create primary contact if contact info provided
-            if row.contact_name and row.contact_email:
-                contact_data: dict = {
-                    "vendor_id": new_vendor_id,
-                    "full_name": row.contact_name.strip(),
-                    "email": row.contact_email.strip(),
-                    "is_primary": True,
-                }
-                if row.contact_phone:
-                    contact_data["phone"] = row.contact_phone.strip()
-                if row.contact_title:
-                    contact_data["title"] = row.contact_title.strip()
-
-                db.table("vendor_contacts").insert(contact_data).execute()
-
+            vendor_create = _import_row_to_vendor_create(row)
+            await _create_vendor_with_contacts(db, vendor_create, geocode=True)
             created += 1
-
-        except Exception as e:
-            error_msg = str(e)
-            if "unique" in error_msg.lower() or "duplicate" in error_msg.lower():
-                errors.append({"row": idx + 1, "message": f"Duplicate vendor: {row.company_name}"})
-            else:
-                errors.append({"row": idx + 1, "message": error_msg[:200]})
+        except ValidationError as exc:
+            errors.append({"row": idx + 1, "message": _format_validation_error(exc)})
+        except HTTPException as exc:
+            errors.append({"row": idx + 1, "message": str(exc.detail)})
+        except APIError as exc:
+            errors.append({"row": idx + 1, "message": (exc.message or str(exc))[:200]})
+        except Exception as exc:  # noqa: BLE001 — last-resort per-row guard
+            logger.exception("Unexpected import failure on row %s", idx + 1)
+            errors.append({"row": idx + 1, "message": str(exc)[:200]})
 
     return VendorImportResponse(created=created, errors=errors)

@@ -212,8 +212,14 @@ class VendorFlagResponse(BluOnXBase):
 
 
 class VendorImportRow(BluOnXBase):
-    """Single row from a CSV import."""
-    company_name: str
+    """Single row from a CSV import.
+
+    Every field is optional at this layer so that a single malformed row
+    (e.g. a missing company_name) does not fail Pydantic validation for the
+    whole request. Per-row validation is performed by mapping each row to a
+    VendorCreate in the import handler, which surfaces failures as row errors.
+    """
+    company_name: str | None = None
     address: str | None = None
     city: str | None = None
     state: str | None = None
