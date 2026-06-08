@@ -293,3 +293,82 @@ export interface WizardData {
   /** Optional PM-set desired start date (Task 8.1.5). ISO date or "". */
   desiredStartDate: string | null;
 }
+
+// ─── Bid Scoring & Recommendation (Task 8.2 / 8.3 / 8.4) ────────────
+
+export type WarningFlagCode =
+  | 'over_budget'
+  | 'late_start'
+  | 'insurance_window'
+  | 'onboarding_incomplete';
+
+export type ScoreDimension =
+  | 'price'
+  | 'compliance'
+  | 'performance'
+  | 'capacity'
+  | 'timeline';
+
+export interface ScoringMetadataInputs {
+  this_total: string | null;
+  lowest_valid_total: string | null;
+  onboarding_status: string | null;
+  insurance_expiration: string | null;
+  deadline: string | null;
+  max_active_jobs: number | null;
+  current_active_jobs: number;
+  proposed_start_date: string | null;
+  desired_start_date: string | null;
+}
+
+export interface ScoringMetadata {
+  rubric_version: string;
+  weights: Record<string, number>;
+  inputs: ScoringMetadataInputs;
+  sub_scores: Record<ScoreDimension, number>;
+  cohort_size: number;
+  computed_at: string;
+  /** Present only when the package has no desired_start_date (Task 8.2). */
+  basis?: 'no_desired_date';
+}
+
+export interface BidScoreRow {
+  id: string;
+  bid_submission_id: string;
+  vendor_company_name: string | null;
+  price_score: string | null;
+  compliance_score: string | null;
+  performance_score: string | null;
+  capacity_score: string | null;
+  timeline_score: string | null;
+  total_weighted_score: string | null;
+  scoring_metadata: ScoringMetadata;
+  scored_at: string | null;
+  scored_by: string | null;
+}
+
+export interface RankedVendor {
+  rank: number;
+  bid_submission_id: string;
+  vendor_company_name: string | null;
+  total_weighted_score: string | null;
+  this_total: string | null;
+  warning_flags: WarningFlagCode[];
+}
+
+export interface BidRecommendation {
+  recommended_bid_submission_id: string;
+  justification: string;
+  ranking: RankedVendor[];
+}
+
+export interface BidScoreCohort {
+  bid_package_id: string;
+  rubric_version: string;
+  cohort_size: number;
+  scores: BidScoreRow[];
+  budget_estimate: string | null;
+  valid_submission_count: number | null;
+  latest_submission_at: string | null;
+  recommendation: BidRecommendation | null;
+}

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
+import { useTask } from '@/features/tasks/hooks/useTask';
 import { useRevisionRequests } from '@/features/bids/hooks/useRevisionRequests';
 import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
@@ -19,7 +20,6 @@ import { RequestRevisionModal } from '@/features/bids/components/RequestRevision
 import { CancelRevisionDialog } from '@/features/bids/components/CancelRevisionDialog';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { SubmissionStatusPie } from '@/features/bids/components/SubmissionStatusPie';
-import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
 import { formatDateOnly } from '@/lib/format';
 import { cn } from '@/utils/cn';
 import type { BidInvitation, BidRevisionRequest } from '@/features/bids/types';
@@ -34,6 +34,7 @@ export function BidPackageDetailPage() {
   const { toast } = useToast();
 
   const { data: bp, isLoading, error } = useBidPackageDetail(bidPackageId!);
+  const { data: task } = useTask(projectId!, taskId!);
   const { data: revisionRequests } = useRevisionRequests(bidPackageId!);
   const { remaining, isPassed } = useCountdown(bp?.deadline ?? '');
 
@@ -177,6 +178,22 @@ export function BidPackageDetailPage() {
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
+          {/* Task 8.3 gate: competitive + ≥1 submitted bid; status/deadline never gate. */}
+          {task?.bid_type === 'competitive' &&
+            bp.submitted_bids.length > 0 &&
+            bp.status !== 'cancelled' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  navigate(
+                    `/projects/${projectId}/tasks/${taskId}/bid-packages/${bidPackageId}/compare`,
+                  )
+                }
+              >
+                Compare Bids
+              </Button>
+            )}
           {isPassed && bp.status === 'open' && (
             <Button variant="outline" size="sm" onClick={() => {/* TODO: close bidding */}}>
               Close Bidding
@@ -279,10 +296,7 @@ export function BidPackageDetailPage() {
         </div>
       </Card>
 
-      {/* Bid Amount Comparison */}
-      {bp.submitted_bids && bp.submitted_bids.length > 0 && (
-        <BidAmountBarChart submittedBids={bp.submitted_bids} />
-      )}
+      {/* Bid Amount Comparison moved to /compare route (Task 8.3). */}
 
       {/* Documents */}
       {bp.documents.length > 0 && (

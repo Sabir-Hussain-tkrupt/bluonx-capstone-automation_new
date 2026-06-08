@@ -29,6 +29,7 @@ from app.services.bid_package_service import (
 )
 from app.services.bid_scoring_service import (
     BidScoringError,
+    get_bid_package_scores,
     score_bid_package,
 )
 from app.services.bid_package_list_service import (
@@ -196,6 +197,24 @@ async def compute_bid_package_scores(
         return await score_bid_package(
             bid_package_id, scored_by=user["user_id"], db=db
         )
+    except BidScoringError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(
+    "/bid-packages/{bid_package_id}/scores",
+    response_model=BidScoreCohortResponse,
+)
+async def read_bid_package_scores(
+    bid_package_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Read persisted weighted scores for a competitive bid package, joined to
+    the live non-superseded cohort. Read-only — no recompute, no writes.
+    Empty/never-computed returns 200 with scores:[]. Task 8.3/8.4 seam."""
+    try:
+        return await get_bid_package_scores(bid_package_id, db=db)
     except BidScoringError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

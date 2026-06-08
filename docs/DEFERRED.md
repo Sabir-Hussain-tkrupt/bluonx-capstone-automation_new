@@ -31,3 +31,20 @@ on-time milestone completion rate (computed from the `milestones` table that shi
 2. Update `backend/tests/scoring/test_dimension_performance.py` — replace the placeholder assertions with real on-time-rate / flag-history cases.
 
 Anything in the engine that depends on this dimension already routes through the constant, so no other call site needs to change.
+
+## Per-document "missing docs" warning (Task 8.4)
+
+Task 8.4's warning-flag set ships with `onboarding_incomplete`, which covers the MVP need: a single signal that the vendor's onboarding paperwork is not fully in place. A finer-grained per-document warning ("missing W-9", "missing COI", etc.) was considered and deferred. It would require:
+
+1. Plumbing the per-document checklist from `vendor_documents` (and the onboarding requirement table that drives it) into `scoring_metadata.inputs` so the recommendation builder can derive truthful per-doc flags.
+2. UI surface in 8.3's flag-chip layer to display N codes per vendor.
+
+`onboarding_incomplete` is intentionally labeled by the *enum status*, not by "missing docs," to stay truthful to the data the metadata snapshot actually carries today. Revisit when vendor-document plumbing reaches the scoring inputs.
+
+## Manual score adjustment (Task 8.4)
+
+The `bid_scores.scored_by` column was provisioned in Phase 8.2 as a dormant seam: NULL means the row is system-generated; non-NULL would mark a manual adjustment. Task 8.4 confirmed it remains dormant for MVP — manual override is **not** built.
+
+Rationale: PM discretion is exercised at award time (Phase 9), where `awards.override_justification` captures the reason for picking against the recommendation. There is no second discretionary lever needed at scoring time, and adding one would split judgment across two surfaces.
+
+If a manual-adjustment write path is ever added, the orchestrator at `backend/app/services/bid_scoring_service.py` already preserves manual rows on recompute (rows where `scored_by IS NOT NULL` are filtered before upsert), so no further change to scoring is required.
