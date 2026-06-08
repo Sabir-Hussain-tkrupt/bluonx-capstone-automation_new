@@ -12,7 +12,7 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, require_admin
 from app.services.geocoding import geocode_address
 from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
@@ -287,6 +287,31 @@ async def get_vendor(
     }
 
 
+def _company_name_exists(db: Client, company_name: str) -> bool:
+    """True if an active (non-deleted) vendor already has this name.
+
+    Case-insensitive exact match. The ilike pattern is the (stripped) name
+    with no wildcards, so it matches whole values case-insensitively; any
+    literal % / _ in the name would be treated as a wildcard by ilike, so we
+    re-check each candidate with a precise normalized comparison in Python to
+    avoid false positives. App-layer only — there is no DB unique constraint.
+    """
+    target = company_name.strip().casefold()
+    if not target:
+        return False
+    resp = (
+        db.table("vendors")
+        .select("company_name")
+        .is_("deleted_at", "null")
+        .ilike("company_name", company_name.strip())
+        .execute()
+    )
+    return any(
+        (r.get("company_name") or "").strip().casefold() == target
+        for r in (resp.data or [])
+    )
+
+
 async def _create_vendor_with_contacts(
     db: Client, vendor: VendorCreate, *, geocode: bool = True
 ) -> dict:
@@ -324,6 +349,16 @@ async def _create_vendor_with_contacts(
         )
     if primary_count == 0:
         contacts_data[0].is_primary = True
+
+    # Reject duplicate company names (case-insensitive) against active vendors.
+    # This covers POST /vendors directly and, because import inserts each row
+    # before the next is processed, also catches in-file duplicates within a
+    # single import batch (row 2's check sees row 1).
+    if _company_name_exists(db, vendor.company_name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A vendor named '{vendor.company_name.strip()}' already exists.",
+        )
 
     # Build vendor insert data (exclude contacts and trade_ids)
     vendor_data = vendor.model_dump(exclude={"contacts", "trade_ids"})
@@ -495,14 +530,16 @@ async def update_vendor(
 @router.delete("/vendors/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_vendor(
     vendor_id: UUID,
-    user: dict = Depends(get_current_active_user),
+    user: dict = Depends(require_admin),
     db: Client = Depends(get_supabase),
 ):
-    """Soft-delete a vendor (sets deleted_at).
+    """Soft-delete a vendor (sets deleted_at). Admin only.
 
-    Blocked with 409 if the vendor has any active engagement (live bid
-    invitation, in-flight submission, pending/accepted award, or active
-    contract). Historical/terminal involvement does not block deletion.
+    Project managers can deactivate a vendor (PATCH status='inactive') but
+    cannot delete one. Blocked with 409 if the vendor has any active
+    engagement (live bid invitation, in-flight submission, pending/accepted
+    award, or active contract). Historical/terminal involvement does not
+    block deletion.
     """
     _get_vendor_or_404(db, vendor_id)
     _assert_vendor_deletable(db, vendor_id)
