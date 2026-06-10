@@ -53,6 +53,31 @@ class AwardResponse(BluOnXBase):
     updated_at: datetime
 
 
+# ── pre-award validation (Task 9.1) ──────────────────────────────────────
+
+CHECK_SEVERITY = Literal["block", "warn", "pass", "skipped"]
+CHECK_STATUS = Literal["pass", "fail", "skipped"]
+
+
+class PreAwardCheck(BluOnXBase):
+    check: str
+    severity: CHECK_SEVERITY
+    status: CHECK_STATUS
+    message: str
+    inputs: dict
+
+
+class PreAwardValidationResult(BluOnXBase):
+    rubric_version: str
+    can_award: bool
+    has_blocking: bool
+    has_warnings: bool
+    requires_override: bool
+    validated_at: str
+    award_amount: Decimal | None = None
+    checks: list[PreAwardCheck]
+
+
 # ── contracts ────────────────────────────────────────────────────────────
 
 CONTRACT_STATUSES = Literal[

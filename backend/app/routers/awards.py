@@ -7,9 +7,43 @@ from supabase import Client
 
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
-from app.models.awards import AwardCreate, AwardResponse, AwardUpdate
+from app.models.awards import (
+    AwardCreate,
+    AwardResponse,
+    AwardUpdate,
+    PreAwardValidationResult,
+)
+from app.services.pre_award_validation_service import (
+    PreAwardError,
+    load_pre_award_context,
+    validate_pre_award,
+)
 
 router = APIRouter()
+
+
+@router.get(
+    "/awards/validate/{bid_submission_id}",
+    response_model=PreAwardValidationResult,
+)
+async def preview_pre_award_validation(
+    bid_submission_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Read-only pre-award validation preview for a candidate submission (Task 9.1).
+
+    Resolves the context server-side from the submission id and returns the
+    structured pass/warn/block result so the PM sees what awarding would flag
+    *before* committing. No side effects, no write. A blocking result is a
+    200 with the block detail (the 422 hard-reject belongs to award-create in
+    9.2/9.5); 404 on an unknown submission.
+    """
+    try:
+        context = await load_pre_award_context(bid_submission_id, db=db)
+    except PreAwardError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return validate_pre_award(context)
 
 
 @router.get("/awards", response_model=list[AwardResponse])
@@ -45,6 +79,10 @@ async def create_award(
     # submission the vendor has since revised. The DB trigger
     # fn_enforce_award_consistency would only catch this with a cryptic
     # message; this gives the PM a clear, actionable error.
+    # The canonical eligibility gate is check_submission_eligibility in
+    # pre_award_validation_service (Task 9.1, which also covers draft /
+    # wrong-status); this guard stays as create-time defense-in-depth.
+    # Full gate enforcement (block → 422, warn → override) lands in 9.2/9.5.
     sub_resp = (
         db.table("bid_submissions")
         .select("id, is_superseded")
