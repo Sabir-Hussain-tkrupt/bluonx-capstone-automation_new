@@ -367,7 +367,7 @@ def validate_pre_award(context: PreAwardContext) -> dict:
 
 
 def _unwrap_single(data: Any) -> dict | None:
-    """PostgREST `.maybe_single()` can return dict, list, or None."""
+    """Pull the first row from a PostgREST result (list, dict, or None)."""
     if data is None:
         return None
     if isinstance(data, list):
@@ -429,9 +429,14 @@ async def load_pre_award_context(
             " projects!inner(estimated_end_date))))"
         )
         .eq("id", str(bid_submission_id))
-        .maybe_single()
+        .limit(1)
         .execute()
     )
+    # .limit(1) returns a (possibly empty) list and never raises on 0 rows —
+    # unlike .maybe_single(), whose 0-row handling depends on a brittle
+    # substring match against PostgREST's error wording and re-raises a
+    # generic APIError (→ 500) when the phrasing doesn't match. Mirrors the
+    # create_award guard's pattern.
     row = _unwrap_single(resp.data)
     if row is None:
         raise PreAwardError(404, "Bid submission not found")
