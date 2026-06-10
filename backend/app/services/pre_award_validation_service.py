@@ -16,8 +16,6 @@ Gate semantics (defined here; ENFORCED at award-create in 9.2/9.5, not here):
   any block  → can_award = false (hard-reject, not overridable)
   any warn   → requires_override = true (PM proceeds with justification)
   pass/skip  → clean award.
-
-Spec: docs/CURRENT_PHASE_TASKS.md Task 9.1.
 """
 
 from __future__ import annotations
