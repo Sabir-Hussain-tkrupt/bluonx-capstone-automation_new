@@ -68,6 +68,12 @@ class _Chain:
         self._single = True
         return self
 
+    def maybe_single(self):
+        # Mirrors single() here; execute() already returns data=None when the
+        # filtered set is empty, which is the maybe_single contract.
+        self._single = True
+        return self
+
     def execute(self):
         out = self._rows
         for kind, col, val in self._filters:

@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import EmailStr, Field
 
 from app.models.common import BluOnXBase
 
@@ -100,7 +100,7 @@ class VendorListResponse(BluOnXBase):
 class VendorContactCreateInline(BluOnXBase):
     """Contact creation when creating a vendor (no vendor_id needed)."""
     full_name: str
-    email: str
+    email: EmailStr
     phone: str | None = None
     title: str | None = None
     is_primary: bool = False
@@ -109,7 +109,7 @@ class VendorContactCreateInline(BluOnXBase):
 class VendorContactCreate(BluOnXBase):
     vendor_id: UUID
     full_name: str
-    email: str
+    email: EmailStr
     phone: str | None = None
     title: str | None = None
     is_primary: bool = False
@@ -117,7 +117,7 @@ class VendorContactCreate(BluOnXBase):
 
 class VendorContactUpdate(BluOnXBase):
     full_name: str | None = None
-    email: str | None = None
+    email: EmailStr | None = None
     phone: str | None = None
     title: str | None = None
     is_primary: bool | None = None
@@ -212,8 +212,14 @@ class VendorFlagResponse(BluOnXBase):
 
 
 class VendorImportRow(BluOnXBase):
-    """Single row from a CSV import."""
-    company_name: str
+    """Single row from a CSV import.
+
+    Every field is optional at this layer so that a single malformed row
+    (e.g. a missing company_name) does not fail Pydantic validation for the
+    whole request. Per-row validation is performed by mapping each row to a
+    VendorCreate in the import handler, which surfaces failures as row errors.
+    """
+    company_name: str | None = None
     address: str | None = None
     city: str | None = None
     state: str | None = None

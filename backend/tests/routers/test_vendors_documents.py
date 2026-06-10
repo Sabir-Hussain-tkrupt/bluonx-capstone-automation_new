@@ -79,6 +79,12 @@ class _Query:
         self._single = True
         return self
 
+    def maybe_single(self):
+        # Same shape as single() for the double; production uses maybe_single
+        # so a missing row returns data=None instead of raising.
+        self._single = True
+        return self
+
     def execute(self):
         return self._fake._resolve(self)
 
