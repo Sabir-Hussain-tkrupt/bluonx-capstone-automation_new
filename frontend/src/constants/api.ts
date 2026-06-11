@@ -67,6 +67,7 @@ export const API_ENDPOINTS = {
   // Awards
   AWARDS: '/awards',
   AWARD: (id: string) => `/awards/${id}`,
+  AWARD_VALIDATE: (bidSubmissionId: string) => `/awards/validate/${bidSubmissionId}`,
 
   // Contracts
   CONTRACTS: '/contracts',

@@ -139,6 +139,8 @@ export const queryKeys = {
         : queryKeys.awards.lists(),
     details: () => [...queryKeys.awards.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.awards.details(), id] as const,
+    validation: (bidSubmissionId: string) =>
+      [...queryKeys.awards.all, 'validation', bidSubmissionId] as const,
   },
 
   contracts: {

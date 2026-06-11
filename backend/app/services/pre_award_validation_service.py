@@ -407,15 +407,17 @@ def _to_decimal(value: Any) -> Decimal | None:
     return Decimal(str(value))
 
 
-async def load_pre_award_context(
+async def fetch_submission_chain_row(
     bid_submission_id: UUID, *, db: Client
-) -> PreAwardContext:
-    """Resolve the full pre-award context from a candidate submission id.
+) -> dict:
+    """Resolve the candidate submission's full chain in one nested PostgREST
+    select: bid_submissions → bid_invitations → bid_packages → tasks → projects
+    plus vendors. Unknown submission → 404 (PreAwardError).
 
-    Walks bid_submissions → bid_invitations → bid_packages → tasks → projects
-    plus vendors in one nested PostgREST select. Unknown submission → 404.
-    (`onboarding_status` is loaded for snapshot completeness but no 9.1 check
-    consumes it.)
+    Returns the raw joined row. The award write path (Task 9.2) reads task id,
+    vendor id and package status off this same row, so the embed carries
+    `tasks.id` and `bid_packages.status` even though no 9.1 check consumes them.
+    (`onboarding_status` is likewise loaded for snapshot completeness.)
     """
     resp = (
         db.table("bid_submissions")
@@ -425,7 +427,7 @@ async def load_pre_award_context(
             " vendors!inner(insurance_expiration_date, bonding_capacity,"
             " max_active_jobs, current_active_jobs, onboarding_status),"
             " bid_invitations!inner(bid_packages!inner(desired_start_date,"
-            " deadline, status, tasks!inner(budget_estimate, project_id,"
+            " deadline, status, tasks!inner(id, budget_estimate, project_id,"
             " projects!inner(estimated_end_date))))"
         )
         .eq("id", str(bid_submission_id))
@@ -440,7 +442,12 @@ async def load_pre_award_context(
     row = _unwrap_single(resp.data)
     if row is None:
         raise PreAwardError(404, "Bid submission not found")
+    return row
 
+
+def context_from_row(row: dict) -> PreAwardContext:
+    """Build the pure validator context from a chain row. No I/O — `today` is
+    injected here so the validator stays deterministically testable."""
     vendor = _embed_one(row.get("vendors"))
     invitation = _embed_one(row.get("bid_invitations"))
     package = _embed_one(invitation.get("bid_packages"))
@@ -462,3 +469,11 @@ async def load_pre_award_context(
         desired_start_date=_parse_date(package.get("desired_start_date")),
         today=date.today(),
     )
+
+
+async def load_pre_award_context(
+    bid_submission_id: UUID, *, db: Client
+) -> PreAwardContext:
+    """Resolve the full pre-award validation context from a submission id."""
+    row = await fetch_submission_chain_row(bid_submission_id, db=db)
+    return context_from_row(row)

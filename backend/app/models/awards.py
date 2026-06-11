@@ -32,6 +32,17 @@ class AwardCreate(BluOnXBase):
     validation_results: dict | None = None
 
 
+class AwardCreateRequest(BluOnXBase):
+    """Task 9.2 award-create payload. Only the candidate submission plus the
+    (optional) override decision come from the client; award_amount, task_id,
+    vendor_id, awarded_by, status and the validation_results snapshot are all
+    derived server-side and never trusted from the request body."""
+
+    bid_submission_id: UUID
+    has_override: bool = False
+    override_justification: str | None = None
+
+
 class AwardUpdate(BluOnXBase):
     status: AWARD_STATUSES | None = None
     override_justification: str | None = None

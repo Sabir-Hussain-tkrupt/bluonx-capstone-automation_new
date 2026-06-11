@@ -7,6 +7,9 @@ import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
 import { useBidPackageScores } from '@/features/bids/hooks/useBidPackageScores';
 import { useComputeBidPackageScores } from '@/features/bids/hooks/useComputeBidPackageScores';
 import { useTask } from '@/features/tasks/hooks/useTask';
+import { useToast } from '@/components/ui/Toast/useToast';
+import { useCreateAward } from '@/features/bids/hooks/useCreateAward';
+import { AwardDialog } from '@/features/bids/components/AwardDialog';
 import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
 import { BidSubmissionDetailModal } from '@/features/bids/components/BidSubmissionDetailModal';
 import { ComparisonTable } from '@/features/bids/components/ComparisonTable';
@@ -50,12 +53,53 @@ export function BidPackageComparePage() {
     error: scoresError,
   } = useBidPackageScores(bidPackageId!);
   const recomputeMutation = useComputeBidPackageScores(bidPackageId!);
+  const { toast } = useToast();
+  const awardMutation = useCreateAward({
+    bidPackageId: bidPackageId!,
+    taskId: taskId!,
+  });
 
   // Sort + UI state.
   const [sortColumn, setSortColumn] = useState<SortColumn>('total');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewSubmissionId, setViewSubmissionId] = useState<string | null>(null);
+  const [awardTarget, setAwardTarget] = useState<{
+    bidSubmissionId: string;
+    vendorName: string;
+  } | null>(null);
+  const [awardError, setAwardError] = useState<string | null>(null);
+
+  const handleAward = (bidSubmissionId: string, vendorName: string) => {
+    setAwardError(null);
+    setAwardTarget({ bidSubmissionId, vendorName });
+  };
+
+  const handleConfirmAward = (args: {
+    has_override: boolean;
+    override_justification?: string;
+  }) => {
+    if (!awardTarget) return;
+    setAwardError(null);
+    awardMutation.mutate(
+      { bid_submission_id: awardTarget.bidSubmissionId, ...args },
+      {
+        onSuccess: () => {
+          toast({
+            variant: 'success',
+            message: `Awarded ${awardTarget.vendorName}.`,
+          });
+          setAwardTarget(null);
+        },
+        onError: (err) => {
+          setAwardError(
+            (err as { message?: string })?.message ||
+              'Failed to create the award. Please try again.',
+          );
+        },
+      },
+    );
+  };
 
   const handleSortChange = (column: SortColumn) => {
     if (column === sortColumn) {
@@ -199,7 +243,10 @@ export function BidPackageComparePage() {
       ) : (
         <>
           {cohort.recommendation && (
-            <RecommendationPanel recommendation={cohort.recommendation} />
+            <RecommendationPanel
+              recommendation={cohort.recommendation}
+              onAward={handleAward}
+            />
           )}
 
           {stalenessHint && (
@@ -220,6 +267,7 @@ export function BidPackageComparePage() {
             expandedId={expandedId}
             onToggleExpand={handleToggleExpand}
             onViewBid={setViewSubmissionId}
+            onAward={handleAward}
           />
 
           {submittedBids.length > 0 && (
@@ -234,6 +282,22 @@ export function BidPackageComparePage() {
         submissionId={viewSubmissionId}
         isOpen={!!viewSubmissionId}
         onClose={() => setViewSubmissionId(null)}
+      />
+
+      <AwardDialog
+        key={awardTarget?.bidSubmissionId ?? 'closed'}
+        bidSubmissionId={awardTarget?.bidSubmissionId ?? null}
+        vendorName={awardTarget?.vendorName ?? 'Vendor'}
+        isOpen={!!awardTarget}
+        onClose={() => {
+          if (!awardMutation.isPending) {
+            setAwardTarget(null);
+            setAwardError(null);
+          }
+        }}
+        onConfirm={handleConfirmAward}
+        isSubmitting={awardMutation.isPending}
+        serverError={awardError}
       />
     </div>
   );
