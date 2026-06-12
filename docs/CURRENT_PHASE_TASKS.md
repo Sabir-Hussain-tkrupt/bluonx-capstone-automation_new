@@ -151,9 +151,74 @@ This is exactly what `awards.validation_results` stores at award time and what 9
 
 ---
 
-### Task 9.2: Override Workflow (~4h) — summary
+### Task 9.2: Award-Create + Validation Override Gate (~4h)
 
-PM proceeds past `warn`-severity checks with a required justification. Warning dialog renders the 9.1 result (each warn check + message); on confirm, award-create stores `has_override = TRUE`, non-empty `override_justification`, and the full 9.1 result snapshot into `awards.validation_results` (JSONB). Award-create **hard-rejects (422)** any `block`-severity result regardless of override. Override history is the audit trail (no separate table — it lives on the award row). *Depends on 9.1's gate semantics.*
+**Objective:** Build the real award-create write path (the first writer to `awards`) with the 9.1 validation result as its gate. The PM may proceed past `warn`-severity checks with a required justification; `block`-severity checks are never overridable. This task writes the award row at `pending_acceptance` and stops — no DocuSign envelope, no email, no contract (those are 9.3–9.6). **9.2 does not depend on any of the open DocuSign decisions and is shippable now.**
+
+> **Locked decision — `has_override` means *validation* override only.** Awarding a vendor who isn't the top-scored recommendation (8.4) is a free PM choice: it sets nothing, requires no justification, and is recorded only implicitly by which `bid_submission_id` won. `has_override = TRUE` means exactly one thing: *the PM knowingly accepted a flagged validation `warn`.* Rationale: the recommendation is a **ranking**, validation is a **risk gate** — conflating them would muddy the audit signal. (8.4 persists nothing — verified — so there is no collision; 9.2 is the clean first writer to `awards`.)
+
+**Backend — award-create write path (makes the `create_award` 501 stub real, `routers/awards.py:37-89`):**
+
+Request payload (extends existing `AwardCreate`): `{ bid_submission_id, has_override?, override_justification? }`. Everything else is **server-derived, never trusted from the client**:
+- `award_amount` = the candidate submission's `total_amount`
+- `task_id` / `vendor_id` = resolved from the submission chain (the existing consistency triggers enforce this anyway)
+- `awarded_by` = authenticated user; `status` = `pending_acceptance`
+
+Gate logic (server is the final truth — **re-runs 9.1 fresh**, never trusts a client-supplied validation snapshot):
+```
+result = validate_pre_award(load_context(bid_submission_id))   # recompute server-side
+if result.has_blocking:                       → 422, return the block detail (not overridable)
+if result.has_warnings:
+    if not has_override or not override_justification.strip():
+                                              → 422, return the full result (forces the dialog)
+    has_override_final = TRUE
+else:
+    has_override_final = FALSE                # no warnings ⇒ override is a no-op even if client sent it
+INSERT award( status=pending_acceptance, award_amount=<submission.total_amount>,
+              has_override=has_override_final,
+              override_justification = <justification if has_override_final else NULL>,
+              validation_results = <result snapshot>, awarded_by=<user> )
+UPDATE tasks SET status='awarded' WHERE id=<task_id>
+```
+- **`has_override` is never TRUE when no warnings existed**, regardless of what the client sent — the server decides.
+- `validation_results` (JSONB) is snapshotted on **every** award, clean or not, so the audit record always shows the state at award time (self-describing per-check `inputs`, same principle as `bid_scores.scoring_metadata`).
+- **Atomic:** award INSERT + task status update in one transaction.
+
+Preconditions (structural, before the gate):
+- submission not found → `404`.
+- the submission's bid package status must be `closed` or `evaluating` — awarding from an `open` package (bidding still live) or `cancelled` → `422`. *(Sensible default; drop if you don't want a package-status gate.)*
+- second active award on the same task → the partial unique index `idx_awards_one_active_per_task` fires; **surface it as a clean `409`, not a `500`.**
+- ineligible submission (superseded/draft/wrong-status) needs no separate guard — it already returns via `result.has_blocking` (the 9.1 `submission_eligibility` block). This **subsumes** the old `awards.py:48-63` superseded `409` guard; replace it with the validator-driven path (keep a hard transaction-level guard for defense-in-depth).
+
+**Frontend — award action + override dialog:**
+- An **Award** action per vendor in the comparison UI (`RecommendationPanel.tsx` / the comparison table row in `BidPackageComparePage.tsx`). Wire up the unused `AWARDS` / `AWARD(id)` constants (`constants/api.ts:67-69`).
+- On click → fetch `GET /awards/validate/{bid_submission_id}` (the 9.1 preview) and render the dialog:
+  - `block` checks → red, **confirm disabled** (cannot award).
+  - `warn` checks → amber, with a **required justification textarea** (confirm disabled until non-empty).
+  - `pass` / `skipped` → muted.
+  - all clean → confirm enabled, no justification field.
+- Confirm → `POST /awards` → on success, **invalidate** the package scores / package / task React Query keys (mutation-invalidation convention — no polling). The existing `is_awarded` read flag (`types.ts:90`, `InvitationsTable.tsx:145`) already hides "Request Revision" once awarded, so that surface updates for free.
+- Reuse existing modal/dialog + form components (Phase 2 library).
+
+**Audit trail (reframe — no separate table):** the plan says "override history logging for audit trail." There is **no separate override-history table** and we add none. The award row *is* the immutable audit record: `has_override`, `override_justification`, the `validation_results` JSONB snapshot, `awarded_by`, `awarded_at`. Re-awards (after a cancel/decline) leave the prior award row in place — the partial unique index permits historical `declined_by_vendor`/`cancelled` rows — so the table naturally carries award history.
+
+**Vendor-facing gap (expected, not a bug):** between 9.2 and 9.3/9.4 an awarded vendor receives no notification — award-create only writes the internal row. The signing link + award email are 9.3/9.4.
+
+**Files (audit before assuming):** make `create_award` real in `backend/app/routers/awards.py`; new `backend/app/services/award_service.py` (write path + gate, calls the 9.1 validator); reuse `PreAwardValidationResult`; frontend award button + dialog under `frontend/src/features/bids/`; tests under `backend/tests/awards/`.
+
+**Out of scope:** DocuSign/envelope (9.3), award email (9.4), contract row (9.5), declines (9.6), acceptance transition (`pending_acceptance → accepted`, which is driven by the signing webhook per open decision #1). No schema change.
+
+**Acceptance (9.2):**
+- [ ] `create_award` writes a real award row; server recomputes 9.1 validation and **never** trusts a client-supplied `validation_results`.
+- [ ] `block` → 422 (non-overridable, returns block detail); `warn` without justification → 422 (returns full result); `warn` + non-empty justification → award written with `has_override=TRUE` + justification + snapshot; all-clean → award written with `has_override=FALSE` + snapshot.
+- [ ] `has_override` is never TRUE when no warnings existed, regardless of client input.
+- [ ] Award status = `pending_acceptance`; `tasks.status → 'awarded'`; both in one transaction.
+- [ ] `award_amount` derived server-side from the submission; `awarded_by` = authenticated user.
+- [ ] Second active award on the same task → clean `409` (not 500); package-status precondition enforced.
+- [ ] Old superseded `409` guard reconciled into the validator's eligibility block.
+- [ ] Awarding a non-top-ranked vendor requires nothing extra and sets no override fields.
+- [ ] Frontend: award button + dialog renders the validation result; justification required **only** when warnings present; confirm disabled on blocks; success invalidates the relevant React Query keys.
+- [ ] No envelope, email, or contract created; no schema change.
 
 ### Task 9.3: DocuSign Integration (~10h) — summary
 

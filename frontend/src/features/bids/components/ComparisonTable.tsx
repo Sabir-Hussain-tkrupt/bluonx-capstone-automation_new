@@ -30,6 +30,8 @@ export interface ComparisonTableProps {
   expandedId: string | null;
   onToggleExpand: (id: string) => void;
   onViewBid: (submissionId: string) => void;
+  /** Award this vendor's submission (Task 9.2). Omit to hide the action. */
+  onAward?: (submissionId: string, vendorName: string) => void;
 }
 
 const DIMENSION_COLUMNS: { key: ScoreDimension; label: string }[] = [
@@ -58,6 +60,7 @@ export function ComparisonTable({
   expandedId,
   onToggleExpand,
   onViewBid,
+  onAward,
 }: ComparisonTableProps) {
   const rankByIdx = buildRankIndex(ranking);
   const sorted = [...scores].sort(compareBy(sortColumn, sortDirection));
@@ -77,6 +80,15 @@ export function ComparisonTable({
                 isRecommended={isRecommended}
                 onViewBid={() => onViewBid(row.bid_submission_id)}
                 onToggleExpand={() => onToggleExpand(row.bid_submission_id)}
+                onAward={
+                  onAward
+                    ? () =>
+                        onAward(
+                          row.bid_submission_id,
+                          row.vendor_company_name ?? 'Vendor',
+                        )
+                    : undefined
+                }
                 isExpanded={expandedId === row.bid_submission_id}
               />
               {expandedId === row.bid_submission_id && (
@@ -218,13 +230,29 @@ export function ComparisonTable({
                       )}
                     </td>
                     <td className="px-3 py-3 text-right" data-no-print>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onViewBid(row.bid_submission_id)}
-                      >
-                        View Bid
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onViewBid(row.bid_submission_id)}
+                        >
+                          View Bid
+                        </Button>
+                        {onAward && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              onAward(
+                                row.bid_submission_id,
+                                row.vendor_company_name ?? 'Vendor',
+                              )
+                            }
+                          >
+                            Award
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                   {isExpanded && (
@@ -360,6 +388,7 @@ function MobileVendorCard({
   isExpanded,
   onViewBid,
   onToggleExpand,
+  onAward,
 }: {
   row: BidScoreRow;
   ranked?: RankedVendor;
@@ -367,6 +396,7 @@ function MobileVendorCard({
   isExpanded: boolean;
   onViewBid: () => void;
   onToggleExpand: () => void;
+  onAward?: () => void;
 }) {
   return (
     <div
@@ -427,9 +457,16 @@ function MobileVendorCard({
         >
           {isExpanded ? 'Hide line items' : 'Show line items'}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onViewBid}>
-          View Bid
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={onViewBid}>
+            View Bid
+          </Button>
+          {onAward && (
+            <Button variant="primary" size="sm" onClick={onAward}>
+              Award
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

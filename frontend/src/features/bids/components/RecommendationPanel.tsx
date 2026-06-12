@@ -1,4 +1,5 @@
 import { cn } from '@/utils/cn';
+import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/format';
 import type { BidRecommendation, RankedVendor } from '@/features/bids/types';
 import { parseDecimal } from '@/features/bids/utils/score-display';
@@ -6,6 +7,8 @@ import { WarningFlagChip } from './WarningFlagChip';
 
 export interface RecommendationPanelProps {
   recommendation: BidRecommendation;
+  /** Award a vendor's submission (Task 9.2). Omit to hide the action. */
+  onAward?: (submissionId: string, vendorName: string) => void;
 }
 
 /**
@@ -14,7 +17,10 @@ export interface RecommendationPanelProps {
  *  - Alternatives (#2/#3) — compact rows. Hidden for lone-bidder cohorts so we
  *    don't fabricate fake alternatives (task acceptance: "no false alternatives").
  */
-export function RecommendationPanel({ recommendation }: RecommendationPanelProps) {
+export function RecommendationPanel({
+  recommendation,
+  onAward,
+}: RecommendationPanelProps) {
   const ranking = recommendation.ranking;
   if (ranking.length === 0) return null;
 
@@ -65,6 +71,22 @@ export function RecommendationPanel({ recommendation }: RecommendationPanelProps
             {winner.warning_flags.map((code) => (
               <WarningFlagChip key={code} code={code} />
             ))}
+          </div>
+        )}
+        {onAward && (
+          <div className="mt-4 flex justify-end" data-no-print>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() =>
+                onAward(
+                  winner.bid_submission_id,
+                  winner.vendor_company_name ?? 'Top-ranked vendor',
+                )
+              }
+            >
+              Award {winner.vendor_company_name ?? 'this vendor'}
+            </Button>
           </div>
         )}
       </div>

@@ -1,0 +1,261 @@
+"""
+Task 9.2 — award-create write path + validation override gate.
+
+The server recomputes the 9.1 validation fresh (never trusts a client snapshot)
+and gates the write:
+
+  block            → 422 (returns the result; not overridable)
+  warn + no/blank justification → 422 (returns the full result; forces the dialog)
+  warn + justification          → 201, has_override=TRUE  + snapshot
+  all clean                     → 201, has_override=FALSE + snapshot
+
+Plus structural preconditions: 404 unknown submission, 422 wrong package status,
+409 second active award per task. award_amount / task_id / vendor_id / awarded_by
+are server-derived — the request carries only the submission + override fields.
+"""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+from postgrest.exceptions import APIError
+
+from .conftest import PM_USER_ID, SUBMISSION_ID, TASK_ID, VENDOR_ID, award_body
+
+URL = "/api/v1/awards"
+
+
+# ── Row builders ─────────────────────────────────────────────────────────
+
+
+def chain_row(
+    *,
+    is_superseded: bool = False,
+    is_draft: bool = False,
+    status: str = "submitted",
+    total_amount: str | None = "50000.00",
+    package_status: str = "closed",
+    budget_estimate: str | None = "50000.00",
+    insurance_expiration: str | None = "2099-12-31",
+    bonding_capacity: str | None = "100000.00",
+    max_active_jobs: int | None = 10,
+    current_active_jobs: int = 1,
+    desired_start_date: str | None = None,
+    proposed_start_date: str | None = None,
+    estimated_end_date: str | None = None,
+) -> dict:
+    """The nested bid_submissions → … → projects row the 9.1 loader selects.
+    Defaults are an all-clean, awardable candidate on a `closed` package."""
+    return {
+        "total_amount": total_amount,
+        "proposed_start_date": proposed_start_date,
+        "vendor_id": str(VENDOR_ID),
+        "is_draft": is_draft,
+        "is_superseded": is_superseded,
+        "status": status,
+        "is_direct_assign": False,
+        "vendors": {
+            "insurance_expiration_date": insurance_expiration,
+            "bonding_capacity": bonding_capacity,
+            "max_active_jobs": max_active_jobs,
+            "current_active_jobs": current_active_jobs,
+            "onboarding_status": "approved",
+        },
+        "bid_invitations": {
+            "bid_packages": {
+                "desired_start_date": desired_start_date,
+                "deadline": "2099-01-01",
+                "status": package_status,
+                "tasks": {
+                    "id": str(TASK_ID),
+                    "budget_estimate": budget_estimate,
+                    "project_id": str(uuid4()),
+                    "projects": {"estimated_end_date": estimated_end_date},
+                },
+            },
+        },
+    }
+
+
+def award_row(**over) -> dict:
+    """A canned, fully-populated awards row for the insert to read back
+    (satisfies AwardResponse). Server-derived values asserted via the recorded
+    insert payload, not this echo."""
+    now = "2026-06-11T00:00:00+00:00"
+    row = {
+        "id": str(uuid4()),
+        "task_id": str(TASK_ID),
+        "bid_submission_id": str(SUBMISSION_ID),
+        "vendor_id": str(VENDOR_ID),
+        "awarded_by": str(PM_USER_ID),
+        "awarded_at": now,
+        "award_amount": "50000.00",
+        "has_override": False,
+        "override_justification": None,
+        "validation_results": {},
+        "status": "pending_acceptance",
+        "created_at": now,
+        "updated_at": now,
+    }
+    row.update(over)
+    return row
+
+
+def clean_spec(**chain_over) -> dict:
+    return {
+        "bid_submissions": {"select": [chain_row(**chain_over)]},
+        "awards": {"insert": [award_row()]},
+        "tasks": {"default": []},
+    }
+
+
+# ── All-clean → 201, has_override=FALSE + snapshot ───────────────────────
+
+
+def test_clean_award_writes_pending_acceptance(recording_client_factory):
+    c, calls = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 201
+
+    inserted = calls["awards"]["insert"][0]
+    assert inserted["status"] == "pending_acceptance"
+    assert inserted["has_override"] is False
+    assert inserted["override_justification"] is None
+    # Server-derived, never from the client body.
+    assert inserted["award_amount"] == "50000.00"
+    assert inserted["task_id"] == str(TASK_ID)
+    assert inserted["vendor_id"] == str(VENDOR_ID)
+    assert inserted["awarded_by"] == str(PM_USER_ID)
+    # Snapshot stored on every award, clean or not.
+    snap = inserted["validation_results"]
+    assert snap["has_blocking"] is False and snap["has_warnings"] is False
+    assert snap["rubric_version"] == "preaward-v1"
+
+    # tasks.status flipped to awarded in the same flow.
+    assert calls["tasks"]["update"][0] == {"status": "awarded"}
+
+
+def test_clean_award_ignores_client_supplied_override(recording_client_factory):
+    """has_override is never TRUE when no warnings existed, regardless of input."""
+    c, calls = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body(has_override=True, override_justification="n/a"))
+    assert r.status_code == 201
+    inserted = calls["awards"]["insert"][0]
+    assert inserted["has_override"] is False
+    assert inserted["override_justification"] is None
+
+
+# ── warn → override gate ─────────────────────────────────────────────────
+
+
+def _warn_spec(**over) -> dict:
+    # budget_estimate well below the award amount → budget_variance WARN.
+    return clean_spec(budget_estimate="10000.00", **over)
+
+
+def test_warn_without_justification_returns_422_with_result(client_factory):
+    c = client_factory(_warn_spec())
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["requires_override"] is True
+    assert detail["has_warnings"] is True
+    assert detail["has_blocking"] is False
+    assert detail["can_award"] is True
+
+
+def test_warn_blank_justification_returns_422(client_factory):
+    c = client_factory(_warn_spec())
+    r = c.post(URL, json=award_body(has_override=True, override_justification="   "))
+    assert r.status_code == 422
+    assert r.json()["detail"]["requires_override"] is True
+
+
+def test_warn_with_justification_writes_override(recording_client_factory):
+    c, calls = recording_client_factory(_warn_spec())
+    r = c.post(
+        URL,
+        json=award_body(has_override=True, override_justification="Renewal in hand"),
+    )
+    assert r.status_code == 201
+    inserted = calls["awards"]["insert"][0]
+    assert inserted["has_override"] is True
+    assert inserted["override_justification"] == "Renewal in hand"
+    assert inserted["validation_results"]["has_warnings"] is True
+
+
+# ── block → 422 (non-overridable), no write ──────────────────────────────
+
+
+def test_block_superseded_returns_422(recording_client_factory):
+    c, calls = recording_client_factory(clean_spec(is_superseded=True))
+    r = c.post(URL, json=award_body(has_override=True, override_justification="x"))
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["has_blocking"] is True
+    assert detail["can_award"] is False
+    elig = next(c for c in detail["checks"] if c["check"] == "submission_eligibility")
+    assert elig["severity"] == "block"
+    # Block short-circuits before any write.
+    assert "awards" not in calls
+
+
+def test_block_draft_returns_422(client_factory):
+    c = client_factory(clean_spec(is_draft=True))
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    assert r.json()["detail"]["has_blocking"] is True
+
+
+def test_block_wrong_status_returns_422(client_factory):
+    c = client_factory(clean_spec(status="rejected"))
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    assert r.json()["detail"]["has_blocking"] is True
+
+
+def test_block_expired_insurance_returns_422(client_factory):
+    c = client_factory(clean_spec(insurance_expiration="2000-01-01"))
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    ins = next(c for c in detail["checks"] if c["check"] == "insurance_validity")
+    assert ins["severity"] == "block"
+
+
+# ── Structural preconditions ─────────────────────────────────────────────
+
+
+def test_submission_not_found_returns_404(client_factory):
+    c = client_factory({"bid_submissions": {"select": []}})
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 404
+
+
+def test_open_package_returns_422_precondition(recording_client_factory):
+    c, calls = recording_client_factory(clean_spec(package_status="open"))
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    # Precondition message is a plain string, not the validation result.
+    assert isinstance(r.json()["detail"], str)
+    assert "awards" not in calls
+
+
+def test_cancelled_package_returns_422_precondition(client_factory):
+    c = client_factory(clean_spec(package_status="cancelled"))
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    assert isinstance(r.json()["detail"], str)
+
+
+def test_second_active_award_returns_clean_409(client_factory):
+    spec = clean_spec()
+    spec["awards"] = {
+        "insert": APIError(
+            {"code": "23505", "message": "duplicate key value violates unique constraint"}
+        )
+    }
+    c = client_factory(spec)
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 409
+    assert isinstance(r.json()["detail"], str)

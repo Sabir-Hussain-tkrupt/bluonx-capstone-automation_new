@@ -372,3 +372,55 @@ export interface BidScoreCohort {
   latest_submission_at: string | null;
   recommendation: BidRecommendation | null;
 }
+
+// ── Pre-award validation (Task 9.1 result / 9.2 override gate) ────────────
+
+export type PreAwardSeverity = 'block' | 'warn' | 'pass' | 'skipped';
+export type PreAwardCheckStatus = 'pass' | 'fail' | 'skipped';
+
+/** One validation check. `inputs` is a self-describing raw blob — kept open. */
+export interface PreAwardCheck {
+  check: string;
+  severity: PreAwardSeverity;
+  status: PreAwardCheckStatus;
+  message: string;
+  inputs: Record<string, unknown>;
+}
+
+/** Byte-compatible with the backend PreAwardValidationResult / the
+ *  awards.validation_results snapshot. Returned by GET /awards/validate/{id}
+ *  and echoed in the 422 body when the override gate trips. */
+export interface PreAwardValidationResult {
+  rubric_version: string;
+  can_award: boolean;
+  has_blocking: boolean;
+  has_warnings: boolean;
+  requires_override: boolean;
+  validated_at: string;
+  award_amount: string | null;
+  checks: PreAwardCheck[];
+}
+
+/** POST /awards request body (Task 9.2). award_amount / task_id / vendor_id are
+ *  server-derived; only the submission + override decision come from the PM. */
+export interface CreateAwardPayload {
+  bid_submission_id: string;
+  has_override?: boolean;
+  override_justification?: string;
+}
+
+export interface Award {
+  id: string;
+  task_id: string;
+  bid_submission_id: string;
+  vendor_id: string;
+  awarded_by: string;
+  awarded_at: string;
+  award_amount: string;
+  has_override: boolean;
+  override_justification: string | null;
+  validation_results: PreAwardValidationResult | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
