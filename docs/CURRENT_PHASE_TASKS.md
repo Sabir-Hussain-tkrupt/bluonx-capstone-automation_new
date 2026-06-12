@@ -220,9 +220,53 @@ Preconditions (structural, before the gate):
 - [ ] Frontend: award button + dialog renders the validation result; justification required **only** when warnings present; confirm disabled on blocks; success invalidates the relevant React Query keys.
 - [ ] No envelope, email, or contract created; no schema change.
 
-### Task 9.3: DocuSign Integration (~10h) — summary
+### Task 9.3a: DocuSign Auth + Client Foundation (~4h)
 
-JWT Grant auth against the **DocuSign developer sandbox**; production account connection deferred to go-live (Phase 12). DocuSign client (RSA key, JWT consent, token caching), envelope create/send, signer config, and a **new** envelope-status webhook (separate from the SES/SNS `webhooks.py`) that updates `docusign_envelopes.status` + `webhook_payload` and drives contract status. **Reframe:** the plan assumes a DocuSign account is in hand — it is not; we build the envelope/tab plumbing against a sandbox placeholder. *Blocked on open decisions #1–#4 below.*
+**Objective:** Stand up the DocuSign client and **JWT Grant** authentication so the rest of Phase 9 has an authenticated `ApiClient` to build on. This layer is **decision-independent** — it doesn't care who signs or what the document is — so it ships now while 9.3b waits on decisions #1–#3.
+
+> **Locked decision — JWT Grant (impersonation), not Authorization Code.** BluOnX is an unattended service integration: the *sender* is the organization (BluOnX/Capstone), envelopes are sent by backend automation with no human at a consent screen, and vendors sign by email without DocuSign logins. DocuSign's own rule: a single app-wide DocuSign login ⇒ JWT Grant; per-user interactive logins ⇒ Auth Code. The "DocuSign recommends Auth Code" line is scoped to *user-present* apps and doesn't apply here. (Full reasoning in chat, June 9.)
+
+**SDK:** the official `docusign-esign` Python client. Its calls are **synchronous** (blocking `requests` under the hood) — wrap token mint and all later envelope calls in a threadpool (`anyio.to_thread.run_sync` / `run_in_executor`) so they don't block the FastAPI event loop. Add `docusign-esign` to backend deps.
+
+**Two hosts (don't conflate):**
+- **OAuth host** (token mint + consent) — sandbox constant `account-d.docusign.com`. New env: `DOCUSIGN_OAUTH_BASE_URL`.
+- **REST base** (API calls) — `{DOCUSIGN_ACCOUNT_BASE_URL}/restapi` (e.g. `https://demo.docusign.net/restapi`).
+
+**Config additions (`core/config.py`)** — existing: `DOCUSIGN_ACCOUNT_ID`, `DOCUSIGN_USER_ID`, `DOCUSIGN_ACCOUNT_BASE_URL`, `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_PRIVATE_KEY_PATH`. Add: `DOCUSIGN_OAUTH_BASE_URL` (default `account-d.docusign.com`), `DOCUSIGN_JWT_SCOPES` (default `signature impersonation`), `DOCUSIGN_REDIRECT_URI` (any URI registered on the integration key — used only for the one-time consent URL), `DOCUSIGN_TOKEN_EXPIRES_IN` (default `3600`), and a **`DOCUSIGN_PROVIDER` mock toggle** (`sandbox` | `mock`) mirroring the `EMAIL_PROVIDER` pattern.
+
+**Provider abstraction (mirror EmailService):**
+- `sandbox` provider → real JWT mint against the developer sandbox.
+- `mock` provider → returns a synthetic token without any network call, so unit tests and local dev run without consent or creds (same role `EMAIL_PROVIDER=mock` plays for email). This is the safe default when creds/consent aren't in place.
+
+**Client responsibilities (`backend/app/services/docusign_client.py` or similar — audit existing service layout first):**
+- Mint a JWT user token via the SDK (`request_jwt_user_token` / `configure_jwt_authorization_flow`) using the impersonated user (`DOCUSIGN_USER_ID` as `sub`), integration key as `client_id`, RSA key from `DOCUSIGN_PRIVATE_KEY_PATH`, scopes `signature impersonation`.
+- **Cache the token in-process with its expiry** and re-mint on demand with a safety margin (tokens are 1-hour, **no refresh token** — DocuSign issues none for JWT). In-process cache fits the single-Fargate-task, no-Redis model; no token persistence.
+- On `consent_required`, **construct and surface the one-time consent URL**: `https://{DOCUSIGN_OAUTH_BASE_URL}/oauth/auth?response_type=code&scope=signature%20impersonation&client_id={integration_key}&redirect_uri={redirect_uri}` — caller visits once in a browser as the impersonated user, clicks allow (the returned code is ignored), then retries. Consent persists server-side until revoked.
+- Expose an authenticated `ApiClient` / `EnvelopesApi` factory for 9.3b.
+
+**Diagnostic endpoint:** `GET /admin/docusign-health` (mirrors the Phase 7 `/admin/scheduler-health` convention) — attempts a token mint and returns `{ ok: true }`, or, on `consent_required`, returns the consent URL so the one-time grant is self-service. Authenticated (internal users) only.
+
+**Impersonated user = a dedicated *system* user** (e.g. "BluOnX Automation"), not a personal employee account, so audit trails aren't tied to someone who may leave. Note: the impersonated *sender* is a different concept from the internal *signatory* in decision #3 — they needn't be the same identity.
+
+**Secrets hygiene:** confirm `backend/secrets/` is gitignored before first commit (the `.pem` is a private key — leaking it = indefinite impersonation, since there's no short-lived refresh token to revoke). Production key storage is AWS Secrets Manager (Phase 12 seam).
+
+**Files (audit before assuming):** `core/config.py` (settings); new `backend/app/services/docusign_client.py` (provider abstraction + token cache); `/admin/docusign-health` route (reuse the scheduler-health router pattern); deps file; `.gitignore`; tests under `backend/tests/`.
+
+**Out of scope (9.3b and later):** envelope creation, signer/tab config, the Connect status webhook + HMAC verification, any award/contract mutation. No schema change.
+
+**Acceptance (9.3a):**
+- [ ] `docusign-esign` added; all blocking SDK calls run in a threadpool (event loop never blocked).
+- [ ] `DOCUSIGN_PROVIDER=mock` returns a synthetic token with no network call (tests/dev run without consent or creds); `sandbox` mints a real token.
+- [ ] Token is cached in-process and re-minted on expiry with a safety margin; no refresh-token logic; no token persisted.
+- [ ] `consent_required` is caught and the correct consent URL is constructed and surfaced.
+- [ ] `GET /admin/docusign-health` returns ok on success or the consent URL when consent is missing; internal-auth only.
+- [ ] OAuth host vs REST base kept distinct; config loads cleanly; `backend/secrets/` gitignored.
+- [ ] Unit tests cover token-cache re-mint, consent-URL construction, mock provider, and config loading; a real-mint integration test is marked/skipped without creds (test-discipline convention).
+- [ ] No envelope, webhook, award, or contract code; no schema change.
+
+### Task 9.3b: DocuSign Envelope + Connect Webhook (~6h) — summary
+
+Build on 9.3a's authenticated client: create/send an envelope on award (document + `Signer` recipients + `SignHere` anchor tabs, or template + roles — per decision #2), persist the `docusign_envelopes` row, and add a **new** Connect status webhook (separate from the SES/SNS `webhooks.py`) that **HMAC-verifies the raw body** (`x-docusign-signature`, SHA-256 over the exact bytes, base64), is **idempotent** (Connect retries up to 5× over 72h — a duplicate `completed` must not double-act), and updates `docusign_envelopes.status` + `webhook_payload`. The `envelope-completed` event is what drives award acceptance (decision #1). New env needed: `DOCUSIGN_CONNECT_HMAC_KEY`. *Blocked on decisions #1, #2, #3.*
 
 ### Task 9.4: Award Letter Email Template (~3h) — summary
 
@@ -238,14 +282,14 @@ Professional decline email (HTML + text pair) to the **other** invited vendors o
 
 ---
 
-## Open decisions (gate 9.3 / 9.5 / 9.6 — NOT 9.1)
+## Open decisions (gate 9.3b / 9.5 / 9.6 — NOT 9.1, 9.2, or 9.3a)
 
-These do not block 9.1 and are deliberately deferred so award validation can ship first:
+These do not block 9.1, 9.2, or 9.3a, which ship first:
 
-1. **Award acceptance = DocuSign signing?** (proposed default: envelope `completed` webhook flips `awards.status → accepted`, activates the contract, fires the capacity trigger; no separate vendor accept step).
-2. **Contract document source** — client DocuSign template w/ tabs, in-app-generated PDF + anchor tabs, or award-letter-only MVP? (proposed: build tab plumbing against a sandbox placeholder, wire the real template at go-live).
-3. **Signers + order** — proposed: sequential, vendor then internal BluOnX signer; internal signatory TBD.
-4. **DocuSign env** — proposed: dev entirely against developer sandbox via JWT Grant; prod deferred to go-live.
+1. **Award acceptance = DocuSign signing?** (proposed default: the Connect `envelope-completed` event flips `awards.status → accepted`, activates the contract, fires the capacity trigger; no separate vendor accept step).
+2. **Contract document source** — client DocuSign template w/ tabs, in-app-generated PDF + anchor tabs, or award-letter-only MVP? (proposed: in-app PDF + anchor `SignHere` tabs — keeps the document version-controlled, no dependency on a console template).
+3. **Signers + order** — proposed: sequential, vendor (`routingOrder` 1) then internal BluOnX signer (`routingOrder` 2); internal signatory identity is a config value, TBD.
+4. **DocuSign env / auth** — ✅ **RESOLVED (June 9):** JWT Grant against the developer sandbox; production account deferred to go-live (Phase 12). Spec'd in 9.3a.
 5. **Decline-email timing** — proposed: fire on acceptance (signed), not at award creation, so we don't decline everyone before the winner signs.
 
 ---
