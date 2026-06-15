@@ -98,6 +98,35 @@ async def create_award(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.post("/awards/{award_id}/send-contract", status_code=status.HTTP_200_OK)
+async def resend_contract_envelope(
+    award_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Manually (re)send the contract envelope for an award (Task 9.3b).
+
+    The post-commit send at award-create is best-effort; if it failed (DocuSign
+    down, missing config) the award sits at `pending_acceptance` with no envelope.
+    This re-runs the same re-entrant send path: it reuses an existing contract /
+    envelope rather than duplicating, so it's safe to call repeatedly.
+    """
+    from app.services.contract_envelope_service import (
+        ContractEnvelopeError,
+        send_contract_envelope,
+    )
+
+    try:
+        envelope = await send_contract_envelope(award_id, db=db)
+    except ContractEnvelopeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {
+        "envelope_id": envelope.get("envelope_id"),
+        "status": envelope.get("status"),
+        "contract_id": envelope.get("contract_id"),
+    }
+
+
 @router.patch("/awards/{award_id}", response_model=AwardResponse)
 async def update_award(
     award_id: UUID,

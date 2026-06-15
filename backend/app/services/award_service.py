@@ -22,11 +22,14 @@ is surfaced as a clean 409, not a 500.
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from uuid import UUID
 
 from postgrest.exceptions import APIError
 from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 from app.services.pre_award_validation_service import (
     _embed_one,
@@ -148,6 +151,21 @@ async def create_award(
     # 5) Flip the task to awarded. Single-statement op, consistent with the
     #    rest of the codebase (no cross-table transaction primitive available).
     db.table("tasks").update({"status": "awarded"}).eq("id", str(task_id)).execute()
+
+    # 6) Post-commit, best-effort: send the contract envelope (9.3b) + award email
+    #    (9.4) and create the contract row (9.5). A DocuSign/PDF/email failure must
+    #    NOT roll back the award — it stays pending_acceptance with no envelope and
+    #    is retryable via POST /awards/{id}/send-contract. Local import avoids any
+    #    import cycle (the envelope service imports nothing from award_service).
+    try:
+        from app.services.contract_envelope_service import send_contract_envelope
+
+        await send_contract_envelope(award["id"], db=db)
+    except Exception:
+        logger.exception(
+            "Contract envelope send failed for award %s (award stands; resendable)",
+            award.get("id"),
+        )
 
     return award
 

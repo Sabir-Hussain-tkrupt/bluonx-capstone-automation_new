@@ -70,5 +70,19 @@ class Settings(BaseSettings):
     DOCUSIGN_REDIRECT_URI: str = "http://localhost:8000/api/v1/admin/docusign-health"
     DOCUSIGN_TOKEN_EXPIRES_IN: int = 3600  # JWT assertion lifetime (seconds)
 
+    # DocuSign Connect status webhook (Task 9.3b).
+    # HMAC key mirrors the key configured in DocuSign admin (Connect → HMAC);
+    # the webhook verifies the raw request body against it. None ⇒ verification
+    # rejects every request (fail-closed) until the key is configured.
+    DOCUSIGN_CONNECT_HMAC_KEY: str | None = None
+    # Public URL placed in each envelope's eventNotification so Connect can
+    # reach us (an ngrok tunnel in dev). None ⇒ no eventNotification attached.
+    DOCUSIGN_CONNECT_WEBHOOK_URL: str | None = None
+
+    # Internal countersigner (routingOrder 2) for the contract envelope.
+    # Pure config (decision 3b) — sandbox = your own name/email.
+    CONTRACT_OWNER_SIGNER_NAME: str | None = None
+    CONTRACT_OWNER_SIGNER_EMAIL: str | None = None
+
 
 settings = Settings()

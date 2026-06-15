@@ -264,33 +264,93 @@ Preconditions (structural, before the gate):
 - [ ] Unit tests cover token-cache re-mint, consent-URL construction, mock provider, and config loading; a real-mint integration test is marked/skipped without creds (test-discipline convention).
 - [ ] No envelope, webhook, award, or contract code; no schema change.
 
-### Task 9.3b: DocuSign Envelope + Connect Webhook (~6h) — summary
+### Contract lifecycle reframe (read before 9.3b / 9.5)
 
-Build on 9.3a's authenticated client: create/send an envelope on award (document + `Signer` recipients + `SignHere` anchor tabs, or template + roles — per decision #2), persist the `docusign_envelopes` row, and add a **new** Connect status webhook (separate from the SES/SNS `webhooks.py`) that **HMAC-verifies the raw body** (`x-docusign-signature`, SHA-256 over the exact bytes, base64), is **idempotent** (Connect retries up to 5× over 72h — a duplicate `completed` must not double-act), and updates `docusign_envelopes.status` + `webhook_payload`. The `envelope-completed` event is what drives award acceptance (decision #1). New env needed: `DOCUSIGN_CONNECT_HMAC_KEY`. *Blocked on decisions #1, #2, #3.*
+The plan and our earlier notes said "contract created on acceptance." **The schema overrides that.** `docusign_envelopes.contract_id` is `NOT NULL`, and `contracts.status` runs `draft → sent_for_signature → executed → active → completed/terminated`. Both mean the contract row must exist **at envelope-send time**, not at signature. Corrected lifecycle:
+
+| Moment | `awards.status` | `contracts.status` | `docusign_envelopes.status` | Side effects |
+|---|---|---|---|---|
+| Award (9.2) | `pending_acceptance` | — | — | task → `awarded` |
+| Envelope send (9.3b+9.5) | `pending_acceptance` | `sent_for_signature` | `sent` | award email sent |
+| Both sign (Connect `completed`) | `accepted` | `executed` | `completed` | **+1 capacity (trigger)**, declines fire (9.6) |
+| Vendor declines / voided | `declined_by_vendor` | `terminated` | `declined`/`voided` | task freed to re-award |
+
+Capacity still bumps only on `award → accepted` — unchanged. What changed: the contract row is **born at send in `sent_for_signature`**, not at acceptance. 9.5 owns that row's full lifecycle; 9.3b calls into it so the envelope FK is satisfiable.
+
+### Task 9.3b: DocuSign Envelope + Connect Webhook (~6h)
+
+**Objective:** On top of 9.3a's authenticated client, send the contract envelope when an award is created, and consume DocuSign's status callbacks to drive the acceptance lifecycle above. Built on the resolved-by-assumption decisions (see the confirmation table below) — all of which land on config or one swappable document template, never the architecture.
+
+**Resolved assumptions baked in:**
+- **Acceptance = full envelope completion** (both signers), via the Connect `envelope-completed` event. Not the vendor's signature alone.
+- **Document = in-app-generated contract PDF** (firm standard terms, populated with award data) + the vendor's **signed SOW attached as an exhibit** when one is on file; sent as inline document(s) with anchor-string `SignHere` tabs. Terms template isolated for one-line swap if the client supplies their own.
+- **Signers = sequential: vendor contact `routingOrder` 1, internal BluOnX signer `routingOrder` 2** (`CONTRACT_OWNER_SIGNER_NAME` / `_EMAIL` config; sandbox = your own email).
+
+**Part A — Envelope send (`send_contract_envelope(award_id)` in the DocuSign service):**
+- Triggered **post-commit from `award_service`** after award-create (9.2), best-effort: a send failure does **not** roll back the award (it stays `pending_acceptance` with no envelope) and is retryable via a resend path. Also exposed for manual resend.
+- Load context: award → submission → vendor + invited contact, task, project. Vendor signer = the invited `vendor_contacts` row; internal signer = config.
+- **Create the `contracts` row first** (9.5 path) in `sent_for_signature` so the envelope FK holds; generate the contract PDF from award data (vendor, `award_amount`, start/end dates, project/task, terms template), attaching the signed SOW exhibit if present. *(contract_number assignment + date/terms population are 9.5's detail.)*
+- Build the `EnvelopeDefinition`: document(s) base64, two `Signer` recipients with `routingOrder` + `SignHere` anchor tabs (`/vendor_sig/`, `/owner_sig/`), an **envelope-level `eventNotification`** pointing at our webhook (self-contained — no account-level Connect config), `status="sent"`. All SDK calls in a threadpool (9.3a rule).
+- Persist the `docusign_envelopes` row (`envelope_id`, `status='sent'`, `contract_id`); set contract → `sent_for_signature`.
+
+**Part B — Connect status webhook (the acceptance hub):**
+- A **new** route, separate from the SES/SNS `webhooks.py`. **HMAC-verify the raw body** before parsing: SHA-256 over the exact request bytes, base64, constant-time compare against `x-docusign-signature` (read `await request.body()` *before* JSON). Reject on mismatch. New env: `DOCUSIGN_CONNECT_HMAC_KEY`.
+- **Idempotent:** Connect retries up to 5× over 72h — key on `envelope_id` + event/status and no-op if already applied (a duplicate `completed` must never double-create a contract, double-bump capacity, or double-send declines).
+- Update `docusign_envelopes.status` + store the full `webhook_payload` (JSONB, for audit/debug) on every event.
+- **Dispatch on event** (the transition handlers themselves live in award/contract/decline services — 9.5/9.6 — the webhook just routes to them):
+  - `completed` → `on_envelope_completed`: contract → `executed`, award → `accepted` (fires the +1 capacity trigger), trigger declines to the other vendors (9.6).
+  - `declined` / `voided` → contract → `terminated`, award → `declined_by_vendor`.
+  - `delivered` / `sent` → status update only.
+
+**Dev note — local webhook testing:** DocuSign Connect must reach a **public URL**, so testing the webhook locally needs a tunnel (e.g. ngrok) pointed at the backend; set the envelope `eventNotification` URL accordingly. The `DOCUSIGN_PROVIDER=mock` path (9.3a) lets you build/test the *send* and *handler* logic without live envelopes; the real Connect round-trip needs the tunnel + sandbox consent.
+
+**Co-dependency:** 9.3b, 9.5 (contract row), and 9.4 (award email) are sent together at award time and are naturally built in one pass. The webhook's completion handler needs 9.5's contract transitions and 9.6's decline send to exist.
+
+**Files (audit before assuming):** extend `backend/app/services/docusign_client.py` (envelope build/send) + a new `contract_service.py` if not already present (9.5); new Connect webhook route (do **not** fold into `webhooks.py`); extend `award_service` with the post-commit send hook + resend; config (`DOCUSIGN_CONNECT_HMAC_KEY`, `CONTRACT_OWNER_SIGNER_NAME/_EMAIL`, webhook URL); tests under `backend/tests/`.
+
+**Out of scope:** award email body (9.4), contract_number/terms text detail (9.5), decline email body (9.6). No schema change.
+
+**Acceptance (9.3b):**
+- [ ] `send_contract_envelope` creates the `contracts` row (`sent_for_signature`), generates the contract PDF (+ SOW exhibit if present), sends a real sandbox envelope with two sequential signers + anchor tabs, persists `docusign_envelopes`; all SDK calls off the event loop.
+- [ ] Send is post-commit best-effort — a DocuSign failure leaves the award at `pending_acceptance` (not rolled back) and is resendable.
+- [ ] Webhook HMAC-verifies the raw body and rejects bad signatures; idempotent across Connect retries (duplicate `completed` is a no-op).
+- [ ] `completed` → contract `executed` + award `accepted` (+1 capacity via trigger) + declines dispatched; `declined`/`voided` → contract `terminated` + award `declined_by_vendor`; every event updates status + stores `webhook_payload`.
+- [ ] Acceptance fires only on **full** completion (both signers), not the vendor's signature alone.
+- [ ] No schema change.
 
 ### Task 9.4: Award Letter Email Template (~3h) — summary
 
-HTML + plain-text pair under `backend/app/templates/emails/` (`base.html` layout, `template_renderer` singleton, Phase 7 convention). Congratulations + project/task details + mobilization info + embedded DocuSign signing link. Sent via `EmailService.send_email()` (mock in dev). *Build alongside 9.3 (needs the signing link).*
+HTML + plain-text pair under `backend/app/templates/emails/` (`base.html` layout, `template_renderer` singleton, Phase 7 convention). Congratulations + project/task details + mobilization info + embedded DocuSign signing link. **No milestone list** (milestones don't exist until Phase 10 — confirmed). Sent via `EmailService.send_email()` (mock in dev) at envelope-send time. Built alongside 9.3b.
 
-### Task 9.5: Contract Record Creation (~6h) — summary
+### Task 9.5: Contract Record Lifecycle (~6h) — summary
 
-On award acceptance, create one `contracts` row (auto `contract_number`, dates, amount, payment terms), link the `docusign_envelopes` row, let the existing trigger handle the +1 capacity. Surface the partial-unique violation (`idx_contracts_one_active_per_task`) as a clean 409. Competitive awards only — no synthetic-submission flow (direct_assign excluded). *Blocked on open decision #1 (what "acceptance" means) and #2 (contract document source).* *(Re-estimated ~6h, down from 8h — the direct_assign half is gone.)*
+Owns the `contracts` row across its full lifecycle (per the reframe above): **created at envelope-send in `sent_for_signature`** (auto `contract_number`, start/end dates, `contract_amount`, payment terms), linked to the `docusign_envelopes` row; **`executed` on Connect `completed`** (the moment award → `accepted` fires the +1 capacity trigger); **`terminated` on decline/void** (frees the task to re-award). Surface the partial-unique violation (`idx_contracts_one_active_per_task`) as a clean 409. Competitive awards only. Built together with 9.3b (the envelope-send path calls contract-create so the FK holds). `payment_terms` content is a placeholder until the client provides boilerplate.
 
 ### Task 9.6: Decline Notifications (~7h) — summary
 
-Professional decline email (HTML + text pair) to the **other** invited vendors on the package. **Reframe:** plan says "batch sending via n8n" — n8n is gone; this loops over recipients through `EmailService.send_email()` with the Phase 7 semaphore/`asyncio.gather` concurrency pattern, each logged to `email_log`. *Blocked on open decision #5 (fire on acceptance, not on award creation).*
+Professional decline email (HTML + text pair) to the **other** invited vendors on the package, **fired on acceptance** (Connect `completed`), not at award creation — so we don't decline the backup pool before the winner signs. **Reframe:** plan says "batch sending via n8n" — n8n is gone; this loops over recipients through `EmailService.send_email()` with the Phase 7 semaphore/`asyncio.gather` concurrency pattern, each logged to `email_log`. Dispatched from the 9.3b webhook completion handler.
 
 ---
 
-## Open decisions (gate 9.3b / 9.5 / 9.6 — NOT 9.1, 9.2, or 9.3a)
+## Decisions — resolved-by-assumption (build now, confirm with client later)
 
-These do not block 9.1, 9.2, or 9.3a, which ship first:
+Client is unreachable for a few days; rather than block, we adopt the highest-probability answer for a real construction firm and **isolate each assumption to config or one swappable document template** so a client deviation never touches the architecture or schema. All of 9.3b–9.6 build on these.
 
-1. **Award acceptance = DocuSign signing?** (proposed default: the Connect `envelope-completed` event flips `awards.status → accepted`, activates the contract, fires the capacity trigger; no separate vendor accept step).
-2. **Contract document source** — client DocuSign template w/ tabs, in-app-generated PDF + anchor tabs, or award-letter-only MVP? (proposed: in-app PDF + anchor `SignHere` tabs — keeps the document version-controlled, no dependency on a console template).
-3. **Signers + order** — proposed: sequential, vendor (`routingOrder` 1) then internal BluOnX signer (`routingOrder` 2); internal signatory identity is a config value, TBD.
-4. **DocuSign env / auth** — ✅ **RESOLVED (June 9):** JWT Grant against the developer sandbox; production account deferred to go-live (Phase 12). Spec'd in 9.3a.
-5. **Decline-email timing** — proposed: fire on acceptance (signed), not at award creation, so we don't decline everyone before the winner signs.
+| # | Question | Options | **Our pick (resolved June 9)** | Blast radius if client differs |
+|---|---|---|---|---|
+| 1 | Acceptance trigger | (a) signing = acceptance · (b) separate accept step | **(a)** the contract signature *is* acceptance (industry-standard; no separate step exists in construction) | Low — would add an accept step; `pending_acceptance` already models it |
+| 1b | Acceptance = whose signature | vendor-only · both signers | **full envelope completion (both signers)** — firm countersigns last | Low — Connect event filter |
+| 2 | Contract document source | (a) our generated terms PDF + SOW exhibit · (b) client's own subcontract template · (c) DocuSign console template | **(a)** generated PDF, signed SOW as exhibit, terms template isolated for one-line swap | Low–med — swap one template, or flip envelope builder to template+roles; flow untouched |
+| 2b | SOW relationship to contract | reference · attach-as-exhibit · combined single doc | **attach signed SOW as exhibit** (scope ≠ terms; SOW binds price-to-scope at bid, contract carries legal terms) | Low — document-assembly detail |
+| 3 | Signing order | (a) vendor → firm · (b) firm → vendor · (c) vendor only | **(a)** vendor `routingOrder` 1, firm countersigns `routingOrder` 2 | Low — `routingOrder` change |
+| 3b | Internal signatory identity | specific name/email | **config value** (`CONTRACT_OWNER_SIGNER_NAME/_EMAIL`); sandbox = your email | None — pure config |
+| 4 | DocuSign env / auth | JWT sandbox · auth-code · prod now | **JWT Grant, developer sandbox; prod at go-live** (spec'd in 9.3a) | n/a — locked |
+| 5 | Decline-email timing | on award creation · on acceptance | **on acceptance** (Connect `completed`) — don't burn the backup pool before the winner signs | Low — webhook trigger point |
+
+**Also flagged to the client (not Phase 9 work, log in `DEFERRED.md`):**
+- **Mandatory signed SOW at bid time** — the client stated "sign a SOW for each job, submit with each bid," but Task 5.5 left it optional/unenforced. Assume they want it mandatory; this is a **Phase 5 (bidding) enforcement gap**, and could later become a pre-award compliance check ("no signed SOW on file → block/warn"). Does not block Phase 9.
+- **Contract `payment_terms` / terms-template text** — placeholder until the client supplies their subcontract boilerplate. The *plumbing* is template-agnostic.
+- **Legal weight of the bid-time SOW signature** (binding sub-agreement vs acknowledgment; whether the contract must re-incorporate it) — a legal-structure question for the client's contracts people. Determines what the DocuSign contract document must contain (decision #2).
 
 ---
 

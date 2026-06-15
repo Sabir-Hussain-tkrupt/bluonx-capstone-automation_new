@@ -84,4 +84,10 @@ CLAUDE.md
 
 /tmp
 
+# ignore backend secrets folder
 backend/secrets/
+
+
+# ignore temporary files created for testing manually
+_manual_test*
+

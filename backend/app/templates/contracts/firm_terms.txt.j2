@@ -1,0 +1,38 @@
+{# ─────────────────────────────────────────────────────────────────────────
+   Firm standard subcontract terms — ISOLATED, SWAPPABLE TEMPLATE.
+
+   This is the one file to replace when the client supplies their own
+   subcontract boilerplate (decision #2). The PDF generator
+   (services/contract_pdf.py) renders this body verbatim into the contract;
+   the signature block + anchor tabs are appended by the generator, not here.
+
+   `payment_terms` is a placeholder until the client provides terms text.
+   ───────────────────────────────────────────────────────────────────────── #}
+1. SCOPE OF WORK
+The Subcontractor ({{ vendor_company }}) shall furnish all labor, materials,
+equipment, and supervision necessary to complete the work for the scope titled
+"{{ task_name }}" on the project "{{ project_name }}", in accordance with the
+bid submitted by the Subcontractor and any signed Scope of Work attached hereto
+as an exhibit.
+
+2. CONTRACT PRICE
+The Contractor shall pay the Subcontractor the sum of {{ award_amount_formatted }}
+as full compensation for the complete and satisfactory performance of the work,
+subject to the terms of this agreement.
+
+3. SCHEDULE
+The Subcontractor shall commence work on or about {{ start_date_formatted }} and
+shall complete the work by {{ end_date_formatted }}, time being of the essence.
+
+4. PAYMENT TERMS
+{{ payment_terms }}
+
+5. INSURANCE AND BONDING
+The Subcontractor shall maintain insurance and bonding in the amounts required by
+the Contractor and shall provide certificates evidencing such coverage prior to
+commencing work.
+
+6. GENERAL CONDITIONS
+This agreement incorporates the Contractor's general conditions and any exhibits
+attached hereto. In the event of a conflict, the terms of this agreement shall
+govern. This agreement is binding upon execution by both parties below.

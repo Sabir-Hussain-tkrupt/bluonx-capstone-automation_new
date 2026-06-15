@@ -249,6 +249,120 @@ class DocuSignClient:
         api_client.set_default_header("Authorization", f"Bearer {token}")
         return api_client
 
+    async def send_envelope(self, envelope_definition) -> str:
+        """Create the envelope and return its DocuSign `envelope_id`.
+
+        Mock short-circuit (mirrors the token mock and EMAIL_PROVIDER=mock): when
+        DOCUSIGN_PROVIDER != "sandbox" we return a synthetic id with NO network,
+        so unit tests and local dev exercise the full send path offline. The real
+        EnvelopesApi.create_envelope call runs in a threadpool (9.3a rule — never
+        block the event loop on the blocking SDK).
+        """
+        if settings.DOCUSIGN_PROVIDER != "sandbox":
+            env_id = f"mock-env-{uuid4()}"
+            logger.info("[MOCK DOCUSIGN] envelope not sent; synthetic id %s", env_id)
+            return env_id
+
+        from docusign_esign import EnvelopesApi
+
+        api_client = await self.get_api_client()
+        envelopes_api = EnvelopesApi(api_client)
+        summary = await run_in_threadpool(
+            envelopes_api.create_envelope,
+            settings.DOCUSIGN_ACCOUNT_ID,
+            envelope_definition=envelope_definition,
+        )
+        return summary.envelope_id
+
+
+# ── Envelope builder (pure — no network; unit-testable by field inspection) ───
+
+
+def build_envelope_definition(
+    *,
+    documents: list[dict],
+    signers: list[dict],
+    webhook_url: str | None = None,
+    email_subject: str = "Please sign your BluOnX subcontract",
+    status: str = "sent",
+):
+    """Assemble a `docusign_esign.EnvelopeDefinition` for the contract envelope.
+
+    `documents`: [{document_base64, name, document_id, file_extension="pdf"}].
+    `signers`:   [{name, email, recipient_id, routing_order, anchor_string}] —
+                 each gets a `SignHere` anchor tab on its anchor string. Sequential
+                 routing comes from `routing_order` (vendor 1, owner 2).
+    `webhook_url`: when set, an envelope-level `eventNotification` is attached so
+                 Connect status callbacks are self-contained (no account-level
+                 Connect config needed).
+
+    Constructing these SDK objects requires no network, so this is unit-testable.
+    """
+    from docusign_esign import (
+        Document,
+        EnvelopeDefinition,
+        EventNotification,
+        EnvelopeEvent,
+        Recipients,
+        SignHere,
+        Signer,
+        Tabs,
+    )
+
+    docs = [
+        Document(
+            document_base64=d["document_base64"],
+            name=d.get("name", f"Document {i + 1}"),
+            file_extension=d.get("file_extension", "pdf"),
+            document_id=str(d.get("document_id", i + 1)),
+        )
+        for i, d in enumerate(documents)
+    ]
+
+    signer_objs = []
+    for s in signers:
+        # The contract PDF places each anchor alone at the bottom of a ~56px
+        # whitespace band (see contract_pdf.build_contract_pdf). The signature
+        # stamps upward from the anchor, so a small negative y-offset lifts it a
+        # touch into that band — clear of the line just below and the printed name
+        # well above. x-offset of 0 keeps it left-aligned under the role label.
+        sign_here = SignHere(
+            anchor_string=s["anchor_string"],
+            anchor_units="pixels",
+            anchor_x_offset="0",
+            anchor_y_offset="-8",
+        )
+        signer_objs.append(
+            Signer(
+                email=s["email"],
+                name=s["name"],
+                recipient_id=str(s["recipient_id"]),
+                routing_order=str(s["routing_order"]),
+                tabs=Tabs(sign_here_tabs=[sign_here]),
+            )
+        )
+
+    definition = EnvelopeDefinition(
+        email_subject=email_subject,
+        documents=docs,
+        recipients=Recipients(signers=signer_objs),
+        status=status,
+    )
+
+    if webhook_url:
+        definition.event_notification = EventNotification(
+            url=webhook_url,
+            logging_enabled="true",
+            require_acknowledgment="true",
+            include_documents="false",
+            envelope_events=[
+                EnvelopeEvent(envelope_event_status_code=code)
+                for code in ("sent", "delivered", "completed", "declined", "voided")
+            ],
+        )
+
+    return definition
+
 
 # ── Process-wide singleton ────────────────────────────────────────────────────
 #

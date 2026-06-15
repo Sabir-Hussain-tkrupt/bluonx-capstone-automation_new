@@ -1,0 +1,28 @@
+BluOnX Development LLC
+================================================================
+
+Hi {{ vendor_contact_name }},
+
+Congratulations! {{ vendor_company }} has been awarded the contract for
+{{ project_name }} — {{ task_name }}. We look forward to working with you.
+
+AWARD DETAILS
+----------------------------------------------------------------
+Project:            {{ project_name }}
+Scope:              {{ task_name }}
+Contract Amount:    {{ award_amount_formatted }}
+{% if contract_number %}Contract No.:       {{ contract_number }}
+{% endif %}{% if start_date_formatted %}Anticipated Start:  {{ start_date_formatted }}
+{% endif %}
+
+NEXT STEP — SIGN YOUR CONTRACT
+----------------------------------------------------------------
+You'll receive a separate email from DocuSign with your subcontract for
+electronic signature. Please review and sign it promptly so we can countersign
+and finalize the award. Once both parties have signed, we'll be in touch with
+mobilization details and the project schedule.
+
+--
+BluOnX Development LLC
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

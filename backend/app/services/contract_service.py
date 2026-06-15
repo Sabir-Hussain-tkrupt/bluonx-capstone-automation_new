@@ -1,0 +1,152 @@
+"""
+Contract record lifecycle (Task 9.5), built together with the envelope send (9.3b).
+
+Per the "Contract lifecycle reframe" in CURRENT_PHASE_TASKS.md, the contracts row
+is born at ENVELOPE-SEND time in `sent_for_signature` (not at acceptance) so the
+NOT NULL `docusign_envelopes.contract_id` FK is satisfiable. This module owns the
+row's transitions:
+
+  create_contract_for_award  → INSERT at `sent_for_signature` (re-entrant)
+  mark_contract_executed     → `executed` + signed_at (Connect `completed`)
+  mark_contract_terminated   → `terminated` (decline / void)
+
+Writes are single-statement supabase-py ops; the partial unique index
+`idx_contracts_one_active_per_task` is surfaced as a clean 409 (mirrors the
+award_service convention). No schema change.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from postgrest.exceptions import APIError
+from supabase import Client
+
+logger = logging.getLogger(__name__)
+
+
+class ContractError(Exception):
+    """Raised on contract-write failure; the router maps it to an HTTPException."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _is_unique_violation(err: APIError) -> bool:
+    """Same heuristic as award_service._is_unique_violation (Postgres 23505)."""
+    code = getattr(err, "code", None)
+    msg = str(err).lower()
+    return code == "23505" or "duplicate key" in msg or "unique" in msg
+
+
+def generate_contract_number(award_id: str) -> str:
+    """Auto contract number. `CON-{YYYY}-{first 8 of the award id}` — unique
+    (award_id is unique per active task), race-free, and needs no sequence table.
+    Refining the human-facing scheme is left to 9.5 polish."""
+    year = datetime.now(timezone.utc).year
+    short = str(award_id).replace("-", "")[:8].upper()
+    return f"CON-{year}-{short}"
+
+
+def _str_amount(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value) if isinstance(value, Decimal) else str(value)
+
+
+def _date_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()[:10]
+    return str(value)[:10]
+
+
+def _first(data: Any) -> dict | None:
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def create_contract_for_award(
+    award: dict,
+    *,
+    start_date: Any = None,
+    end_date: Any = None,
+    payment_terms: str | None = None,
+    db: Client,
+) -> dict:
+    """INSERT the contract row at `sent_for_signature`. Re-entrant: if a contract
+    already exists for this award (`award_id` is UNIQUE), return it rather than
+    re-inserting — so a best-effort resend after a partial failure is safe.
+
+    `award` must carry: id, vendor_id, task_id, award_amount.
+    """
+    award_id = award["id"]
+
+    # Re-entrant guard — reuse an existing contract for this award.
+    existing = (
+        db.table("contracts").select("*").eq("award_id", str(award_id)).limit(1).execute()
+    )
+    found = _first(existing.data)
+    if found:
+        return found
+
+    insert_row = {
+        "award_id": str(award_id),
+        "vendor_id": str(award["vendor_id"]),
+        "task_id": str(award["task_id"]),
+        "contract_number": generate_contract_number(award_id),
+        "start_date": _date_str(start_date),
+        "end_date": _date_str(end_date),
+        "contract_amount": _str_amount(award.get("award_amount")),
+        "payment_terms": payment_terms,
+        "status": "sent_for_signature",
+    }
+    try:
+        resp = db.table("contracts").insert(insert_row).execute()
+    except APIError as exc:
+        if _is_unique_violation(exc):
+            raise ContractError(
+                409, "An active contract already exists for this task."
+            ) from exc
+        raise
+
+    row = _first(resp.data)
+    if not row:
+        raise ContractError(500, "Contract creation failed.")
+    return row
+
+
+def mark_contract_executed(contract_id: str, *, db: Client) -> dict:
+    """Connect `completed` → contract `executed`, signed_at = now."""
+    resp = (
+        db.table("contracts")
+        .update(
+            {
+                "status": "executed",
+                "signed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        .eq("id", str(contract_id))
+        .execute()
+    )
+    return _first(resp.data) or {}
+
+
+def mark_contract_terminated(contract_id: str, *, db: Client) -> dict:
+    """Decline / void → contract `terminated` (frees the task to re-award)."""
+    resp = (
+        db.table("contracts")
+        .update({"status": "terminated"})
+        .eq("id", str(contract_id))
+        .execute()
+    )
+    return _first(resp.data) or {}
