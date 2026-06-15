@@ -407,6 +407,8 @@ export interface CreateAwardPayload {
   bid_submission_id: string;
   has_override?: boolean;
   override_justification?: string;
+  /** Optional PM-authored guidance (mobilization, site access, etc.), rendered in the award email. */
+  instructions?: string;
 }
 
 export interface Award {

@@ -78,6 +78,7 @@ export function BidPackageComparePage() {
   const handleConfirmAward = (args: {
     has_override: boolean;
     override_justification?: string;
+    instructions?: string;
   }) => {
     if (!awardTarget) return;
     setAwardError(null);

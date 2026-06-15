@@ -14,6 +14,11 @@ Contract Amount:    {{ award_amount_formatted }}
 {% if contract_number %}Contract No.:       {{ contract_number }}
 {% endif %}{% if start_date_formatted %}Anticipated Start:  {{ start_date_formatted }}
 {% endif %}
+{% if instructions %}
+INSTRUCTIONS
+----------------------------------------------------------------
+{{ instructions }}
+{% endif %}
 
 NEXT STEP — SIGN YOUR CONTRACT
 ----------------------------------------------------------------

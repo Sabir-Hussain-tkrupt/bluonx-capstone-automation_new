@@ -91,6 +91,7 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
         db.table("awards")
         .select(
             "id, vendor_id, task_id, award_amount, bid_submission_id, status,"
+            " instructions,"
             " bid_submissions!inner(proposed_start_date,"
             "   bid_invitations!inner(vendor_contacts!inner(full_name, email))),"
             " vendors!inner(company_name),"
@@ -304,6 +305,9 @@ async def _send_award_email(
         "award_amount_formatted": _fmt_money(award.get("award_amount")),
         "contract_number": contract.get("contract_number"),
         "start_date_formatted": _fmt_date(start_date),
+        # PM-authored guidance, stored on the award; reused as-is on resend since
+        # this context is reloaded from the awards row each time.
+        "instructions": award.get("instructions"),
     }
     html_body = template_renderer.render("award_notification.html", context)
     plain_text_body = template_renderer.render_text("award_notification.txt", context)

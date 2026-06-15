@@ -80,6 +80,7 @@ async def create_award(
     bid_submission_id: UUID,
     has_override: bool,
     override_justification: str | None,
+    instructions: str | None = None,
     awarded_by: str,
     db: Client,
 ) -> dict:
@@ -131,6 +132,7 @@ async def create_award(
         "award_amount": _str_amount(context.award_amount),
         "has_override": has_override_final,
         "override_justification": justification_final,
+        "instructions": (instructions or "").strip() or None,
         "validation_results": _json_safe(result),
         "status": "pending_acceptance",
     }

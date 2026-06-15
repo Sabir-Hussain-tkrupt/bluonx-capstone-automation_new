@@ -91,6 +91,7 @@ async def create_award(
             bid_submission_id=award.bid_submission_id,
             has_override=award.has_override,
             override_justification=award.override_justification,
+            instructions=award.instructions,
             awarded_by=user["user_id"],
             db=db,
         )

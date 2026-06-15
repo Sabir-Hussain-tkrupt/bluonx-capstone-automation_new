@@ -500,6 +500,7 @@ CREATE TABLE awards (
   awarded_by              UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   awarded_at              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   award_amount            DECIMAL(15,2) NOT NULL CHECK (award_amount >= 0),
+  instructions              TEXT,
   has_override            BOOLEAN       NOT NULL DEFAULT FALSE,
   override_justification  TEXT,
   validation_results      JSONB,
