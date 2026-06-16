@@ -141,26 +141,36 @@ def _fetch_invitations(
     return _unwrap_list(resp.data)
 
 
-def _task_has_active_award(db, task_id) -> bool:
-    """True if the task has an award in a revision-blocking status.
+def _task_active_award(db, task_id) -> dict | None:
+    """The task's live award (status in _BLOCKING_AWARD_STATUSES) as
+    {"bid_submission_id", "status"}, or None when the task is re-awardable
+    (no award, or only declined_by_vendor / cancelled — consistent with
+    idx_awards_one_active_per_task).
 
     One query per package-detail request (NOT per invitation). The status
-    set matches bid_revision_service.create_revision_request exactly. The
-    status check runs in Python so it stays correct regardless of whether
-    the caller's mock applies PostgREST filters.
+    check runs in Python so it stays correct regardless of whether the
+    caller's mock applies PostgREST filters.
     """
     if not task_id:
-        return False
+        return None
     resp = (
         db.table("awards")
-        .select("id, status")
+        .select("id, status, bid_submission_id")
         .eq("task_id", str(task_id))
         .execute()
     )
-    return any(
-        row.get("status") in _BLOCKING_AWARD_STATUSES
-        for row in _unwrap_list(resp.data)
-    )
+    for row in _unwrap_list(resp.data):
+        if row.get("status") in _BLOCKING_AWARD_STATUSES:
+            return {
+                "bid_submission_id": row.get("bid_submission_id"),
+                "status": row.get("status"),
+            }
+    return None
+
+
+def _task_has_active_award(db, task_id) -> bool:
+    """True if the task has an award in a revision-blocking status."""
+    return _task_active_award(db, task_id) is not None
 
 
 def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
@@ -366,7 +376,8 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     documents_rows = _fetch_documents(db, bid_package_id)
 
     # Task-scoped: one query for the whole package, applied to every row.
-    is_awarded = _task_has_active_award(db, bid_package.get("task_id"))
+    active_award = _task_active_award(db, bid_package.get("task_id"))
+    is_awarded = active_award is not None
     invitations = [
         _transform_invitation(row, is_awarded=is_awarded)
         for row in invitations_rows
@@ -395,6 +406,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         "invitation_summary": summary,
         "invitations": invitations,
         "submitted_bids": submitted_bids,
+        "award": active_award,
     }
 
 

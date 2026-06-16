@@ -246,7 +246,10 @@ export function BidPackageComparePage() {
           {cohort.recommendation && (
             <RecommendationPanel
               recommendation={cohort.recommendation}
-              onAward={handleAward}
+              // Suppress the recommendation's Award action once the task has a
+              // live award (RecommendationPanel hides the button when onAward is
+              // omitted). The winning-row "Awarded" state lives in the table.
+              onAward={bp.award ? undefined : handleAward}
             />
           )}
 
@@ -269,6 +272,7 @@ export function BidPackageComparePage() {
             onToggleExpand={handleToggleExpand}
             onViewBid={setViewSubmissionId}
             onAward={handleAward}
+            award={bp.award ?? null}
           />
 
           {submittedBids.length > 0 && (

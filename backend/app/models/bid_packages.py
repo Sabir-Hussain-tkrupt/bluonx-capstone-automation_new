@@ -95,6 +95,17 @@ class InvitationItem(BluOnXBase):
     is_awarded: bool = False
 
 
+class ActiveAwardInfo(BluOnXBase):
+    """The task's live award (status in pending_acceptance / accepted), if any.
+
+    Lets the comparison UI mark the winning submission ("Pending signature" vs
+    "Awarded ✓") and suppress the Award action on every row. Null when the task
+    is re-awardable (no award, or only declined_by_vendor / cancelled)."""
+
+    bid_submission_id: UUID | None = None
+    status: str
+
+
 class BidTemplateSummary(BluOnXBase):
     id: UUID
     name: str
@@ -128,6 +139,9 @@ class BidPackageDetailResponse(BluOnXBase):
     invitation_summary: InvitationSummary
     invitations: list[InvitationItem] = Field(default_factory=list)
     submitted_bids: list[SubmittedBid] = Field(default_factory=list)
+    # The task's live award (or null when re-awardable). Drives the comparison
+    # UI's Award-button suppression + winning-row "Awarded" state.
+    award: ActiveAwardInfo | None = None
 
 
 class InvitationListResponse(BluOnXBase):
