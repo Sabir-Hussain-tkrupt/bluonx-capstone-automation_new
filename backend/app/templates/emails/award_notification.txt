@@ -4,7 +4,7 @@ BluOnX Development LLC
 Hi {{ vendor_contact_name }},
 
 Congratulations! {{ vendor_company }} has been awarded the contract for
-{{ project_name }} — {{ task_name }}. We look forward to working with you.
+{{ project_name }} ({{ task_name }}). We look forward to working with you.
 
 AWARD DETAILS
 ----------------------------------------------------------------
@@ -20,7 +20,7 @@ INSTRUCTIONS
 {{ instructions }}
 {% endif %}
 
-NEXT STEP — SIGN YOUR CONTRACT
+NEXT STEP: SIGN YOUR CONTRACT
 ----------------------------------------------------------------
 You'll receive a separate email from DocuSign with your subcontract for
 electronic signature. Please review and sign it promptly so we can countersign

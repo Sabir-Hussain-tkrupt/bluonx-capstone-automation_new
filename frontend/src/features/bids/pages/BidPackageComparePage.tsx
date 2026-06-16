@@ -213,7 +213,7 @@ export function BidPackageComparePage() {
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              Compare bids — {bp.task_name} (Round {bp.round_number})
+              Compare bids: {bp.task_name} (Round {bp.round_number})
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={bp.status} size="sm" />

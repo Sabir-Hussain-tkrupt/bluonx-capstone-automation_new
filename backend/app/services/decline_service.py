@@ -80,7 +80,7 @@ async def send_decline_notifications(
         }
         html_body = template_renderer.render("award_decline.html", context)
         plain_text_body = template_renderer.render_text("award_decline.txt", context)
-        subject = f"Bid Update — {context['project_name']} / {context['task_name']}"
+        subject = f"Bid Update: {context['project_name']} ({context['task_name']})"
         async with semaphore:
             try:
                 result = await service.send_email(

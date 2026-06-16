@@ -4,7 +4,7 @@ BluOnX Development LLC
 Hi {{ vendor_contact_name }},
 
 Thank you for taking the time to submit a bid for
-{{ project_name }} — {{ task_name }}. After careful review, we have awarded this
+{{ project_name }} ({{ task_name }}). After careful review, we have awarded this
 scope to another vendor on this occasion.
 
 We genuinely value your interest and the effort that went into your proposal,

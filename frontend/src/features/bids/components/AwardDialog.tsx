@@ -75,7 +75,7 @@ export function AwardDialog({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Award — ${vendorName}`}
+      title={`Award: ${vendorName}`}
       size="lg"
       footer={
         <>

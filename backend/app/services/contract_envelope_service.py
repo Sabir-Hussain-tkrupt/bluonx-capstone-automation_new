@@ -236,7 +236,7 @@ async def send_contract_envelope(
         signers=signers,
         webhook_url=settings.DOCUSIGN_CONNECT_WEBHOOK_URL,
         email_subject=(
-            f"Please sign your BluOnX subcontract — {project.get('name', '')}"
+            f"Please sign your BluOnX subcontract for {project.get('name', '')}"
         ).strip(),
     )
 
@@ -314,7 +314,7 @@ async def _send_award_email(
     service = email_service or EmailService(provider=create_email_provider(), db_client=db)
     await service.send_email(
         to_email=to_email,
-        subject=f"You've been awarded — {context['project_name']} / {context['task_name']}",
+        subject=f"You've been awarded: {context['project_name']} ({context['task_name']})",
         html_body=html_body,
         plain_text_body=plain_text_body,
         email_type="award_notification",
