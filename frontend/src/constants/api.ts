@@ -42,6 +42,7 @@ export const API_ENDPOINTS = {
   // Bid Packages
   BID_PACKAGES: '/bid-packages',
   BID_PACKAGE: (id: string) => `/bid-packages/${id}`,
+  BID_PACKAGE_CLOSE: (id: string) => `/bid-packages/${id}/close`,
   TASK_BID_PACKAGES: (taskId: string) => `/tasks/${taskId}/bid-packages`,
   BID_PACKAGE_INVITATIONS: (id: string) => `/bid-packages/${id}/invitations`,
   BID_PACKAGE_EMAIL_LOG: (id: string) => `/bid-packages/${id}/email-log`,

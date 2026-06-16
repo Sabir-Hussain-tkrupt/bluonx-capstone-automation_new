@@ -154,11 +154,17 @@ async def handle_envelope_event(
             db.table("awards").update({"status": "accepted"}).eq(
                 "id", award["id"]
             ).execute()
-        # Declines to the backup pool (9.6), fired only now (winner has signed).
+        # Close the package on acceptance (evaluating -> closed). Guarded on the
+        # current status so it's idempotent across Connect retries and only fires
+        # the evaluating -> closed transition.
         submission = _embed_one(award.get("bid_submissions"))
         invitation = _embed_one(submission.get("bid_invitations"))
         bid_package_id = invitation.get("bid_package_id")
         if bid_package_id:
+            db.table("bid_packages").update({"status": "closed"}).eq(
+                "id", str(bid_package_id)
+            ).eq("status", "evaluating").execute()
+            # Declines to the backup pool (9.6), fired only now (winner has signed).
             await decline_service.send_decline_notifications(
                 bid_package_id=bid_package_id,
                 winning_vendor_id=award.get("vendor_id"),

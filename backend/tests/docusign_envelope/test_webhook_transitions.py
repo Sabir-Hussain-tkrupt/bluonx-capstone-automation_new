@@ -77,6 +77,8 @@ async def test_completed_executes_contract_accepts_award_and_declines(fake_email
     assert calls["contracts"]["update"][0]["status"] == "executed"
     # Award accepted (fires +1 capacity trigger).
     assert calls["awards"]["update"][0] == {"status": "accepted"}
+    # Package closed on acceptance (evaluating -> closed, guarded write).
+    assert calls["bid_packages"]["update"][0] == {"status": "closed"}
     # Declines fired to the backup pool.
     assert len(fake_email.sent) == 1
     assert fake_email.sent[0]["email_type"] == "decline_notification"
@@ -93,6 +95,8 @@ async def test_declined_terminates_contract_and_declines_award(fake_email):
     assert calls["docusign_envelopes"]["update"][0]["status"] == "declined"
     assert calls["contracts"]["update"][0]["status"] == "terminated"
     assert calls["awards"]["update"][0] == {"status": "declined_by_vendor"}
+    # Package is left in 'evaluating' on decline (re-awardable) — no package write.
+    assert "bid_packages" not in calls
     # No decline emails on a vendor decline.
     assert fake_email.sent == []
 

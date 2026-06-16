@@ -206,7 +206,7 @@ class TestSubmittedBids:
 
 class TestLazyExpiration:
     """When deadline has passed, sent/opened invitations auto-expire
-    and bid_package.status flips from 'open' to 'closed'."""
+    and bid_package.status flips from 'open' to 'evaluating'."""
 
     @pytest.mark.asyncio
     async def test_lazy_expiration_updates_invitations_and_package(
@@ -246,8 +246,8 @@ class TestLazyExpiration:
             db=client,
         )
 
-        # Bid package should be marked closed in the returned response
-        assert result["status"] == "closed"
+        # Bid package should be marked evaluating in the returned response
+        assert result["status"] == "evaluating"
 
         # bid_invitations should have been updated with status='expired'
         invitation_updates = [
@@ -258,12 +258,12 @@ class TestLazyExpiration:
             u["payload"].get("status") == "expired" for u in invitation_updates
         )
 
-        # bid_packages should have been updated with status='closed'
+        # bid_packages should have been updated with status='evaluating'
         package_updates = [
             u for u in updates_captured if u["table"] == "bid_packages"
         ]
         assert any(
-            u["payload"].get("status") == "closed" for u in package_updates
+            u["payload"].get("status") == "evaluating" for u in package_updates
         )
 
     @pytest.mark.asyncio

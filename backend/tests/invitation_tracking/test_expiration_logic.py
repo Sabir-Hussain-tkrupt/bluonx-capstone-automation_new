@@ -112,11 +112,12 @@ class TestDoesNotTouchFinalizedRows:
                 assert status == "expired"
 
 
-class TestUpdatesBidPackageToClosed:
-    """bid_packages.status flips from 'open' to 'closed'."""
+class TestUpdatesBidPackageToEvaluating:
+    """bid_packages.status flips from 'open' to 'evaluating' (the sweep no longer
+    writes 'closed'; that is reserved for award acceptance)."""
 
     @pytest.mark.asyncio
-    async def test_package_status_closed(
+    async def test_package_status_evaluating(
         self,
         sample_bid_package_past_deadline,
         sample_invitations_mixed_statuses,
@@ -138,6 +139,9 @@ class TestUpdatesBidPackageToClosed:
         ]
         assert len(package_updates) >= 1
         assert any(
+            u["payload"].get("status") == "evaluating" for u in package_updates
+        )
+        assert not any(
             u["payload"].get("status") == "closed" for u in package_updates
         )
 

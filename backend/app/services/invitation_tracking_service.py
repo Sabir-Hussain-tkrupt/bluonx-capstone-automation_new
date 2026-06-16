@@ -66,7 +66,10 @@ class TerminalStatusError(InvitationTrackingError):
 _ALL_STATUSES = ("sent", "opened", "submitted", "declined", "expired", "no_response")
 _PM_SETTABLE_STATUSES = frozenset({"declined", "expired", "no_response"})
 _EXPIRABLE_STATUSES = ("sent", "opened")
-_NOOP_PACKAGE_STATUSES = frozenset({"closed", "cancelled"})
+# Statuses the deadline sweep / lazy-expiry treat as no-ops: it acts ONLY on an
+# 'open' package. 'evaluating' is included so a manually-closed package (open →
+# evaluating) is never re-swept when its deadline later passes.
+_NOOP_PACKAGE_STATUSES = frozenset({"closed", "cancelled", "evaluating"})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -299,11 +302,14 @@ def _transform_document(row: dict) -> dict:
 
 
 async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
-    """If the bid package deadline has passed and the package is open,
-    flip all sent/opened invitations to 'expired' and close the package.
+    """Automatic deadline backstop. If the bid package deadline has passed and the
+    package is still open, flip all sent/opened invitations to 'expired' and move
+    the package open → 'evaluating' (NOT 'closed' — the package only reaches
+    'closed' on award acceptance). Invitation-expiry behavior is unchanged.
 
-    Returns {"expired_count": int, "package_closed": bool}.
-    No-op when deadline is in the future or package is closed/cancelled.
+    Returns {"expired_count": int, "package_closed": bool} (package_closed = True
+    when the package was moved out of 'open'). No-op when the deadline is in the
+    future or the package is not 'open'.
     """
     bid_package = _fetch_bid_package(db, bid_package_id)
     if bid_package is None:
@@ -317,7 +323,8 @@ async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
     if deadline is None or deadline >= datetime.now(timezone.utc):
         return {"expired_count": 0, "package_closed": False}
 
-    # Deadline has passed and package is still open — expire overdue rows.
+    # Deadline has passed and package is still open (the _NOOP guard above
+    # already excluded evaluating/closed/cancelled) — expire overdue rows.
     invitations = _fetch_invitations(db, bid_package_id)
     expired_count = sum(
         1 for inv in invitations if inv.get("status") in _EXPIRABLE_STATUSES
@@ -336,12 +343,40 @@ async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
 
     (
         db.table("bid_packages")
-        .update({"status": "closed", "updated_at": now})
+        .update({"status": "evaluating", "updated_at": now})
         .eq("id", str(bid_package_id))
         .execute()
     )
 
     return {"expired_count": expired_count, "package_closed": True}
+
+
+async def close_bidding(*, bid_package_id: UUID, db) -> dict:
+    """Manual early close (PM action): open → 'evaluating'. Allowed only from
+    'open' (409 otherwise), both before and after the deadline. New bid inflow is
+    sealed by the existing `status != 'open'` gates — no token revocation and no
+    invitation expiry here (the deadline sweep owns invitation expiry).
+
+    Returns {"id", "status"}.
+    """
+    bid_package = _fetch_bid_package(db, bid_package_id)
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+
+    current_status = bid_package.get("status")
+    if current_status != "open":
+        raise InvitationTrackingError(
+            409,
+            f"Cannot close bidding: the package is '{current_status}', not 'open'.",
+        )
+
+    (
+        db.table("bid_packages")
+        .update({"status": "evaluating", "updated_at": _now_iso()})
+        .eq("id", str(bid_package_id))
+        .execute()
+    )
+    return {"id": str(bid_package_id), "status": "evaluating"}
 
 
 async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
@@ -361,7 +396,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         and deadline < datetime.now(timezone.utc)
     ):
         await expire_overdue_invitations(bid_package_id=bid_package_id, db=db)
-        bid_package["status"] = "closed"
+        bid_package["status"] = "evaluating"
         lazy_expired = True
 
     invitations_rows = _fetch_invitations(db, bid_package_id)

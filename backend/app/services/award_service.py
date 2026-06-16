@@ -55,6 +55,24 @@ class AwardError(Exception):
         super().__init__(str(detail))
 
 
+def _has_pending_revision(db: Client, bid_package_id) -> bool:
+    """True if any invitation on this package has a pending revision request.
+    Awarding while a revision is outstanding would race the vendor's in-flight
+    edit, so award-create rejects it (409). `bid_revision_requests` keys on
+    `bid_invitation_id`, so we filter through the bid_invitations embed."""
+    if not bid_package_id:
+        return False
+    resp = (
+        db.table("bid_revision_requests")
+        .select("id, bid_invitations!inner(bid_package_id)")
+        .eq("bid_invitations.bid_package_id", str(bid_package_id))
+        .eq("status", "pending")
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 def _is_unique_violation(err: APIError) -> bool:
     """Heuristic — supabase-py wraps Postgres 23505 in APIError. Same logic as
     bid_revision_service._is_unique_violation."""
@@ -102,6 +120,14 @@ async def create_award(
             422,
             f"Cannot award from a bid package with status '{package_status}'. "
             "The package must be closed or evaluating.",
+        )
+
+    # 2b) Don't award while a vendor still has an outstanding revision request —
+    #     the in-flight edit must be resolved (submitted/declined/cancelled) first.
+    if _has_pending_revision(db, package.get("id")):
+        raise AwardError(
+            409,
+            "Resolve the outstanding revision request before awarding.",
         )
 
     # 3) Recompute validation fresh — the server is the final truth.
