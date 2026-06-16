@@ -1,10 +1,10 @@
 # BluOnX Bid Management & Vendor Coordination System — Database Schema Documentation
 
-**Schema Version:** 2.2  
-**Last Updated:** February 23, 2026  
+**Schema Version:** 2.31  
+**Last Updated:** May 14, 2026  
 **Author:** Awais Anwer (Tkrupt)  
 **Engine:** PostgreSQL via Supabase  
-**Tables:** 28 | **Triggers:** 25 (24 active + 1 disabled) | **Functions:** 11 (10 active + 1 disabled)
+**Tables:** 29 | **Triggers:** 29 (28 active + 1 disabled) | **Functions:** 14 (13 active + 1 disabled)
 
 ---
 
@@ -40,6 +40,8 @@ Three task types flow differently through this chain:
 | `competitive` | Full pipeline — bid package, invitations to multiple vendors, scoring, award. |
 | `direct_assign` | PM picks a vendor. Backend creates a synthetic bid_submission (`is_direct_assign = TRUE`) so the downstream chain (award → contract → milestones) works identically. |
 | `internal` | Budget line item only. No bid package, award, contract, or milestones. Enforced at the application layer. |
+
+**Revisions:** A submitted bid can later be revised at PM request (see `bid_revision_requests`). A revision is a *new* `bid_submissions` row that supersedes the original via `supersedes_submission_id`, so the chain above is preserved and the prior version is retained as immutable history. The original bid is never mutated in place.
 
 ---
 
@@ -183,7 +185,7 @@ The fundamental work unit. **One task = one trade = one award = one contract.** 
 
 ---
 
-### Group 4: Bid Lifecycle (10 tables)
+### Group 4: Bid Lifecycle (11 tables)
 
 #### `bid_templates`
 
@@ -220,6 +222,7 @@ Represents a single bidding round for a task. When a PM clicks "Start Bidding," 
 | `round_number` | INTEGER | Auto-set by trigger: `MAX(round_number) + 1` for the task. |
 | `deadline` | TIMESTAMPTZ | Bid submission deadline. Same for all vendors in the package. |
 | `instructions` | TEXT, **nullable** | Optional PM-supplied bid-submission guidance shown to vendors in the portal and invitation email. Distinct from tasks.description (scope of work). May change between rebid rounds. Examples: "include mobilization as separate line item", "bid held firm for 30 days". |
+| `desired_start_date` | DATE, **nullable** | PM-communicated target start date for this bidding round. NULL = flexible/none. Pre-fills the vendor's `proposed_start_date` in the form. When NULL, the timeline dimension is neutralized in scoring. |
 | `status` | VARCHAR(20) | `open`, `closed`, `evaluating`, `cancelled`. |
 
 **Application-layer rule:** Must not be created for tasks with `bid_type = 'internal'`.
@@ -258,26 +261,38 @@ Secure tokens for vendor bid portal authentication. Vendors access the bid form 
 | `bid_invitation_id` | UUID, FK → bid_invitations | CASCADE on delete. |
 | `vendor_id` | UUID, FK → vendors | |
 | `token_hash` | VARCHAR(255), UNIQUE | SHA-256 hash of the raw token. Raw token is never stored. |
-| `expires_at` | TIMESTAMPTZ | Token expiry (7 days). |
-| `is_used` | BOOLEAN | First-response-wins pattern. After first use, subsequent clicks show a friendly "already responded" page. |
+| `expires_at` | TIMESTAMPTZ | Token expiry, set to the bid package deadline (not a fixed window). |
+| `used_at` | TIMESTAMPTZ, nullable | Timestamp of first use. Audit detail. |
+| `is_used` | BOOLEAN | Audit-only flag recording whether the token has been used. Not an access gate — validity is governed by expiry and revocation, not by `is_used`. |
+| `revoked_at` | TIMESTAMPTZ, nullable | Hard-revocation timestamp (e.g., via "Resend Bid Link"). NULL = live. The validator rejects revoked tokens with HTTP 410. |
+| `revoked_by` | UUID, FK → users, nullable | User who revoked the token. SET NULL if that user is later deleted. |
+| `bid_revision_request_id` | UUID, FK → bid_revision_requests, nullable | **Discriminator.** NULL = initial bid-invitation token. Non-NULL = revision token; the validator branches on this to bypass the package-status check and to confirm the revision request is still pending. RESTRICT on delete. |
 | `ip_address` | INET | Security logging. |
 
-**Security model:** Tokens are time-limited (7 days) with first-response-wins logic, not single-use. This handles email scanner pre-fetches and accidental double-clicks gracefully. After successful magic link validation, FastAPI issues a short-lived stateless JWT (2–4 hours) for the vendor's bid form session.
+**Security model:** Token expiry is tied to the bid package deadline rather than an arbitrary window. After successful magic link validation, FastAPI issues a short-lived stateless JWT (2–4 hours) for the vendor's bid form session; if the JWT expires, the vendor clicks the magic link again and resumes from their saved draft. Revision tokens (`bid_revision_request_id` set) follow the same mechanics but branch the validator past the package-status check and instead validate against the revision request's `pending` state and per-request deadline.
 
 #### `bid_submissions`
 
-The vendor's actual bid response. One submission per invitation (enforced by `UNIQUE(bid_invitation_id)`). Supports draft auto-save — the same row transitions from `is_draft = TRUE` to `FALSE` on final submission.
+The vendor's actual bid response. Supports draft auto-save — a row transitions from `is_draft = TRUE` to `FALSE` on final submission. Originally constrained to one row per invitation via a column-level `UNIQUE(bid_invitation_id)`; as of the per-vendor bid revision feature this is enforced by a **partial unique index** (`WHERE is_superseded = FALSE AND is_draft = FALSE`), so exactly one *current* submission exists per invitation while superseded revisions and concurrent drafts coexist.
 
 | Column | Type | Notes |
 |---|---|---|
-| `bid_invitation_id` | UUID, FK → bid_invitations, UNIQUE | One submission per invitation. |
+| `bid_invitation_id` | UUID, FK → bid_invitations | Parent invitation. One *current* (non-superseded, non-draft) submission per invitation, enforced by partial unique index. |
 | `vendor_id` | UUID, FK → vendors | **Denormalized** for query performance. Enforced equal to `bid_invitations.vendor_id` by trigger. |
 | `total_amount` | DECIMAL(15,2) | Sum of all line items. |
 | `status` | VARCHAR(20) | `draft` → `submitted` → `under_review` → `accepted` or `rejected`. |
 | `is_draft` | BOOLEAN | `TRUE` while vendor is editing. `FALSE` on final submission. |
 | `is_direct_assign` | BOOLEAN | `TRUE` for synthetic submissions created via the direct_assign flow. Distinguishes from competitive bids in comparison and reporting views. |
+| `submitted_at` | TIMESTAMPTZ | Set on final submission. |
+| `vendor_notes` | TEXT | Free-text notes from the vendor accompanying the bid. |
+| `proposed_start_date` | DATE | Vendor's committed start date. Pre-filled with `bid_packages.desired_start_date`; required on submit when a desired date exists. `proposed ≤ desired` = on time (feeds timeline scoring). |
+| `supersedes_submission_id` | UUID, FK → bid_submissions, nullable | Chain pointer to the predecessor this row supersedes. NULL = original. RESTRICT on delete (audit chain). CHECK `chk_bid_submissions_supersedes_not_self` prevents self-reference. |
+| `is_superseded` | BOOLEAN | `TRUE` when a newer revision exists. Trigger-maintained on revision finalize. |
+| `revision_number` | INTEGER | Human-visible version. `1` = original; each revision = predecessor + 1 (trigger-enforced). CHECK ≥ 1. |
 
 **Backend contract for `vendor_id`:** The vendor never inserts into this table directly. The API layer resolves `vendor_id` from the `bid_invitation` record when creating a submission. Client-supplied `vendor_id` is never trusted.
+
+**Supersession & revisions:** A revision is a new row whose `supersedes_submission_id` points at the row being revised. The original is preserved unchanged as audit history; when the revision finalizes, triggers flip the predecessor's `is_superseded` to `TRUE` and increment `revision_number`. See §4.8 and `bid_revision_requests`.
 
 #### `bid_line_items`
 
@@ -318,6 +333,25 @@ Weighted scoring results per submission. One score record per submission (enforc
 | `scoring_metadata` | JSONB | Snapshot of scoring breakdown and weights used at time of scoring. Immutable audit record. |
 | `scored_by` | UUID, FK → users, nullable | `NULL` = system-generated score. Non-NULL = manually adjusted by a PM. |
 
+#### `bid_revision_requests`
+
+PM-initiated request asking a single vendor to revise their already-submitted bid after the round has closed, **without disturbing the rest of the package**. Lifecycle: `pending` → `submitted` | `declined` | `expired` | `cancelled`. One **pending** request per invitation at a time (partial unique index); terminal-state rows coexist as audit history.
+
+| Column | Type | Notes |
+|---|---|---|
+| `bid_invitation_id` | UUID, FK → bid_invitations | RESTRICT on delete. The invitation whose submission is being revised. |
+| `original_submission_id` | UUID, FK → bid_submissions | RESTRICT. Denormalized pointer to the submission being revised. The successor relationship itself lives on `bid_submissions.supersedes_submission_id`. |
+| `pm_note` | TEXT, NOT NULL | Personalized note to the vendor. CHECK `length(pm_note) > 0`. |
+| `revision_deadline` | TIMESTAMPTZ | Per-request deadline, independent of `bid_packages.deadline` (may outlive it). |
+| `status` | VARCHAR(20) | `pending`, `submitted`, `declined`, `expired`, `cancelled`. |
+| `decline_reason` | TEXT, nullable | Optional short note from the vendor on decline. |
+| `requested_by` | UUID, FK → users | RESTRICT. PM who initiated the request. |
+| `requested_at`, `responded_at` | TIMESTAMPTZ | Request and response timestamps. |
+
+**How it ties together:** A revision token (a `magic_link_tokens` row with `bid_revision_request_id` set) is emailed to the vendor. The validator branches on that discriminator to bypass the package-status check and confirm the request is still pending. On submit, the vendor's new submission row points at the original via `supersedes_submission_id`; on finalize, triggers flip the predecessor's `is_superseded` flag and close this request to `submitted` (see §4.8).
+
+**Application-layer rules:** PM-initiated only; capped at 2 revisions per vendor per package; blocked once an award is in place for the task.
+
 ---
 
 ### Group 5: Award & Contract (3 tables)
@@ -333,6 +367,7 @@ The award decision record. One active award per task at any time, enforced by a 
 | `vendor_id` | UUID, FK → vendors | **Denormalized.** Enforced equal to `bid_submissions.vendor_id` by trigger. |
 | `awarded_by` | UUID, FK → users | PM who made the decision. |
 | `award_amount` | DECIMAL(15,2) | |
+| `instructions` | TEXT, nullable | PM-supplied award / mobilization instructions, carried into the award letter email. |
 | `has_override` | BOOLEAN | `TRUE` if PM overrode pre-award validation warnings. |
 | `override_justification` | TEXT | Required when `has_override = TRUE`. Audit trail for compliance. |
 | `validation_results` | JSONB | Snapshot of all pre-award validation checks at time of award (insurance, bonding, capacity, budget variance, start date feasibility). |
@@ -471,7 +506,7 @@ In-app notifications for the PM dashboard. User-scoped — each user can only se
 
 ### 4.1 Automatic Timestamps
 
-A `BEFORE UPDATE` trigger on every table with an `updated_at` column calls `fn_set_updated_at()`, which sets `updated_at = NOW()`. Applied to 15 tables.
+A `BEFORE UPDATE` trigger on every table with an `updated_at` column calls `fn_set_updated_at()`, which sets `updated_at = NOW()`. Applied to 16 tables.
 
 ### 4.2 Bid Package Round Number
 
@@ -479,7 +514,7 @@ A `BEFORE UPDATE` trigger on every table with an `updated_at` column calls `fn_s
 
 ### 4.3 Bid Invitation Status Sync
 
-`fn_sync_bid_invitation_on_submission()` — `AFTER INSERT OR UPDATE` on `bid_submissions`. When a submission transitions to `status = 'submitted'`, the parent `bid_invitation` is automatically updated to `status = 'submitted'` with `responded_at = NOW()`. Keeps dashboard counts accurate without relying on application code.
+`fn_sync_bid_invitation_on_submission()` — `AFTER INSERT OR UPDATE` on `bid_submissions`. When a submission transitions to `status = 'submitted'`, the parent `bid_invitation` is automatically updated to `status = 'submitted'` with `responded_at = NOW()`. Keeps dashboard counts accurate without relying on application code. The function uses `COALESCE(responded_at, NOW())` and an `OLD IS NULL` guard so that a later revision submission does not overwrite the original response timestamp.
 
 ### 4.4 Denormalized Field Consistency (4 triggers)
 
@@ -515,17 +550,30 @@ Both use `GREATEST(..., 0)` as a safety net to prevent negative values.
 
 The `fn_sync_vendor_onboarding_status` trigger is **intentionally disabled** (commented out in the schema). The decision was made to keep onboarding status as a manual PM-controlled field because real-world onboarding involves verification steps beyond document presence (e.g., calling the insurance carrier, reviewing W-9 for corrections). The trigger is preserved in the schema for potential future activation.
 
+### 4.8 Per-Vendor Bid Revision Triggers (3 triggers)
+
+These three triggers, all on `bid_submissions`, implement the supersession mechanics behind the per-vendor bid revision feature.
+
+| Trigger (function) | Timing | Behavior |
+|---|---|---|
+| `trg_bid_submissions_enforce_supersession` (`fn_enforce_supersession_chain`) | `BEFORE INSERT OR UPDATE OF supersedes_submission_id, revision_number` | Validates the chain: predecessor exists, same `bid_invitation_id`, predecessor is finalized (not a draft), and `revision_number = predecessor.revision_number + 1`. |
+| `trg_bid_submissions_flip_superseded` (`fn_flip_superseded_on_revision_finalize`) | `BEFORE UPDATE OF is_draft` | When a revision draft finalizes (`is_draft` TRUE → FALSE), flips the predecessor's `is_superseded` to `TRUE`. Running BEFORE means the predecessor leaves the partial unique index *before* the outer row is checked, so the index sees only one current row — no conflict. The `OF is_draft` column filter prevents the trigger from re-firing on the predecessor's own update (recursion termination). |
+| `trg_bid_submissions_close_revision_request` (`fn_close_revision_request_on_finalize`) | `AFTER UPDATE` | On the same finalize, sets the matching `pending` `bid_revision_requests` row to `submitted` with `responded_at = NOW()`, in the same transaction. |
+
+Together with the partial unique index `idx_bid_submissions_current_per_invitation`, these keep exactly one current submission per invitation while preserving every prior version as immutable history.
+
 ---
 
 ## 5. Indexing Strategy
 
-50 custom indexes plus automatic indexes on all PK and UNIQUE columns. Key patterns:
+57 custom indexes plus automatic indexes on all PK and UNIQUE columns. Key patterns:
 
 - **Every FK column** has a dedicated index for JOIN performance.
 - **Composite indexes** on common query patterns (e.g., `tasks(project_id, status)`, `bid_invitations(bid_package_id, status)`).
-- **Partial indexes** on soft-deleted tables (`WHERE deleted_at IS NULL`) to exclude soft-deleted records from index scans. idx_projects_archived on projects(archived_at) WHERE deleted_at IS NULL — efficient filtering for archived vs. non-archived project views.
-- **Conditional indexes** for high-frequency filtered queries: unread notifications (`WHERE is_read = FALSE`), unresolved vendor flags (`WHERE is_resolved = FALSE`), active magic link tokens (`WHERE is_used = FALSE`).
-- **Two partial unique indexes** enforce the "one active record per task" rule on `awards` and `contracts` while preserving historical records.
+- **Partial indexes** on soft-deleted tables (`WHERE deleted_at IS NULL`) to exclude soft-deleted records from index scans. `idx_projects_archived` on `projects(archived_at) WHERE deleted_at IS NULL` — efficient filtering for archived vs. non-archived project views.
+- **Conditional indexes** for high-frequency filtered queries: unread notifications (`WHERE is_read = FALSE`), unresolved vendor flags (`WHERE is_resolved = FALSE`), active magic link tokens (`WHERE is_used = FALSE AND revoked_at IS NULL`).
+- **Four partial unique indexes** enforce single-active-record rules while preserving historical rows: one active award per task, one active contract per task, one *current* (non-superseded, non-draft) bid submission per invitation, and one *pending* revision request per invitation.
+- **Revision feature indexes:** `bid_revision_requests` is indexed on `bid_invitation_id`, `status`, and `original_submission_id`; `magic_link_tokens` has a partial index on `bid_revision_request_id` (WHERE NOT NULL) for revision-token lookups.
 
 ---
 
@@ -533,7 +581,7 @@ The `fn_sync_vendor_onboarding_status` trigger is **intentionally disabled** (co
 
 ### Row Level Security (RLS)
 
-RLS is enabled on all 28 tables. The access model:
+RLS is enabled on all 29 tables. The access model:
 
 | Access Pattern | Auth Method | RLS Behavior |
 |---|---|---|
@@ -548,6 +596,8 @@ Two helper functions in a `private` schema (not exposed via PostgREST) use `SECU
 **Admin-only write policies** exist on `users` (only admin can modify other users' accounts) and `trades` (controlled lookup, admin-managed). All other writes go through FastAPI.
 
 **User-scoped table:** `notifications` — each user can only see and update their own notifications.
+
+`bid_revision_requests` follows the standard bid-lifecycle pattern: authenticated read access via `private.is_active_user()`, all writes through FastAPI service_role, zero anon access.
 
 ### Storage Buckets
 
@@ -573,6 +623,7 @@ Authenticated users have full CRUD. Anonymous has zero access. Vendor uploads ar
 | **Partial unique indexes for re-award/re-contract** | Allows a task to be re-awarded if a vendor declines, while preserving the full history of all awards. Only one active/pending record per task at any time. |
 | **Separate bid_packages table** | Supports rebidding (multiple rounds per task) with clean audit trail per round. |
 | **Synthetic submissions for direct_assign** | Instead of making `bid_submission_id` nullable on awards (which would break the entire consistency trigger chain), direct_assign tasks create a minimal submission record. The entire downstream pipeline (award → contract → milestones) works identically for both competitive and direct-assign tasks. |
+| **Per-vendor bid revision via supersession chain** | A PM can ask one vendor to revise after the round closes without reopening the package. Rather than mutating the original bid (which would destroy audit history), a revised submission is inserted pointing at the original via `supersedes_submission_id`. The original column-level `UNIQUE(bid_invitation_id)` was replaced by a partial unique index so that one *current* row exists per invitation while every prior version is retained. A per-request deadline (`bid_revision_requests.revision_deadline`) lets a single vendor's revision window outlive the package deadline. |
 | **Manual onboarding status** | PM controls the `onboarding_status` field directly. Auto-sync from documents was considered but rejected because real-world verification involves steps beyond document presence. |
 | **email_log + milestone_alerts (no duplication)** | `email_log` is the single source of truth for delivery status. `milestone_alerts` holds milestone-specific context (alert type, response token) and references `email_log` via FK. No data is duplicated between the two. |
 | **Archive as separate column, not a status value** | "Archived" is a visibility concept (hide from default view), not a lifecycle stage. Using a separate archived_at column preserves the original project status, enabling clean unarchive without needing a previous_status field. Projects in any non-active status can be archived; active projects with in-flight tasks cannot. |
@@ -583,15 +634,15 @@ Authenticated users have full CRUD. Anonymous has zero access. Vendor uploads ar
 
 | Metric | Count |
 |---|---|
-| Tables | 28 |
-| Custom indexes | 50 (47 regular + 2 partial unique) |
-| Active triggers | 24 |
-| Active functions | 10 |
+| Tables | 29 |
+| Custom indexes | 57 (53 regular + 4 partial unique) |
+| Active triggers | 28 |
+| Active functions | 13 |
 | Disabled triggers | 1 (onboarding sync) |
 | Disabled functions | 1 (onboarding sync) |
-| CHECK constraints | 46 |
-| Foreign keys (RESTRICT) | 39 |
-| Foreign keys (CASCADE) | 8 |
+| CHECK constraints | 50 |
+| Foreign keys (RESTRICT) | 44 |
+| Foreign keys (CASCADE) | 7 |
 | Foreign keys (SET NULL) | 6 |
 
 ---
@@ -600,6 +651,6 @@ Authenticated users have full CRUD. Anonymous has zero access. Vendor uploads ar
 
 | File | Purpose |
 |---|---|
-| `bluonx_complete_schema_v2_2.sql` | Complete schema: tables, indexes, triggers, functions. |
+| `bluonx_complete_schema.sql` | Complete schema (v2.31): tables, indexes, triggers, functions. |
 | `rls_policies.sql` | All RLS policies, helper functions in `private` schema, anon role revocations. Depends on the schema file. |
 | `storage_rls_policies.sql` | Storage bucket RLS policies. Buckets must be created via Supabase Dashboard before running. |
