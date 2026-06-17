@@ -41,6 +41,9 @@ class AwardCreateRequest(BluOnXBase):
     bid_submission_id: UUID
     has_override: bool = False
     override_justification: str | None = None
+    # PM-authored free-text guidance (mobilization, site access, etc.). Persisted
+    # on the award and rendered in the award email. Optional.
+    instructions: str | None = None
 
 
 class AwardUpdate(BluOnXBase):
@@ -58,6 +61,7 @@ class AwardResponse(BluOnXBase):
     award_amount: Decimal
     has_override: bool
     override_justification: str | None = None
+    instructions: str | None = None
     validation_results: dict | None = None
     status: str
     created_at: datetime

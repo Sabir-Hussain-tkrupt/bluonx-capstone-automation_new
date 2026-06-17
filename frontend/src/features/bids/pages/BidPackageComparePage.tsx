@@ -78,6 +78,7 @@ export function BidPackageComparePage() {
   const handleConfirmAward = (args: {
     has_override: boolean;
     override_justification?: string;
+    instructions?: string;
   }) => {
     if (!awardTarget) return;
     setAwardError(null);
@@ -212,7 +213,7 @@ export function BidPackageComparePage() {
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              Compare bids — {bp.task_name} (Round {bp.round_number})
+              Compare bids: {bp.task_name} (Round {bp.round_number})
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={bp.status} size="sm" />
@@ -245,7 +246,10 @@ export function BidPackageComparePage() {
           {cohort.recommendation && (
             <RecommendationPanel
               recommendation={cohort.recommendation}
-              onAward={handleAward}
+              // Suppress the recommendation's Award action once the task has a
+              // live award (RecommendationPanel hides the button when onAward is
+              // omitted). The winning-row "Awarded" state lives in the table.
+              onAward={bp.award ? undefined : handleAward}
             />
           )}
 
@@ -268,6 +272,7 @@ export function BidPackageComparePage() {
             onToggleExpand={handleToggleExpand}
             onViewBid={setViewSubmissionId}
             onAward={handleAward}
+            award={bp.award ?? null}
           />
 
           {submittedBids.length > 0 && (

@@ -24,6 +24,9 @@ from .conftest import PM_USER_ID, SUBMISSION_ID, TASK_ID, VENDOR_ID, award_body
 
 URL = "/api/v1/awards"
 
+# Local: the bid_packages.id the chain row carries, used by the pending-revision guard.
+PACKAGE_ID = uuid4()
+
 
 # ── Row builders ─────────────────────────────────────────────────────────
 
@@ -63,6 +66,7 @@ def chain_row(
         },
         "bid_invitations": {
             "bid_packages": {
+                "id": str(PACKAGE_ID),
                 "desired_start_date": desired_start_date,
                 "deadline": "2099-01-01",
                 "status": package_status,
@@ -246,6 +250,28 @@ def test_cancelled_package_returns_422_precondition(client_factory):
     r = c.post(URL, json=award_body())
     assert r.status_code == 422
     assert isinstance(r.json()["detail"], str)
+
+
+def test_pending_revision_blocks_award_409(client_factory):
+    """A pending revision request on the package blocks award-create with 409."""
+    spec = clean_spec()
+    # Any row returned for bid_revision_requests means a pending revision exists
+    # (the service filters .eq("status","pending"); the mock returns this verbatim).
+    spec["bid_revision_requests"] = {"select": [{"id": str(uuid4())}]}
+    c = client_factory(spec)
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 409
+    assert "revision" in r.json()["detail"].lower()
+
+
+def test_no_pending_revision_allows_award(recording_client_factory):
+    """No pending revision (empty result) → award proceeds normally."""
+    spec = clean_spec()
+    spec["bid_revision_requests"] = {"select": []}
+    c, calls = recording_client_factory(spec)
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 201
+    assert calls["awards"]["insert"][0]["status"] == "pending_acceptance"
 
 
 def test_second_active_award_returns_clean_409(client_factory):

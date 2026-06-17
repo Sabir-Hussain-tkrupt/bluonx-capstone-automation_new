@@ -66,7 +66,10 @@ class TerminalStatusError(InvitationTrackingError):
 _ALL_STATUSES = ("sent", "opened", "submitted", "declined", "expired", "no_response")
 _PM_SETTABLE_STATUSES = frozenset({"declined", "expired", "no_response"})
 _EXPIRABLE_STATUSES = ("sent", "opened")
-_NOOP_PACKAGE_STATUSES = frozenset({"closed", "cancelled"})
+# Statuses the deadline sweep / lazy-expiry treat as no-ops: it acts ONLY on an
+# 'open' package. 'evaluating' is included so a manually-closed package (open →
+# evaluating) is never re-swept when its deadline later passes.
+_NOOP_PACKAGE_STATUSES = frozenset({"closed", "cancelled", "evaluating"})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -141,26 +144,36 @@ def _fetch_invitations(
     return _unwrap_list(resp.data)
 
 
-def _task_has_active_award(db, task_id) -> bool:
-    """True if the task has an award in a revision-blocking status.
+def _task_active_award(db, task_id) -> dict | None:
+    """The task's live award (status in _BLOCKING_AWARD_STATUSES) as
+    {"bid_submission_id", "status"}, or None when the task is re-awardable
+    (no award, or only declined_by_vendor / cancelled — consistent with
+    idx_awards_one_active_per_task).
 
     One query per package-detail request (NOT per invitation). The status
-    set matches bid_revision_service.create_revision_request exactly. The
-    status check runs in Python so it stays correct regardless of whether
-    the caller's mock applies PostgREST filters.
+    check runs in Python so it stays correct regardless of whether the
+    caller's mock applies PostgREST filters.
     """
     if not task_id:
-        return False
+        return None
     resp = (
         db.table("awards")
-        .select("id, status")
+        .select("id, status, bid_submission_id")
         .eq("task_id", str(task_id))
         .execute()
     )
-    return any(
-        row.get("status") in _BLOCKING_AWARD_STATUSES
-        for row in _unwrap_list(resp.data)
-    )
+    for row in _unwrap_list(resp.data):
+        if row.get("status") in _BLOCKING_AWARD_STATUSES:
+            return {
+                "bid_submission_id": row.get("bid_submission_id"),
+                "status": row.get("status"),
+            }
+    return None
+
+
+def _task_has_active_award(db, task_id) -> bool:
+    """True if the task has an award in a revision-blocking status."""
+    return _task_active_award(db, task_id) is not None
 
 
 def _fetch_submitted_bids(db, bid_package_id: UUID) -> list[dict]:
@@ -289,11 +302,14 @@ def _transform_document(row: dict) -> dict:
 
 
 async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
-    """If the bid package deadline has passed and the package is open,
-    flip all sent/opened invitations to 'expired' and close the package.
+    """Automatic deadline backstop. If the bid package deadline has passed and the
+    package is still open, flip all sent/opened invitations to 'expired' and move
+    the package open → 'evaluating' (NOT 'closed' — the package only reaches
+    'closed' on award acceptance). Invitation-expiry behavior is unchanged.
 
-    Returns {"expired_count": int, "package_closed": bool}.
-    No-op when deadline is in the future or package is closed/cancelled.
+    Returns {"expired_count": int, "package_closed": bool} (package_closed = True
+    when the package was moved out of 'open'). No-op when the deadline is in the
+    future or the package is not 'open'.
     """
     bid_package = _fetch_bid_package(db, bid_package_id)
     if bid_package is None:
@@ -307,7 +323,8 @@ async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
     if deadline is None or deadline >= datetime.now(timezone.utc):
         return {"expired_count": 0, "package_closed": False}
 
-    # Deadline has passed and package is still open — expire overdue rows.
+    # Deadline has passed and package is still open (the _NOOP guard above
+    # already excluded evaluating/closed/cancelled) — expire overdue rows.
     invitations = _fetch_invitations(db, bid_package_id)
     expired_count = sum(
         1 for inv in invitations if inv.get("status") in _EXPIRABLE_STATUSES
@@ -326,12 +343,40 @@ async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
 
     (
         db.table("bid_packages")
-        .update({"status": "closed", "updated_at": now})
+        .update({"status": "evaluating", "updated_at": now})
         .eq("id", str(bid_package_id))
         .execute()
     )
 
     return {"expired_count": expired_count, "package_closed": True}
+
+
+async def close_bidding(*, bid_package_id: UUID, db) -> dict:
+    """Manual early close (PM action): open → 'evaluating'. Allowed only from
+    'open' (409 otherwise), both before and after the deadline. New bid inflow is
+    sealed by the existing `status != 'open'` gates — no token revocation and no
+    invitation expiry here (the deadline sweep owns invitation expiry).
+
+    Returns {"id", "status"}.
+    """
+    bid_package = _fetch_bid_package(db, bid_package_id)
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+
+    current_status = bid_package.get("status")
+    if current_status != "open":
+        raise InvitationTrackingError(
+            409,
+            f"Cannot close bidding: the package is '{current_status}', not 'open'.",
+        )
+
+    (
+        db.table("bid_packages")
+        .update({"status": "evaluating", "updated_at": _now_iso()})
+        .eq("id", str(bid_package_id))
+        .execute()
+    )
+    return {"id": str(bid_package_id), "status": "evaluating"}
 
 
 async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
@@ -351,7 +396,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         and deadline < datetime.now(timezone.utc)
     ):
         await expire_overdue_invitations(bid_package_id=bid_package_id, db=db)
-        bid_package["status"] = "closed"
+        bid_package["status"] = "evaluating"
         lazy_expired = True
 
     invitations_rows = _fetch_invitations(db, bid_package_id)
@@ -366,7 +411,8 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     documents_rows = _fetch_documents(db, bid_package_id)
 
     # Task-scoped: one query for the whole package, applied to every row.
-    is_awarded = _task_has_active_award(db, bid_package.get("task_id"))
+    active_award = _task_active_award(db, bid_package.get("task_id"))
+    is_awarded = active_award is not None
     invitations = [
         _transform_invitation(row, is_awarded=is_awarded)
         for row in invitations_rows
@@ -395,6 +441,7 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
         "invitation_summary": summary,
         "invitations": invitations,
         "submitted_bids": submitted_bids,
+        "award": active_award,
     }
 
 

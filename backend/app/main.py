@@ -22,6 +22,8 @@ from app.routers import (
     bid_submissions,
     bid_templates,
     contracts,
+    docusign_health,
+    docusign_webhooks,
     geocoding,
     health,
     milestones,
@@ -87,6 +89,8 @@ app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(geocoding.router, prefix=_v1, tags=["Geocoding"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
+app.include_router(docusign_webhooks.router, prefix=_v1, tags=["DocuSign Webhooks"])
 app.include_router(scheduler_health.router, prefix=_v1, tags=["Scheduler"])
+app.include_router(docusign_health.router, prefix=_v1, tags=["DocuSign"])
 app.include_router(vendor_auth.router, prefix=_v1, tags=["Vendor Auth"])
 app.include_router(vendor_portal.router, prefix=_v1, tags=["Vendor Portal"])

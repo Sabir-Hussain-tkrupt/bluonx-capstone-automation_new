@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
 import { useBidSubmissionDetail } from '@/features/bids/hooks/useBidSubmissionDetail';
 import type {
+  ActiveAward,
   BidScoreRow,
   RankedVendor,
   ScoreDimension,
@@ -32,6 +33,9 @@ export interface ComparisonTableProps {
   onViewBid: (submissionId: string) => void;
   /** Award this vendor's submission (Task 9.2). Omit to hide the action. */
   onAward?: (submissionId: string, vendorName: string) => void;
+  /** The task's live award (or null). When present, the Award action is
+   *  suppressed on every row and the winning row shows an "Awarded" state. */
+  award?: ActiveAward | null;
 }
 
 const DIMENSION_COLUMNS: { key: ScoreDimension; label: string }[] = [
@@ -61,6 +65,7 @@ export function ComparisonTable({
   onToggleExpand,
   onViewBid,
   onAward,
+  award,
 }: ComparisonTableProps) {
   const rankByIdx = buildRankIndex(ranking);
   const sorted = [...scores].sort(compareBy(sortColumn, sortDirection));
@@ -78,6 +83,7 @@ export function ComparisonTable({
                 row={row}
                 ranked={ranked}
                 isRecommended={isRecommended}
+                award={award}
                 onViewBid={() => onViewBid(row.bid_submission_id)}
                 onToggleExpand={() => onToggleExpand(row.bid_submission_id)}
                 onAward={
@@ -238,20 +244,19 @@ export function ComparisonTable({
                         >
                           View Bid
                         </Button>
-                        {onAward && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() =>
-                              onAward(
-                                row.bid_submission_id,
-                                row.vendor_company_name ?? 'Vendor',
-                              )
-                            }
-                          >
-                            Award
-                          </Button>
-                        )}
+                        <AwardCell
+                          row={row}
+                          award={award}
+                          onAwardClick={
+                            onAward
+                              ? () =>
+                                  onAward(
+                                    row.bid_submission_id,
+                                    row.vendor_company_name ?? 'Vendor',
+                                  )
+                              : undefined
+                          }
+                        />
                       </div>
                     </td>
                   </tr>
@@ -381,11 +386,58 @@ function RankPill({ rank }: { rank: number | null }) {
   );
 }
 
+/**
+ * Award action cell, shared by desktop + mobile. Three states keyed on the
+ * task's live award (Task 9.2/9.3b):
+ *   - no live award        → the Award button (re-awardable; backend 409 is the net)
+ *   - this is the winner   → an "Awarded" badge (pending_acceptance vs accepted)
+ *   - another row won      → nothing (suppressed)
+ */
+function AwardCell({
+  row,
+  award,
+  onAwardClick,
+}: {
+  row: BidScoreRow;
+  award?: ActiveAward | null;
+  onAwardClick?: () => void;
+}) {
+  if (award) {
+    if (award.bid_submission_id === row.bid_submission_id) {
+      return <AwardedBadge status={award.status} />;
+    }
+    return null;
+  }
+  if (!onAwardClick) return null;
+  return (
+    <Button variant="primary" size="sm" onClick={onAwardClick}>
+      Award
+    </Button>
+  );
+}
+
+function AwardedBadge({ status }: { status: ActiveAward['status'] }) {
+  const accepted = status === 'accepted';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap',
+        accepted
+          ? 'bg-success-100 text-success-700'
+          : 'bg-warning-100 text-warning-700',
+      )}
+    >
+      {accepted ? 'Awarded ✓' : 'Pending signature'}
+    </span>
+  );
+}
+
 function MobileVendorCard({
   row,
   ranked,
   isRecommended,
   isExpanded,
+  award,
   onViewBid,
   onToggleExpand,
   onAward,
@@ -394,6 +446,7 @@ function MobileVendorCard({
   ranked?: RankedVendor;
   isRecommended: boolean;
   isExpanded: boolean;
+  award?: ActiveAward | null;
   onViewBid: () => void;
   onToggleExpand: () => void;
   onAward?: () => void;
@@ -461,11 +514,7 @@ function MobileVendorCard({
           <Button variant="ghost" size="sm" onClick={onViewBid}>
             View Bid
           </Button>
-          {onAward && (
-            <Button variant="primary" size="sm" onClick={onAward}>
-              Award
-            </Button>
-          )}
+          <AwardCell row={row} award={award} onAwardClick={onAward} />
         </div>
       </div>
     </div>

@@ -109,6 +109,16 @@ export interface BidPackageDetail {
   invitation_summary: InvitationSummary;
   invitations: BidInvitation[];
   submitted_bids: SubmittedBid[];
+  /** The task's live award, or null when re-awardable (no award, or only
+   *  declined_by_vendor / cancelled). Drives the comparison-table Award
+   *  suppression + the winning row's "Awarded" state. */
+  award: ActiveAward | null;
+}
+
+/** The task's live award surfaced on the bid-package detail (Task 9.2/9.3b). */
+export interface ActiveAward {
+  bid_submission_id: string | null;
+  status: 'pending_acceptance' | 'accepted';
 }
 
 // ─── Bid Submission Detail (GET /v1/bid-submissions/{id}) ───────────
@@ -407,6 +417,8 @@ export interface CreateAwardPayload {
   bid_submission_id: string;
   has_override?: boolean;
   override_justification?: string;
+  /** Optional PM-authored guidance (mobilization, site access, etc.), rendered in the award email. */
+  instructions?: string;
 }
 
 export interface Award {

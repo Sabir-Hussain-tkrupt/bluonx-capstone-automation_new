@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Bid Update: {{ project_name }}{% endblock %}
+
+{% block preheader %}An update on your bid for {{ task_name }} on {{ project_name }}.{% endblock %}
+
+{% block content %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Hi {{ vendor_contact_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Thank you for taking the time to submit a bid for
+      <strong>{{ project_name }} ({{ task_name }})</strong>. After careful review,
+      we have awarded this scope to another vendor on this occasion.
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:24px;">
+      We genuinely value your interest and the effort that went into your proposal,
+      and we hope to have the opportunity to work with you on a future project.
+    </td>
+  </tr>
+</table>
+{% endblock %}

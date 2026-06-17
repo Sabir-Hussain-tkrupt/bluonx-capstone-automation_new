@@ -441,7 +441,7 @@ async def fetch_submission_chain_row(
             " is_superseded, status, is_direct_assign,"
             " vendors!inner(insurance_expiration_date, bonding_capacity,"
             " max_active_jobs, current_active_jobs, onboarding_status),"
-            " bid_invitations!inner(bid_packages!inner(desired_start_date,"
+            " bid_invitations!inner(bid_packages!inner(id, desired_start_date,"
             " deadline, status, tasks!inner(id, budget_estimate, project_id,"
             " projects!inner(estimated_end_date))))"
         )

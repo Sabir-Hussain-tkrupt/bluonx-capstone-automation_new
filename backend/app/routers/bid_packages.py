@@ -38,6 +38,7 @@ from app.services.bid_package_list_service import (
 )
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
+    close_bidding,
     get_bid_package_detail,
     get_bid_package_email_log,
     list_invitations,
@@ -139,6 +140,25 @@ async def get_bid_package(
     """
     try:
         return await get_bid_package_detail(bid_package_id=bid_package_id, db=db)
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/bid-packages/{bid_package_id}/close")
+async def close_bid_package(
+    bid_package_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Manually close bidding early (open -> evaluating).
+
+    Allowed only from 'open' (409 otherwise), before or after the deadline. This
+    stops new bid inflow immediately (the vendor portal gates on status == 'open').
+    In-flight revision tokens are unaffected — they are gated by their own
+    revision_deadline, not the package status.
+    """
+    try:
+        return await close_bidding(bid_package_id=bid_package_id, db=db)
     except InvitationTrackingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

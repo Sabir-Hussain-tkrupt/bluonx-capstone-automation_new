@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import type { PreAwardCheck, PreAwardSeverity } from '@/features/bids/types';
 
 const JUSTIFICATION_MAX = 2000;
+const INSTRUCTIONS_MAX = 2000;
 
 export interface AwardDialogProps {
   /** Candidate submission; also drives the lazy validation fetch. Null = closed. */
@@ -19,6 +20,7 @@ export interface AwardDialogProps {
   onConfirm: (args: {
     has_override: boolean;
     override_justification?: string;
+    instructions?: string;
   }) => void;
   isSubmitting: boolean;
   serverError?: string | null;
@@ -46,6 +48,7 @@ export function AwardDialog({
   );
   // Fresh per submission — the page remounts this dialog via `key`.
   const [justification, setJustification] = useState('');
+  const [instructions, setInstructions] = useState('');
 
   const hasBlocking = result?.has_blocking ?? false;
   const hasWarnings = result?.has_warnings ?? false;
@@ -64,6 +67,7 @@ export function AwardDialog({
     onConfirm({
       has_override: hasWarnings,
       override_justification: hasWarnings ? justification.trim() : undefined,
+      instructions: instructions.trim() || undefined,
     });
   };
 
@@ -71,7 +75,7 @@ export function AwardDialog({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Award — ${vendorName}`}
+      title={`Award: ${vendorName}`}
       size="lg"
       footer={
         <>
@@ -153,6 +157,31 @@ export function AwardDialog({
                 />
                 <p className="text-right text-xs text-secondary-400">
                   {justification.length}/{JUSTIFICATION_MAX}
+                </p>
+              </FormField>
+            )}
+
+            {!hasBlocking && (
+              <FormField
+                label="Instructions (optional)"
+                htmlFor="award-instructions"
+                hint="PM guidance for the vendor (mobilization, site access, etc.). Included in the award email."
+              >
+                <textarea
+                  id="award-instructions"
+                  rows={4}
+                  maxLength={INSTRUCTIONS_MAX}
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  className={cn(
+                    'w-full rounded-lg border bg-white px-3 py-2 text-sm transition-colors',
+                    'focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none',
+                    'placeholder:text-secondary-400 border-secondary-300',
+                  )}
+                  placeholder="e.g. Mobilize the week of July 1; check in with the site super at the north gate."
+                />
+                <p className="text-right text-xs text-secondary-400">
+                  {instructions.length}/{INSTRUCTIONS_MAX}
                 </p>
               </FormField>
             )}
