@@ -495,6 +495,13 @@ def _assert_chain_not_deleted(row: dict) -> None:
             )
 
 
+def _utc_today() -> date:
+    """Today's date in UTC. The validator's `today` must share the same clock as
+    the result's `validated_at` (also UTC) so the insurance-expired BLOCK isn't
+    judged on the host's local calendar day at the midnight boundary."""
+    return datetime.now(timezone.utc).date()
+
+
 def context_from_row(row: dict) -> PreAwardContext:
     """Build the pure validator context from a chain row. No I/O — `today` is
     injected here so the validator stays deterministically testable."""
@@ -517,7 +524,7 @@ def context_from_row(row: dict) -> PreAwardContext:
         budget_estimate=_to_decimal(task.get("budget_estimate")),
         estimated_end_date=_parse_date(project.get("estimated_end_date")),
         desired_start_date=_parse_date(package.get("desired_start_date")),
-        today=date.today(),
+        today=_utc_today(),
     )
 
 
