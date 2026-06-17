@@ -20,13 +20,17 @@ Gate semantics (defined here; ENFORCED at award-create in 9.2/9.5, not here):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from fastapi.concurrency import run_in_threadpool
 from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -363,10 +367,12 @@ def validate_pre_award(context: PreAwardContext) -> dict:
         ),
     ]
 
-    has_blocking = any(c["severity"] == "block" for c in checks)
-    has_warnings = any(c["severity"] == "warn" for c in checks)
+    block_checks = [c["check"] for c in checks if c["severity"] == "block"]
+    warn_checks = [c["check"] for c in checks if c["severity"] == "warn"]
+    has_blocking = bool(block_checks)
+    has_warnings = bool(warn_checks)
 
-    return {
+    result = {
         "rubric_version": RUBRIC_VERSION,
         "can_award": not has_blocking,
         "has_blocking": has_blocking,
@@ -376,6 +382,18 @@ def validate_pre_award(context: PreAwardContext) -> dict:
         "award_amount": context.award_amount,
         "checks": checks,
     }
+
+    # Observability: leave an audit trail for any non-clean outcome (the signal
+    # a PM acts on), and stay quiet on the common clean preview path.
+    if has_blocking or has_warnings:
+        logger.info(
+            "pre-award validation: can_award=%s blocks=%s warns=%s",
+            result["can_award"], block_checks or "-", warn_checks or "-",
+        )
+    else:
+        logger.debug("pre-award validation: clean (can_award=True)")
+
+    return result
 
 
 # ── Loader (owns all I/O) ────────────────────────────────────────────────
@@ -432,23 +450,33 @@ async def fetch_submission_chain_row(
     Returns the raw joined row. The award write path (Task 9.2) reads task id,
     vendor id and package status off this same row, so the embed carries
     `tasks.id` and `bid_packages.status` even though no 9.1 check consumes them.
-    (`onboarding_status` is likewise loaded for snapshot completeness.)
+    (`onboarding_status` is likewise loaded for snapshot completeness.) The
+    vendor/task/project `deleted_at` columns are loaded so a soft-deleted
+    record can be rejected before it flows into an award.
     """
-    resp = (
-        db.table("bid_submissions")
-        .select(
-            "total_amount, proposed_start_date, vendor_id, is_draft,"
-            " is_superseded, status, is_direct_assign,"
-            " vendors!inner(insurance_expiration_date, bonding_capacity,"
-            " max_active_jobs, current_active_jobs, onboarding_status),"
-            " bid_invitations!inner(bid_packages!inner(id, desired_start_date,"
-            " deadline, status, tasks!inner(id, budget_estimate, project_id,"
-            " projects!inner(estimated_end_date))))"
+
+    def _query():
+        return (
+            db.table("bid_submissions")
+            .select(
+                "total_amount, proposed_start_date, vendor_id, is_draft,"
+                " is_superseded, status, is_direct_assign,"
+                " vendors!inner(insurance_expiration_date, bonding_capacity,"
+                " max_active_jobs, current_active_jobs, onboarding_status,"
+                " deleted_at),"
+                " bid_invitations!inner(bid_packages!inner(id, desired_start_date,"
+                " deadline, status, tasks!inner(id, budget_estimate, project_id,"
+                " deleted_at, projects!inner(estimated_end_date, deleted_at))))"
+            )
+            .eq("id", str(bid_submission_id))
+            .limit(1)
+            .execute()
         )
-        .eq("id", str(bid_submission_id))
-        .limit(1)
-        .execute()
-    )
+
+    # The supabase client is synchronous; `.execute()` blocks on network I/O.
+    # Run it in the threadpool so a slow query can't stall the event loop and
+    # starve every other concurrent request on this worker.
+    resp = await run_in_threadpool(_query)
     # .limit(1) returns a (possibly empty) list and never raises on 0 rows —
     # unlike .maybe_single(), whose 0-row handling depends on a brittle
     # substring match against PostgREST's error wording and re-raises a
@@ -456,8 +484,44 @@ async def fetch_submission_chain_row(
     # create_award guard's pattern.
     row = _unwrap_single(resp.data)
     if row is None:
+        logger.info("pre-award: bid submission %s not found", bid_submission_id)
         raise PreAwardError(404, "Bid submission not found")
+    _assert_chain_not_deleted(row, bid_submission_id)
     return row
+
+
+def _assert_chain_not_deleted(row: dict, bid_submission_id: UUID) -> None:
+    """Reject a submission whose vendor / task / project has been soft-deleted.
+
+    The `!inner` joins still return a soft-deleted row (deleted_at doesn't drop
+    it), so without this guard the validator would silently score against
+    archived data and an award could be written against a deleted vendor or
+    task. We surface a clear 422 precondition instead. (Submissions, invitations
+    and packages have no deleted_at column, so only these three are checked.
+    projects.archived_at is intentionally NOT treated as a hard stop here —
+    that's a softer, product-policy state, distinct from deletion.)
+    """
+    vendor = _embed_one(row.get("vendors"))
+    package = _embed_one(_embed_one(row.get("bid_invitations")).get("bid_packages"))
+    task = _embed_one(package.get("tasks"))
+    project = _embed_one(task.get("projects"))
+    for label, entity in (("vendor", vendor), ("task", task), ("project", project)):
+        if entity.get("deleted_at"):
+            logger.warning(
+                "pre-award: submission %s rejected — %s is soft-deleted",
+                bid_submission_id, label,
+            )
+            raise PreAwardError(
+                422,
+                f"Cannot award: the {label} for this submission has been deleted.",
+            )
+
+
+def _utc_today() -> date:
+    """Today's date in UTC. The validator's `today` must share the same clock as
+    the result's `validated_at` (also UTC) so the insurance-expired BLOCK isn't
+    judged on the host's local calendar day at the midnight boundary."""
+    return datetime.now(timezone.utc).date()
 
 
 def context_from_row(row: dict) -> PreAwardContext:
@@ -482,7 +546,7 @@ def context_from_row(row: dict) -> PreAwardContext:
         budget_estimate=_to_decimal(task.get("budget_estimate")),
         estimated_end_date=_parse_date(project.get("estimated_end_date")),
         desired_start_date=_parse_date(package.get("desired_start_date")),
-        today=date.today(),
+        today=_utc_today(),
     )
 
 
