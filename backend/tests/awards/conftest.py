@@ -59,14 +59,29 @@ def make_db(spec: dict) -> MagicMock:
         chain.execute.side_effect = _execute
         return chain
 
+    def _rpc(name: str, params=None, *_a, **_k):
+        chain = MagicMock()
+
+        def _execute(*_ea, **_ek):
+            data = spec.get("rpc", {}).get(name, [])
+            if isinstance(data, Exception):
+                raise data
+            res = MagicMock()
+            res.data = data
+            return res
+
+        chain.execute.side_effect = _execute
+        return chain
+
     client.table.side_effect = _table
+    client.rpc.side_effect = _rpc
     return client
 
 
 def make_db_recording(spec: dict, calls: dict) -> MagicMock:
-    """Like make_db, but records the first positional arg of every
-    select/insert/update/delete call into ``calls[table][op]`` so a test can
-    assert exactly what the service wrote (e.g. the server-derived award row)."""
+    """Like make_db, but records write payloads so a test can assert exactly
+    what the service wrote: table writes land in ``calls[table][op]`` and RPC
+    calls in ``calls["rpc"][name]`` (the params dict)."""
     client = MagicMock()
 
     def _table(name: str):
@@ -101,7 +116,23 @@ def make_db_recording(spec: dict, calls: dict) -> MagicMock:
         chain.execute.side_effect = _execute
         return chain
 
+    def _rpc(name: str, params=None, *_a, **_k):
+        calls.setdefault("rpc", {})[name] = params
+        chain = MagicMock()
+
+        def _execute(*_ea, **_ek):
+            data = spec.get("rpc", {}).get(name, [])
+            if isinstance(data, Exception):
+                raise data
+            res = MagicMock()
+            res.data = data
+            return res
+
+        chain.execute.side_effect = _execute
+        return chain
+
     client.table.side_effect = _table
+    client.rpc.side_effect = _rpc
     return client
 
 
@@ -129,9 +160,9 @@ def client_factory(authed_user):
 
 @pytest.fixture()
 def recording_client_factory(authed_user):
-    """Returns (TestClient, calls_dict). `calls_dict[table][op]` lists the
-    payloads the service passed to that write — for asserting the server-derived
-    award row and the tasks status update."""
+    """Returns (TestClient, calls_dict). `calls_dict[table][op]` lists table
+    write payloads and `calls_dict["rpc"][name]` the RPC params — for asserting
+    the server-derived award row written through fn_create_award."""
 
     def _make(spec: dict):
         calls: dict = {}

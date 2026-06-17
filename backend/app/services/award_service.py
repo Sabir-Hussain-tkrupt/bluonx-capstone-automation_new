@@ -27,6 +27,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -149,22 +150,32 @@ async def create_award(
         has_override_final = False
         justification_final = None
 
-    # 4) Write the award row (server-derived fields only).
-    insert_row = {
-        "task_id": str(task_id),
-        "bid_submission_id": str(bid_submission_id),
-        "vendor_id": str(vendor_id),
-        "awarded_by": str(awarded_by),
-        "award_amount": _str_amount(context.award_amount),
-        "has_override": has_override_final,
-        "override_justification": justification_final,
-        "instructions": (instructions or "").strip() or None,
-        "validation_results": _json_safe(result),
-        "status": "pending_acceptance",
+    # 4) Write the award row + flip the task to 'awarded' atomically via the
+    #    fn_create_award RPC. A plpgsql function body is one implicit
+    #    transaction, so the INSERT and the task UPDATE commit or roll back
+    #    together — PostgREST can't express a multi-statement transaction over
+    #    two .execute() calls, which is why a dedicated function is used here
+    #    (see SECTION 7 in database/bluonx_complete_schema.sql). Server-derived
+    #    fields only. The supabase client is synchronous; offload to the
+    #    threadpool so the write can't stall the event loop.
+    rpc_params = {
+        "p_task_id": str(task_id),
+        "p_bid_submission_id": str(bid_submission_id),
+        "p_vendor_id": str(vendor_id),
+        "p_awarded_by": str(awarded_by),
+        "p_award_amount": _str_amount(context.award_amount),
+        "p_has_override": has_override_final,
+        "p_override_justification": justification_final,
+        "p_instructions": (instructions or "").strip() or None,
+        "p_validation_results": _json_safe(result),
     }
     try:
-        award_resp = db.table("awards").insert(insert_row).execute()
+        award_resp = await run_in_threadpool(
+            lambda: db.rpc("fn_create_award", rpc_params).execute()
+        )
     except APIError as exc:
+        # idx_awards_one_active_per_task (a second active award) bubbles up as a
+        # 23505 through the RPC and rolls the whole transaction back.
         if _is_unique_violation(exc):
             raise AwardError(
                 409,
@@ -172,15 +183,14 @@ async def create_award(
             ) from exc
         raise
 
-    award = (award_resp.data or [None])[0]
+    # RETURNS SETOF awards → PostgREST returns a JSON array of the one inserted
+    # row; tolerate a bare dict too.
+    data = award_resp.data
+    award = (data[0] if isinstance(data, list) else data) or None
     if not award:
         raise AwardError(500, "Award creation failed.")
 
-    # 5) Flip the task to awarded. Single-statement op, consistent with the
-    #    rest of the codebase (no cross-table transaction primitive available).
-    db.table("tasks").update({"status": "awarded"}).eq("id", str(task_id)).execute()
-
-    # 6) Post-commit, best-effort: send the contract envelope (9.3b) + award email
+    # 5) Post-commit, best-effort: send the contract envelope (9.3b) + award email
     #    (9.4) and create the contract row (9.5). A DocuSign/PDF/email failure must
     #    NOT roll back the award — it stays pending_acceptance with no envelope and
     #    is retryable via POST /awards/{id}/send-contract. Local import avoids any

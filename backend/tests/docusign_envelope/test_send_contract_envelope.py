@@ -131,8 +131,9 @@ async def test_post_commit_hook_swallows_send_failure(monkeypatch):
     }
     spec = {
         "bid_submissions": {"select": [_clean_chain_row()]},
-        "awards": {"insert": [inserted_award]},
-        "tasks": {"default": []},
+        # The award + task flip are written atomically via the fn_create_award
+        # RPC (Task 9.2 / fix #1), which returns the inserted award row.
+        "rpc": {"fn_create_award": [inserted_award]},
     }
     db = make_db(spec)
     result = await award_service.create_award(

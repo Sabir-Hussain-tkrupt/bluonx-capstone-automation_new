@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.31
--- Date:     May 14, 2026
+-- Version:  2.32
+-- Date:     June 12, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -1340,10 +1340,71 @@ CREATE TRIGGER trg_on_auth_user_created
 
 
 -- ============================================================================
+-- SECTION 7: APPLICATION RPC FUNCTIONS (callable via PostgREST /rpc)
+-- ============================================================================
+-- Unlike the trigger functions above, these are invoked directly by the
+-- backend through db.rpc(). Each runs in a single implicit transaction, which
+-- is how the app gets multi-statement atomicity that PostgREST otherwise can't
+-- express (one statement per HTTP request).
+-- ----------------------------------------------------------------------------
+
+-- 7.1  fn_create_award — atomic award write (Task 9.2 / fix #1)
+-- ----------------------------------------------------------------------------
+-- Inserts the award at 'pending_acceptance' AND flips the task to 'awarded' in
+-- ONE transaction, so a partial failure can never leave a dangling award with
+-- an un-flipped task. The pre-award validation gate (block / warn / override)
+-- is enforced in Python BEFORE this is called; this function is the write only.
+-- The existing BEFORE-INSERT consistency trigger (fn_enforce_award_consistency)
+-- and the award capacity trigger still fire inside this transaction. A second
+-- active award on the same task raises 23505 from idx_awards_one_active_per_task
+-- and rolls the whole thing back (surfaced as a clean 409 by the service).
+
+CREATE OR REPLACE FUNCTION fn_create_award(
+  p_task_id                UUID,
+  p_bid_submission_id      UUID,
+  p_vendor_id              UUID,
+  p_awarded_by             UUID,
+  p_award_amount           NUMERIC,
+  p_has_override           BOOLEAN,
+  p_override_justification TEXT,
+  p_instructions           TEXT,
+  p_validation_results     JSONB
+)
+RETURNS SETOF awards AS $$
+DECLARE
+  v_award awards;
+BEGIN
+  INSERT INTO awards (
+    task_id, bid_submission_id, vendor_id, awarded_by, award_amount,
+    instructions, has_override, override_justification, validation_results, status
+  ) VALUES (
+    p_task_id, p_bid_submission_id, p_vendor_id, p_awarded_by, p_award_amount,
+    p_instructions, p_has_override, p_override_justification, p_validation_results,
+    'pending_acceptance'
+  )
+  RETURNING * INTO v_award;
+
+  UPDATE tasks SET status = 'awarded' WHERE id = p_task_id;
+
+  RETURN NEXT v_award;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Writes go through the service_role key (FastAPI write path); not exposed to
+-- the authenticated role, which only ever reads.
+GRANT EXECUTE ON FUNCTION fn_create_award(
+  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, JSONB
+) TO service_role;
+
+
+
+
+-- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
 -- Total tables:    29
 -- Total indexes:   55 custom (51 regular + 4 partial unique) + auto PK/UNIQUE
 -- Total triggers:  29 (28 active + 1 disabled onboarding sync)
--- Total functions: 14 (13 active + 1 disabled onboarding sync)
+-- Total functions: 15 (14 active + 1 disabled onboarding sync)
+--                  (14th active = fn_create_award, SECTION 7 RPC)
 -- ============================================================================
