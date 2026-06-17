@@ -91,3 +91,6 @@ backend/secrets/
 # ignore temporary files created for testing manually
 _manual_test*
 
+
+# ignore local current-phase task notes (kept out of git going forward)
+docs/CURRENT_PHASE_TASKS.md
