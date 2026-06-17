@@ -105,15 +105,23 @@ def _str_decimal(v: Decimal | None) -> str | None:
 
 
 def check_submission_eligibility(
-    *, is_superseded: bool, is_draft: bool, status: str | None
+    *,
+    is_superseded: bool,
+    is_draft: bool,
+    status: str | None,
+    award_amount: Decimal | None,
 ) -> dict:
-    """Candidate must be live: not superseded, not draft, status in the live set.
-    Anything else → BLOCK. Subsumes the awards.py create-time superseded guard."""
+    """Candidate must be live AND carry a positive bid amount: not superseded,
+    not draft, status in the live set, and award_amount > 0. Anything else →
+    BLOCK. Subsumes the awards.py create-time superseded guard, and gates a
+    missing/zero amount so a NULL total_amount can never reach the NOT NULL
+    awards.award_amount column at award-create (which would 500)."""
     inputs = {
         "is_superseded": is_superseded,
         "is_draft": is_draft,
         "status": status,
         "eligible_statuses": list(ELIGIBLE_STATUSES),
+        "award_amount": _str_decimal(award_amount),
     }
     if is_superseded:
         return _check(
@@ -131,6 +139,12 @@ def check_submission_eligibility(
         return _check(
             "submission_eligibility", "block",
             f"Submission status {status!r} is not awardable.",
+            inputs,
+        )
+    if award_amount is None or award_amount <= 0:
+        return _check(
+            "submission_eligibility", "block",
+            "This submission has no valid bid amount and cannot be awarded.",
             inputs,
         )
     return _check(
@@ -324,6 +338,7 @@ def validate_pre_award(context: PreAwardContext) -> dict:
             is_superseded=context.is_superseded,
             is_draft=context.is_draft,
             status=context.submission_status,
+            award_amount=context.award_amount,
         ),
         check_insurance_validity(
             insurance_expiration_date=context.insurance_expiration_date,

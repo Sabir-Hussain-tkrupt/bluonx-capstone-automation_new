@@ -78,6 +78,19 @@ def test_superseded_returns_200_with_block_detail(client_factory):
     assert elig["severity"] == "block"
 
 
+def test_null_amount_returns_200_with_block_detail(client_factory):
+    # A live submission with no total_amount must BLOCK at preview, so a NULL
+    # can never reach the NOT NULL awards.award_amount column at award-create.
+    c = client_factory({"bid_submissions": {"select": _row(total_amount=None)}})
+    r = c.get(URL)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["can_award"] is False
+    assert body["has_blocking"] is True
+    elig = next(c for c in body["checks"] if c["check"] == "submission_eligibility")
+    assert elig["severity"] == "block"
+
+
 def test_unknown_submission_returns_404(client_factory):
     c = client_factory({"bid_submissions": {"select": []}})
     r = c.get(URL)
