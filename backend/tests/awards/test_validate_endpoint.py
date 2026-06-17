@@ -7,6 +7,7 @@ award-create in 9.2/9.5), 404 on unknown submission, and no write ever occurs.
 
 from __future__ import annotations
 
+import copy
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -95,6 +96,58 @@ def test_unknown_submission_returns_404(client_factory):
     c = client_factory({"bid_submissions": {"select": []}})
     r = c.get(URL)
     assert r.status_code == 404
+
+
+# ── soft-deleted chain rows must not flow into an award ───────────────────
+# vendors / tasks / projects carry deleted_at; the !inner joins still return a
+# soft-deleted row, so the loader must reject it explicitly (422) rather than
+# silently validate against archived data.
+
+DELETED_AT = "2026-01-01T00:00:00+00:00"
+
+
+def _row_with_deleted(entity: str) -> dict:
+    row = copy.deepcopy(CLEAN_ROW)
+    package = row["bid_invitations"]["bid_packages"]
+    targets = {
+        "vendor": row["vendors"],
+        "task": package["tasks"],
+        "project": package["tasks"]["projects"],
+    }
+    targets[entity]["deleted_at"] = DELETED_AT
+    return row
+
+
+def test_deleted_vendor_returns_422(client_factory):
+    c = client_factory({"bid_submissions": {"select": _row_with_deleted("vendor")}})
+    r = c.get(URL)
+    assert r.status_code == 422
+    assert "vendor" in r.json()["detail"].lower()
+
+
+def test_deleted_task_returns_422(client_factory):
+    c = client_factory({"bid_submissions": {"select": _row_with_deleted("task")}})
+    r = c.get(URL)
+    assert r.status_code == 422
+    assert "task" in r.json()["detail"].lower()
+
+
+def test_deleted_project_returns_422(client_factory):
+    c = client_factory({"bid_submissions": {"select": _row_with_deleted("project")}})
+    r = c.get(URL)
+    assert r.status_code == 422
+    assert "project" in r.json()["detail"].lower()
+
+
+def test_explicit_null_deleted_at_is_active(client_factory):
+    row = copy.deepcopy(CLEAN_ROW)
+    row["vendors"]["deleted_at"] = None
+    row["bid_invitations"]["bid_packages"]["tasks"]["deleted_at"] = None
+    row["bid_invitations"]["bid_packages"]["tasks"]["projects"]["deleted_at"] = None
+    c = client_factory({"bid_submissions": {"select": row}})
+    r = c.get(URL)
+    assert r.status_code == 200
+    assert r.json()["can_award"] is True
 
 
 def _no_write_db(row: dict) -> MagicMock:
