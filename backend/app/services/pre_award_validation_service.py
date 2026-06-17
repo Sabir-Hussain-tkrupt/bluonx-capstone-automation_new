@@ -20,6 +20,7 @@ Gate semantics (defined here; ENFORCED at award-create in 9.2/9.5, not here):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -28,6 +29,8 @@ from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
 from supabase import Client
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -364,10 +367,12 @@ def validate_pre_award(context: PreAwardContext) -> dict:
         ),
     ]
 
-    has_blocking = any(c["severity"] == "block" for c in checks)
-    has_warnings = any(c["severity"] == "warn" for c in checks)
+    block_checks = [c["check"] for c in checks if c["severity"] == "block"]
+    warn_checks = [c["check"] for c in checks if c["severity"] == "warn"]
+    has_blocking = bool(block_checks)
+    has_warnings = bool(warn_checks)
 
-    return {
+    result = {
         "rubric_version": RUBRIC_VERSION,
         "can_award": not has_blocking,
         "has_blocking": has_blocking,
@@ -377,6 +382,18 @@ def validate_pre_award(context: PreAwardContext) -> dict:
         "award_amount": context.award_amount,
         "checks": checks,
     }
+
+    # Observability: leave an audit trail for any non-clean outcome (the signal
+    # a PM acts on), and stay quiet on the common clean preview path.
+    if has_blocking or has_warnings:
+        logger.info(
+            "pre-award validation: can_award=%s blocks=%s warns=%s",
+            result["can_award"], block_checks or "-", warn_checks or "-",
+        )
+    else:
+        logger.debug("pre-award validation: clean (can_award=True)")
+
+    return result
 
 
 # ── Loader (owns all I/O) ────────────────────────────────────────────────
@@ -467,12 +484,13 @@ async def fetch_submission_chain_row(
     # create_award guard's pattern.
     row = _unwrap_single(resp.data)
     if row is None:
+        logger.info("pre-award: bid submission %s not found", bid_submission_id)
         raise PreAwardError(404, "Bid submission not found")
-    _assert_chain_not_deleted(row)
+    _assert_chain_not_deleted(row, bid_submission_id)
     return row
 
 
-def _assert_chain_not_deleted(row: dict) -> None:
+def _assert_chain_not_deleted(row: dict, bid_submission_id: UUID) -> None:
     """Reject a submission whose vendor / task / project has been soft-deleted.
 
     The `!inner` joins still return a soft-deleted row (deleted_at doesn't drop
@@ -489,6 +507,10 @@ def _assert_chain_not_deleted(row: dict) -> None:
     project = _embed_one(task.get("projects"))
     for label, entity in (("vendor", vendor), ("task", task), ("project", project)):
         if entity.get("deleted_at"):
+            logger.warning(
+                "pre-award: submission %s rejected — %s is soft-deleted",
+                bid_submission_id, label,
+            )
             raise PreAwardError(
                 422,
                 f"Cannot award: the {label} for this submission has been deleted.",
