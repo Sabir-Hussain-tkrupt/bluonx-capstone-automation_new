@@ -125,7 +125,9 @@ async def create_award(
 
     # 2b) Don't award while a vendor still has an outstanding revision request —
     #     the in-flight edit must be resolved (submitted/declined/cancelled) first.
-    if _has_pending_revision(db, package.get("id")):
+    #     Offloaded: supabase-py is synchronous, so run the query in the
+    #     threadpool to keep it off the event loop (matches the chain fetch + RPC).
+    if await run_in_threadpool(lambda: _has_pending_revision(db, package.get("id"))):
         raise AwardError(
             409,
             "Resolve the outstanding revision request before awarding.",
