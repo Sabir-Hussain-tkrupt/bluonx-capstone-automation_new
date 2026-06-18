@@ -56,7 +56,24 @@ def make_db(spec: dict, calls: dict | None = None) -> MagicMock:
         chain.execute.side_effect = _execute
         return chain
 
+    def _rpc(name: str, params=None, *_a, **_k):
+        if calls is not None:
+            calls.setdefault("rpc", {})[name] = params
+        chain = MagicMock()
+
+        def _execute(*_ea, **_ek):
+            data = spec.get("rpc", {}).get(name, [])
+            if isinstance(data, Exception):
+                raise data
+            res = MagicMock()
+            res.data = data
+            return res
+
+        chain.execute.side_effect = _execute
+        return chain
+
     client.table.side_effect = _table
+    client.rpc.side_effect = _rpc
     return client
 
 

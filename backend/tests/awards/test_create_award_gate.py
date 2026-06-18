@@ -106,10 +106,11 @@ def award_row(**over) -> dict:
 
 
 def clean_spec(**chain_over) -> dict:
+    # The award + task flip are written atomically through the fn_create_award
+    # RPC, so the canned write lives under "rpc", not separate table ops.
     return {
         "bid_submissions": {"select": [chain_row(**chain_over)]},
-        "awards": {"insert": [award_row()]},
-        "tasks": {"default": []},
+        "rpc": {"fn_create_award": [award_row()]},
     }
 
 
@@ -120,23 +121,24 @@ def test_clean_award_writes_pending_acceptance(recording_client_factory):
     c, calls = recording_client_factory(clean_spec())
     r = c.post(URL, json=award_body())
     assert r.status_code == 201
+    assert r.json()["status"] == "pending_acceptance"
 
-    inserted = calls["awards"]["insert"][0]
-    assert inserted["status"] == "pending_acceptance"
-    assert inserted["has_override"] is False
-    assert inserted["override_justification"] is None
+    # The atomic write goes through fn_create_award; assert the server-derived
+    # params. (The task → 'awarded' flip is now inside the DB function's
+    # transaction, so it's no longer observable here — that's the point of the
+    # atomicity fix; it's covered by the function itself.)
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_has_override"] is False
+    assert params["p_override_justification"] is None
     # Server-derived, never from the client body.
-    assert inserted["award_amount"] == "50000.00"
-    assert inserted["task_id"] == str(TASK_ID)
-    assert inserted["vendor_id"] == str(VENDOR_ID)
-    assert inserted["awarded_by"] == str(PM_USER_ID)
-    # Snapshot stored on every award, clean or not.
-    snap = inserted["validation_results"]
+    assert params["p_award_amount"] == "50000.00"
+    assert params["p_task_id"] == str(TASK_ID)
+    assert params["p_vendor_id"] == str(VENDOR_ID)
+    assert params["p_awarded_by"] == str(PM_USER_ID)
+    # Snapshot passed to the write on every award, clean or not.
+    snap = params["p_validation_results"]
     assert snap["has_blocking"] is False and snap["has_warnings"] is False
     assert snap["rubric_version"] == "preaward-v1"
-
-    # tasks.status flipped to awarded in the same flow.
-    assert calls["tasks"]["update"][0] == {"status": "awarded"}
 
 
 def test_clean_award_ignores_client_supplied_override(recording_client_factory):
@@ -144,9 +146,9 @@ def test_clean_award_ignores_client_supplied_override(recording_client_factory):
     c, calls = recording_client_factory(clean_spec())
     r = c.post(URL, json=award_body(has_override=True, override_justification="n/a"))
     assert r.status_code == 201
-    inserted = calls["awards"]["insert"][0]
-    assert inserted["has_override"] is False
-    assert inserted["override_justification"] is None
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_has_override"] is False
+    assert params["p_override_justification"] is None
 
 
 # ── warn → override gate ─────────────────────────────────────────────────
@@ -182,10 +184,10 @@ def test_warn_with_justification_writes_override(recording_client_factory):
         json=award_body(has_override=True, override_justification="Renewal in hand"),
     )
     assert r.status_code == 201
-    inserted = calls["awards"]["insert"][0]
-    assert inserted["has_override"] is True
-    assert inserted["override_justification"] == "Renewal in hand"
-    assert inserted["validation_results"]["has_warnings"] is True
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_has_override"] is True
+    assert params["p_override_justification"] == "Renewal in hand"
+    assert params["p_validation_results"]["has_warnings"] is True
 
 
 # ── block → 422 (non-overridable), no write ──────────────────────────────
@@ -200,8 +202,8 @@ def test_block_superseded_returns_422(recording_client_factory):
     assert detail["can_award"] is False
     elig = next(c for c in detail["checks"] if c["check"] == "submission_eligibility")
     assert elig["severity"] == "block"
-    # Block short-circuits before any write.
-    assert "awards" not in calls
+    # Block short-circuits before any write — the RPC is never called.
+    assert "rpc" not in calls
 
 
 def test_block_draft_returns_422(client_factory):
@@ -242,7 +244,7 @@ def test_open_package_returns_422_precondition(recording_client_factory):
     assert r.status_code == 422
     # Precondition message is a plain string, not the validation result.
     assert isinstance(r.json()["detail"], str)
-    assert "awards" not in calls
+    assert "rpc" not in calls
 
 
 def test_cancelled_package_returns_422_precondition(client_factory):
@@ -271,13 +273,15 @@ def test_no_pending_revision_allows_award(recording_client_factory):
     c, calls = recording_client_factory(spec)
     r = c.post(URL, json=award_body())
     assert r.status_code == 201
-    assert calls["awards"]["insert"][0]["status"] == "pending_acceptance"
+    assert "fn_create_award" in calls["rpc"]
+    assert r.json()["status"] == "pending_acceptance"
 
 
 def test_second_active_award_returns_clean_409(client_factory):
     spec = clean_spec()
-    spec["awards"] = {
-        "insert": APIError(
+    # The unique-index 23505 now surfaces through the RPC, not a table insert.
+    spec["rpc"] = {
+        "fn_create_award": APIError(
             {"code": "23505", "message": "duplicate key value violates unique constraint"}
         )
     }

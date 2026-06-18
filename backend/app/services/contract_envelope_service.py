@@ -157,8 +157,12 @@ async def send_contract_envelope(
 ) -> dict:
     """Create the contract, send the envelope, persist it, and email the vendor.
     Returns the `docusign_envelopes` row. Re-entrant: an already-sent envelope is
-    returned as-is (no double send)."""
-    ctx = _load_award_context(award_id, db=db)
+    returned as-is (no double send).
+
+    supabase-py is synchronous; every DB / Storage call here is offloaded to the
+    threadpool so this awaited path (post-commit hook + resend route) never blocks
+    the event loop. The PDF build and the DocuSign send are already off-loop."""
+    ctx = await run_in_threadpool(lambda: _load_award_context(award_id, db=db))
 
     submission = _embed_one(ctx.get("bid_submissions"))
     invitation = _embed_one(submission.get("bid_invitations"))
@@ -171,14 +175,16 @@ async def send_contract_envelope(
     end_date = project.get("estimated_end_date")
 
     # 2) Contract row (re-entrant) — born in sent_for_signature so the FK holds.
-    contract = contract_service.create_contract_for_award(
-        ctx, start_date=start_date, end_date=end_date, db=db
+    contract = await run_in_threadpool(
+        lambda: contract_service.create_contract_for_award(
+            ctx, start_date=start_date, end_date=end_date, db=db
+        )
     )
     contract_id = contract["id"]
 
     # 3) Idempotent resend — reuse an existing envelope for this contract.
-    existing = (
-        db.table("docusign_envelopes")
+    existing = await run_in_threadpool(
+        lambda: db.table("docusign_envelopes")
         .select("*")
         .eq("contract_id", str(contract_id))
         .limit(1)
@@ -211,7 +217,9 @@ async def send_contract_envelope(
         }
     ]
     documents.extend(
-        _fetch_sow_exhibits(ctx.get("bid_submission_id"), db=db)
+        await run_in_threadpool(
+            lambda: _fetch_sow_exhibits(ctx.get("bid_submission_id"), db=db)
+        )
     )
 
     # 5) Two sequential signers — vendor (1) then internal countersigner (2).
@@ -244,8 +252,8 @@ async def send_contract_envelope(
     envelope_id = await ds_client.send_envelope(definition)
 
     # 6) Persist the envelope row (contract stays sent_for_signature).
-    env_resp = (
-        db.table("docusign_envelopes")
+    env_resp = await run_in_threadpool(
+        lambda: db.table("docusign_envelopes")
         .insert(
             {
                 "contract_id": str(contract_id),
