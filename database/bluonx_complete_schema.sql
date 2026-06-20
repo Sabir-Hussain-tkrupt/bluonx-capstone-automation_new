@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.32
--- Date:     June 12, 2026
+-- Version:  2.33
+-- Date:     June 19, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -640,6 +640,7 @@ CREATE TABLE email_log (
   subject           VARCHAR(500),
   reference_type    VARCHAR(50),
   reference_id      UUID,
+  provider_message_id VARCHAR(255),
   status            VARCHAR(20)   NOT NULL DEFAULT 'queued'
                                   CHECK (status IN ('queued', 'sent', 'delivered', 'bounced', 'failed')),
   sent_at           TIMESTAMPTZ,
@@ -653,6 +654,7 @@ CREATE TABLE email_log (
 COMMENT ON TABLE  email_log                IS 'Master audit log for all system emails. Tracks delivery, opens, clicks.';
 COMMENT ON COLUMN email_log.reference_type IS 'Polymorphic: table name (e.g., bid_invitations, milestones).';
 COMMENT ON COLUMN email_log.reference_id   IS 'Polymorphic: row ID in the referenced table.';
+COMMENT ON COLUMN email_log.provider_message_id IS 'Provider-side message id (e.g. SES MessageId) returned at send time. Join key the SNS webhook uses to correlate async delivery/bounce/complaint events back to this row. NULL until a send succeeds.';
 
 
 -- Vendor flags: PM manually flags problematic vendors
@@ -799,6 +801,7 @@ CREATE INDEX idx_milestone_alerts_email_log_id      ON milestone_alerts (email_l
 CREATE INDEX idx_email_log_type_status              ON email_log (email_type, status);
 CREATE INDEX idx_email_log_reference                ON email_log (reference_type, reference_id);
 CREATE INDEX idx_email_log_sent_at                  ON email_log (sent_at);
+CREATE INDEX idx_email_log_provider_message_id      ON email_log (provider_message_id);
 CREATE INDEX idx_vendor_flags_vendor_id             ON vendor_flags (vendor_id);
 CREATE INDEX idx_vendor_flags_unresolved            ON vendor_flags (vendor_id, is_resolved)
                                                     WHERE is_resolved = FALSE;

@@ -183,11 +183,17 @@ class EmailService:
 
         # ── Update email_log ────────────────────────────────────────────
         if result.status == "sent":
-            self._update_log(log_id, {
+            update = {
                 "status": "sent",
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "retry_count": retry_count,
-            })
+            }
+            # Persist the provider's message id so the SNS webhook can later
+            # correlate async delivery/bounce/complaint events to this row.
+            # Guard against empty so a NULL (not "") is stored on edge cases.
+            if result.message_id:
+                update["provider_message_id"] = result.message_id
+            self._update_log(log_id, update)
         else:
             self._update_log(log_id, {
                 "status": "failed",

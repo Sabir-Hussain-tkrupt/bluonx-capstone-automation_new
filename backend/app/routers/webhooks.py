@@ -155,13 +155,40 @@ async def ses_notifications(request: Request) -> Response:
             notification_type = message.get("notificationType", "")
             ses_message_id = message.get("mail", {}).get("messageId", "")
 
+            # The SES MessageId is the only key shared between the send path
+            # and this async callback. An empty value must never be used to
+            # match rows (it would match nothing useful and risks NULLs).
+            if not ses_message_id:
+                logger.warning(
+                    "SNS %s notification missing mail.messageId — skipping update",
+                    notification_type,
+                )
+                return Response(status_code=200, content="OK")
+
             db = get_supabase(request)
+
+            def _update_email_log(fields: dict) -> None:
+                """Update the email_log row matched by provider_message_id.
+
+                Logs when no row matched so a missing/mismatched correlation
+                surfaces instead of silently updating nothing.
+                """
+                resp = (
+                    db.table("email_log")
+                    .update(fields)
+                    .eq("provider_message_id", ses_message_id)
+                    .execute()
+                )
+                if not resp.data:
+                    logger.warning(
+                        "SNS %s: no email_log row matched provider_message_id %s",
+                        notification_type,
+                        ses_message_id,
+                    )
 
             if notification_type == "Delivery":
                 logger.info("SES delivery confirmed for message %s", ses_message_id)
-                db.table("email_log").update({
-                    "status": "delivered",
-                }).eq("id", ses_message_id).execute()
+                _update_email_log({"status": "delivered"})
 
             elif notification_type == "Bounce":
                 bounce = message.get("bounce", {})
@@ -171,10 +198,7 @@ async def ses_notifications(request: Request) -> Response:
                 logger.warning(
                     "SES bounce for message %s: %s", ses_message_id, error_msg,
                 )
-                db.table("email_log").update({
-                    "status": "bounced",
-                    "error_message": error_msg,
-                }).eq("id", ses_message_id).execute()
+                _update_email_log({"status": "bounced", "error_message": error_msg})
 
             elif notification_type == "Complaint":
                 complaint = message.get("complaint", {})
@@ -182,10 +206,10 @@ async def ses_notifications(request: Request) -> Response:
                 logger.warning(
                     "SES complaint for message %s: %s", ses_message_id, feedback_type,
                 )
-                db.table("email_log").update({
+                _update_email_log({
                     "status": "failed",
                     "error_message": f"Complaint: {feedback_type}",
-                }).eq("id", ses_message_id).execute()
+                })
 
             else:
                 logger.info("Unhandled SNS notification type: %s", notification_type)

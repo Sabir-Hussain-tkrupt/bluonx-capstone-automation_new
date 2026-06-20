@@ -209,6 +209,11 @@ class TestDeliveryNotification:
         mock_db.table.assert_called_with("email_log")
         update_call = mock_db.table("email_log").update.call_args[0][0]
         assert update_call["status"] == "delivered"
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-delivery-001",
+        )
 
     def test_delivery_returns_200(self, test_client, delivery_notification):
         """SNS requires 200 response for successful processing."""
@@ -252,6 +257,11 @@ class TestBounceNotification:
         assert update_call["status"] == "bounced"
         # Bounce type should be stored in error_message
         assert "Permanent" in update_call.get("error_message", "")
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-bounce-002",
+        )
 
     def test_bounce_stores_bounce_subtype(self, test_client, bounce_notification):
         with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
@@ -297,6 +307,68 @@ class TestComplaintNotification:
         assert resp.status_code == 200
         # Complaint should trigger an update to email_log
         mock_db.table.assert_called_with("email_log")
+        update_call = mock_db.table("email_log").update.call_args[0][0]
+        assert update_call["status"] == "failed"
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-complaint-003",
+        )
+
+
+# ── Correlation-key hardening ───────────────────────────────────────────────
+
+
+class TestMessageIdHardening:
+    """Guards around the provider_message_id correlation key."""
+
+    def test_missing_message_id_skips_update(self, test_client, delivery_notification):
+        """A notification with an empty mail.messageId must not attempt an
+        email_log update (an empty key must never match rows)."""
+        ses_message = json.loads(delivery_notification["Message"])
+        ses_message["mail"]["messageId"] = ""
+        delivery_notification["Message"] = json.dumps(ses_message)
+
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=delivery_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        mock_db.table.return_value.update.assert_not_called()
+
+    def test_zero_row_match_still_200_and_warns(
+        self, test_client, bounce_notification, caplog
+    ):
+        """When no email_log row matches the MessageId, the endpoint still
+        returns 200 but logs a warning (no silent no-op)."""
+        import logging
+
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db, \
+             caplog.at_level(logging.WARNING, logger="app.routers.webhooks"):
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            update_chain = MagicMock()
+            update_chain.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_db.table.return_value.update.return_value = update_chain
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=bounce_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        assert any(
+            "no email_log row matched" in rec.message for rec in caplog.records
+        )
 
 
 # ── Subscription confirmation ───────────────────────────────────────────────
