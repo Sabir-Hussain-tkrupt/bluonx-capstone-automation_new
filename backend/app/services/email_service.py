@@ -274,6 +274,7 @@ def create_email_provider() -> EmailProvider:
             region=settings.AWS_REGION,
             access_key_id=settings.AWS_ACCESS_KEY_ID,
             secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            configuration_set=settings.SES_CONFIGURATION_SET,
         )
 
     return MockEmailProvider()

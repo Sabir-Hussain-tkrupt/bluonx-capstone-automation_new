@@ -39,14 +39,26 @@ _PERMANENT_ERROR_CODES = {
 class SESEmailProvider:
     """AWS SES v2 email provider."""
 
-    def __init__(self, *, region: str, access_key_id: str, secret_access_key: str) -> None:
+    def __init__(
+        self,
+        *,
+        region: str,
+        access_key_id: str,
+        secret_access_key: str,
+        configuration_set: str | None = None,
+    ) -> None:
         self._client = boto3.client(
             "sesv2",
             region_name=region,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
         )
-        logger.info("SES email provider initialised (region=%s)", region)
+        self._configuration_set = configuration_set
+        logger.info(
+            "SES email provider initialised (region=%s, configuration_set=%s)",
+            region,
+            configuration_set or "<none>",
+        )
 
     async def send(self, payload: "EmailPayload") -> "EmailSendResult":
         from app.services.email_service import EmailSendResult
@@ -72,6 +84,11 @@ class SESEmailProvider:
 
         if payload.reply_to:
             kwargs["ReplyToAddresses"] = [payload.reply_to]
+
+        # Tag the send with a configuration set so SES publishes
+        # Delivery/Bounce/Complaint events to SNS. Omitted when unset.
+        if self._configuration_set:
+            kwargs["ConfigurationSetName"] = self._configuration_set
 
         try:
             response = self._client.send_email(**kwargs)

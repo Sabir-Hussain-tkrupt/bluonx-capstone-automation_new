@@ -45,8 +45,11 @@ def _build_signing_string(payload: dict) -> str:
     if msg_type == "Notification":
         fields = ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"]
     else:
-        # SubscriptionConfirmation and UnsubscribeConfirmation
-        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "TopicArn", "Type"]
+        # SubscriptionConfirmation and UnsubscribeConfirmation. These include
+        # the Token field in the canonical string-to-sign (between Timestamp and
+        # TopicArn); omitting it makes the signature never match, so the genuine
+        # confirmation is rejected and the subscription stays pending.
+        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"]
 
     parts: list[str] = []
     for field in fields:
@@ -152,15 +155,24 @@ async def ses_notifications(request: Request) -> Response:
         try:
             message_str = body.get("Message", "{}")
             message = json.loads(message_str)
-            notification_type = message.get("notificationType", "")
+            # SES emits two shapes: configuration-set event publishing uses
+            # "eventType"; legacy identity feedback notifications use
+            # "notificationType". The branch values are identical, so accept
+            # either. We use a configuration set, so eventType is the live path.
+            notification_type = message.get("eventType") or message.get("notificationType", "")
             ses_message_id = message.get("mail", {}).get("messageId", "")
+            logger.info(
+                "SNS event received: type=%s messageId=%s",
+                notification_type or "<empty>",
+                ses_message_id or "<empty>",
+            )
 
             # The SES MessageId is the only key shared between the send path
             # and this async callback. An empty value must never be used to
             # match rows (it would match nothing useful and risks NULLs).
             if not ses_message_id:
                 logger.warning(
-                    "SNS %s notification missing mail.messageId — skipping update",
+                    "SNS %s notification missing mail.messageId, skipping update",
                     notification_type,
                 )
                 return Response(status_code=200, content="OK")

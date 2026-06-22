@@ -194,6 +194,42 @@ class TestSESAPIPayload:
         call_kwargs = mock_boto3_client.send_email.call_args[1]
         assert "ReplyToAddresses" not in call_kwargs
 
+    @pytest.mark.asyncio
+    async def test_no_configuration_set_by_default(
+        self, ses_provider, mock_boto3_client, sample_payload
+    ):
+        """Default provider has no config set → ConfigurationSetName omitted
+        (no SES behavior change when the setting is unset)."""
+        await ses_provider.send(sample_payload)
+        call_kwargs = mock_boto3_client.send_email.call_args[1]
+        assert "ConfigurationSetName" not in call_kwargs
+
+
+# ── Configuration set (SES event tracking) ──────────────────────────────────
+
+
+class TestSESConfigurationSet:
+    """When a configuration set is provided, sends must carry it so SES emits
+    Delivery/Bounce/Complaint events to SNS."""
+
+    @pytest.mark.asyncio
+    async def test_configuration_set_included_when_set(
+        self, mock_boto3_client, sample_payload
+    ):
+        with patch("app.services.email_providers.ses_provider.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_boto3_client
+            provider = SESEmailProvider(
+                region="us-east-1",
+                access_key_id="AKIATEST123",
+                secret_access_key="fakesecretkey",
+                configuration_set="bluonx-dev",
+            )
+        provider._client = mock_boto3_client
+
+        await provider.send(sample_payload)
+        call_kwargs = mock_boto3_client.send_email.call_args[1]
+        assert call_kwargs["ConfigurationSetName"] == "bluonx-dev"
+
 
 # ── Transient errors (retryable) ────────────────────────────────────────────
 
@@ -292,6 +328,7 @@ class TestCreateEmailProvider:
             mock_settings.AWS_ACCESS_KEY_ID = "AKIATEST"
             mock_settings.AWS_SECRET_ACCESS_KEY = "SECRET"
             mock_settings.AWS_REGION = "us-east-1"
+            mock_settings.SES_CONFIGURATION_SET = None
             provider = create_email_provider()
         assert isinstance(provider, SESEmailProvider)
 

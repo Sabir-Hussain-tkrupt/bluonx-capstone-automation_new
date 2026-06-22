@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     EMAIL_PROVIDER: str = "ses"  # "mock" or "ses"
     # SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
     SES_FROM_EMAIL: str = "noreply@bluonx.com"
+    # SES configuration set name. When set, sends carry ConfigurationSetName so
+    # SES emits Delivery/Bounce/Complaint events to SNS. Empty/None → no event
+    # tracking (behaves as before). Must name an existing config set or sends fail.
+    SES_CONFIGURATION_SET: str | None = None  # e.g. "bluonx-dev"
 
     # Portal (vendor-facing URL for magic links)
     PORTAL_BASE_URL: str = "http://localhost:5173"
