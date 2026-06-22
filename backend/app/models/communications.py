@@ -20,7 +20,7 @@ EMAIL_TYPES = Literal[
 ]
 
 EMAIL_STATUSES = Literal[
-    "queued", "sent", "delivered", "bounced", "failed",
+    "queued", "sent", "delivered", "bounced", "failed", "complained",
 ]
 
 

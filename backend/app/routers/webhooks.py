@@ -45,8 +45,11 @@ def _build_signing_string(payload: dict) -> str:
     if msg_type == "Notification":
         fields = ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"]
     else:
-        # SubscriptionConfirmation and UnsubscribeConfirmation
-        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "TopicArn", "Type"]
+        # SubscriptionConfirmation and UnsubscribeConfirmation. These include
+        # the Token field in the canonical string-to-sign (between Timestamp and
+        # TopicArn); omitting it makes the signature never match, so the genuine
+        # confirmation is rejected and the subscription stays pending.
+        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"]
 
     parts: list[str] = []
     for field in fields:
@@ -152,16 +155,74 @@ async def ses_notifications(request: Request) -> Response:
         try:
             message_str = body.get("Message", "{}")
             message = json.loads(message_str)
-            notification_type = message.get("notificationType", "")
+            # SES emits two shapes: configuration-set event publishing uses
+            # "eventType"; legacy identity feedback notifications use
+            # "notificationType". The branch values are identical, so accept
+            # either. We use a configuration set, so eventType is the live path.
+            notification_type = message.get("eventType") or message.get("notificationType", "")
             ses_message_id = message.get("mail", {}).get("messageId", "")
+            logger.info(
+                "SNS event received: type=%s messageId=%s",
+                notification_type or "<empty>",
+                ses_message_id or "<empty>",
+            )
+
+            # The SES MessageId is the only key shared between the send path
+            # and this async callback. An empty value must never be used to
+            # match rows (it would match nothing useful and risks NULLs).
+            if not ses_message_id:
+                logger.warning(
+                    "SNS %s notification missing mail.messageId, skipping update",
+                    notification_type,
+                )
+                return Response(status_code=200, content="OK")
 
             db = get_supabase(request)
 
+            def _update_email_log(
+                fields: dict, restrict_to_statuses: list[str] | None = None
+            ) -> None:
+                """Update the email_log row matched by provider_message_id.
+
+                When restrict_to_statuses is given, the update only applies while
+                the row is in one of those states. This keeps a late or reordered
+                Delivery event from clobbering a terminal bounced/complained row.
+
+                A 0-row result is logged so a missing correlation surfaces. For a
+                restricted (Delivery) update, 0 rows can also just mean the row is
+                already terminal (a legitimate skip), so that case is info, not a
+                warning.
+                """
+                query = (
+                    db.table("email_log")
+                    .update(fields)
+                    .eq("provider_message_id", ses_message_id)
+                )
+                if restrict_to_statuses is not None:
+                    query = query.in_("status", restrict_to_statuses)
+                resp = query.execute()
+                if not resp.data:
+                    if restrict_to_statuses is not None:
+                        logger.info(
+                            "SNS %s: no eligible email_log row for %s "
+                            "(already terminal or unknown id)",
+                            notification_type,
+                            ses_message_id,
+                        )
+                    else:
+                        logger.warning(
+                            "SNS %s: no email_log row matched provider_message_id %s",
+                            notification_type,
+                            ses_message_id,
+                        )
+
             if notification_type == "Delivery":
                 logger.info("SES delivery confirmed for message %s", ses_message_id)
-                db.table("email_log").update({
-                    "status": "delivered",
-                }).eq("id", ses_message_id).execute()
+                # Non-clobbering: only advance a row that has not reached a
+                # terminal state (bounced/complained/failed/delivered).
+                _update_email_log(
+                    {"status": "delivered"}, restrict_to_statuses=["queued", "sent"]
+                )
 
             elif notification_type == "Bounce":
                 bounce = message.get("bounce", {})
@@ -171,10 +232,7 @@ async def ses_notifications(request: Request) -> Response:
                 logger.warning(
                     "SES bounce for message %s: %s", ses_message_id, error_msg,
                 )
-                db.table("email_log").update({
-                    "status": "bounced",
-                    "error_message": error_msg,
-                }).eq("id", ses_message_id).execute()
+                _update_email_log({"status": "bounced", "error_message": error_msg})
 
             elif notification_type == "Complaint":
                 complaint = message.get("complaint", {})
@@ -182,17 +240,19 @@ async def ses_notifications(request: Request) -> Response:
                 logger.warning(
                     "SES complaint for message %s: %s", ses_message_id, feedback_type,
                 )
-                db.table("email_log").update({
-                    "status": "failed",
+                # A complaint follows a successful delivery, so it is not a send
+                # failure. Use a distinct status instead of 'failed'.
+                _update_email_log({
+                    "status": "complained",
                     "error_message": f"Complaint: {feedback_type}",
-                }).eq("id", ses_message_id).execute()
+                })
 
             else:
                 logger.info("Unhandled SNS notification type: %s", notification_type)
 
         except Exception:
-            # Always return 200 — SNS retries on non-2xx and we don't want
-            # a DB error to cause infinite retry loops from AWS.
+            # Always return 200 (SNS retries on non-2xx and we don't want
+            # a DB error to cause infinite retry loops from AWS).
             logger.exception("Error processing SNS notification")
 
     return Response(status_code=200, content="OK")

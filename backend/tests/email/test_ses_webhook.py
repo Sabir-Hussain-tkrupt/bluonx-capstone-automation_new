@@ -6,13 +6,20 @@ SNS subscription confirmations are auto-confirmed, and invalid signatures
 are rejected.
 """
 
+import base64
+import datetime
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.webhooks import _build_signing_string, verify_sns_signature
 
 
 # ── Realistic SNS payload fixtures ──────────────────────────────────────────
@@ -137,6 +144,38 @@ def complaint_notification() -> dict:
 
 
 @pytest.fixture()
+def delivery_event_configset() -> dict:
+    """Delivery in the CONFIGURATION SET event-publishing shape (eventType),
+    as opposed to the legacy identity-notification shape (notificationType)."""
+    ses_message = {
+        "eventType": "Delivery",
+        "mail": {
+            "timestamp": "2026-06-22T12:00:00.000Z",
+            "messageId": "ses-msg-configset-evt-001",
+            "source": "noreply@bluonx.com",
+            "destination": ["vendor@example.com"],
+        },
+        "delivery": {
+            "timestamp": "2026-06-22T12:00:01.000Z",
+            "recipients": ["vendor@example.com"],
+            "smtpResponse": "250 2.0.0 OK",
+        },
+    }
+    return {
+        "Type": "Notification",
+        "MessageId": "ee85e39f-ea4d-435a-b922-c6aae3915eff",
+        "TopicArn": "arn:aws:sns:us-east-1:314727362874:bluonx-ses-events-dev",
+        "Subject": "Amazon SES Email Event Notification",
+        "Message": json.dumps(ses_message),
+        "Timestamp": "2026-06-22T12:00:02.000Z",
+        "SignatureVersion": "1",
+        "Signature": "EXAMPLE_SIGNATURE_BASE64==",
+        "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-abc123.pem",
+        "UnsubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe",
+    }
+
+
+@pytest.fixture()
 def subscription_confirmation() -> dict:
     """Realistic SNS SubscriptionConfirmation message."""
     return {
@@ -209,6 +248,60 @@ class TestDeliveryNotification:
         mock_db.table.assert_called_with("email_log")
         update_call = mock_db.table("email_log").update.call_args[0][0]
         assert update_call["status"] == "delivered"
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-delivery-001",
+        )
+
+    def test_configset_eventtype_updates_status(self, test_client, delivery_event_configset):
+        """Configuration-set events use 'eventType' (not 'notificationType').
+        The handler must accept that shape and still mark the row delivered."""
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            update_chain = MagicMock()
+            update_chain.eq.return_value.execute.return_value = MagicMock(data=[{"id": "x"}])
+            mock_db.table.return_value.update.return_value = update_chain
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=delivery_event_configset,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        update_call = mock_db.table("email_log").update.call_args[0][0]
+        assert update_call["status"] == "delivered"
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-configset-evt-001",
+        )
+
+    def test_delivery_is_non_clobbering(self, test_client, delivery_notification):
+        """A Delivery update must be restricted to non-terminal rows so a late or
+        reordered delivery cannot overwrite a terminal bounced/complained row."""
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            update_chain = MagicMock()
+            update_chain.eq.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
+            mock_db.table.return_value.update.return_value = update_chain
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=delivery_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        # The delivery update is gated on the row still being queued/sent.
+        assert update_chain.eq.return_value.in_.call_args[0] == (
+            "status",
+            ["queued", "sent"],
+        )
 
     def test_delivery_returns_200(self, test_client, delivery_notification):
         """SNS requires 200 response for successful processing."""
@@ -252,6 +345,11 @@ class TestBounceNotification:
         assert update_call["status"] == "bounced"
         # Bounce type should be stored in error_message
         assert "Permanent" in update_call.get("error_message", "")
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-bounce-002",
+        )
 
     def test_bounce_stores_bounce_subtype(self, test_client, bounce_notification):
         with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
@@ -297,6 +395,167 @@ class TestComplaintNotification:
         assert resp.status_code == 200
         # Complaint should trigger an update to email_log
         mock_db.table.assert_called_with("email_log")
+        update_call = mock_db.table("email_log").update.call_args[0][0]
+        # A complaint is delivered-then-flagged, not a send failure, so it gets
+        # its own status rather than 'failed'.
+        assert update_call["status"] == "complained"
+        assert "Complaint" in update_call.get("error_message", "")
+        # Must join on the provider message id, NOT the internal UUID PK.
+        assert update_chain.eq.call_args[0] == (
+            "provider_message_id",
+            "ses-msg-complaint-003",
+        )
+
+
+# ── Signature canonical string (real, not mocked) ───────────────────────────
+
+
+class TestSigningString:
+    """The string-to-sign must follow the AWS field order for each type.
+
+    These exercise the real signing logic that the patched-verifier tests skip.
+    The SubscriptionConfirmation canonical string must include Token between
+    Timestamp and TopicArn, or the genuine confirmation is rejected with 403.
+    """
+
+    def test_confirmation_signing_string_includes_token(self):
+        payload = {
+            "Type": "SubscriptionConfirmation",
+            "Message": "m",
+            "MessageId": "id-1",
+            "SubscribeURL": "https://sns.example/confirm",
+            "Timestamp": "2026-06-21T00:00:00.000Z",
+            "Token": "tok-123",
+            "TopicArn": "arn:aws:sns:us-east-1:1:t",
+        }
+        expected = (
+            "Message\nm\n"
+            "MessageId\nid-1\n"
+            "SubscribeURL\nhttps://sns.example/confirm\n"
+            "Timestamp\n2026-06-21T00:00:00.000Z\n"
+            "Token\ntok-123\n"
+            "TopicArn\narn:aws:sns:us-east-1:1:t\n"
+            "Type\nSubscriptionConfirmation\n"
+        )
+        assert _build_signing_string(payload) == expected
+
+    def test_notification_signing_string_has_no_token(self):
+        payload = {
+            "Type": "Notification",
+            "Message": "m",
+            "MessageId": "id-1",
+            "Subject": "s",
+            "Timestamp": "2026-06-21T00:00:00.000Z",
+            "TopicArn": "arn:aws:sns:us-east-1:1:t",
+        }
+        assert "Token" not in _build_signing_string(payload)
+
+
+class TestVerifyConfirmationSignatureRoundTrip:
+    """Full RSA sign-then-verify of a SubscriptionConfirmation. This is the path
+    the genuine SNS confirmation takes, which the patched-verifier tests bypass.
+    """
+
+    @staticmethod
+    def _self_signed_cert(key: rsa.RSAPrivateKey) -> bytes:
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "sns.amazonaws.com")])
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1))
+            .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1))
+            .sign(key, hashes.SHA256())
+        )
+        return cert.public_bytes(serialization.Encoding.PEM)
+
+    def _signed_payload(self):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        payload = {
+            "Type": "SubscriptionConfirmation",
+            "Message": "You have chosen to subscribe.",
+            "MessageId": "abc-123",
+            "SubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&Token=xyz",
+            "Timestamp": "2026-06-21T00:00:00.000Z",
+            "Token": "xyz",
+            "TopicArn": "arn:aws:sns:us-east-1:314727362874:bluonx-ses-events-dev",
+            "SignatureVersion": "1",
+            "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-abc.pem",
+        }
+        signing_string = _build_signing_string(payload)
+        sig = key.sign(signing_string.encode("utf-8"), padding.PKCS1v15(), hashes.SHA1())
+        payload["Signature"] = base64.b64encode(sig).decode()
+        return payload, self._self_signed_cert(key)
+
+    def test_valid_confirmation_signature_passes(self):
+        payload, cert_pem = self._signed_payload()
+        with patch("app.routers.webhooks.httpx.get") as mock_get:
+            mock_get.return_value = MagicMock(content=cert_pem, raise_for_status=lambda: None)
+            assert verify_sns_signature(payload) is True
+
+    def test_tampered_token_fails_verification(self):
+        payload, cert_pem = self._signed_payload()
+        payload["Token"] = "tampered"  # signature no longer matches
+        with patch("app.routers.webhooks.httpx.get") as mock_get:
+            mock_get.return_value = MagicMock(content=cert_pem, raise_for_status=lambda: None)
+            assert verify_sns_signature(payload) is False
+
+
+# ── Correlation-key hardening ───────────────────────────────────────────────
+
+
+class TestMessageIdHardening:
+    """Guards around the provider_message_id correlation key."""
+
+    def test_missing_message_id_skips_update(self, test_client, delivery_notification):
+        """A notification with an empty mail.messageId must not attempt an
+        email_log update (an empty key must never match rows)."""
+        ses_message = json.loads(delivery_notification["Message"])
+        ses_message["mail"]["messageId"] = ""
+        delivery_notification["Message"] = json.dumps(ses_message)
+
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=delivery_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        mock_db.table.return_value.update.assert_not_called()
+
+    def test_zero_row_match_still_200_and_warns(
+        self, test_client, bounce_notification, caplog
+    ):
+        """When no email_log row matches the MessageId, the endpoint still
+        returns 200 but logs a warning (no silent no-op)."""
+        import logging
+
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db, \
+             caplog.at_level(logging.WARNING, logger="app.routers.webhooks"):
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            update_chain = MagicMock()
+            update_chain.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_db.table.return_value.update.return_value = update_chain
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=bounce_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        assert any(
+            "no email_log row matched" in rec.message for rec in caplog.records
+        )
 
 
 # ── Subscription confirmation ───────────────────────────────────────────────

@@ -47,6 +47,12 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   opened: 'warning',
   declined: 'danger',
   no_response: 'neutral',
+  // Email log statuses
+  queued: 'neutral',
+  delivered: 'success',
+  bounced: 'danger',
+  failed: 'danger',
+  complained: 'warning',
 };
 
 const variantStyles: Record<StatusVariant, string> = {

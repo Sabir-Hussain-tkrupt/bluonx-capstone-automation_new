@@ -168,6 +168,31 @@ class TestEmailLogStatus:
         assert "MessageRejected" in update_data["error_message"]
 
     @pytest.mark.asyncio
+    async def test_successful_send_persists_provider_message_id(
+        self, email_service, mock_db_client, send_kwargs
+    ):
+        """A successful send must store the provider MessageId so the SNS
+        webhook can later correlate delivery/bounce events to this row."""
+        await email_service.send_email(**send_kwargs)
+        update_data = mock_db_client.table("email_log").update.call_args[0][0]
+        assert update_data["provider_message_id"] == "ses-msg-abc123"
+
+    @pytest.mark.asyncio
+    async def test_failed_send_omits_provider_message_id(
+        self, mock_provider, mock_db_client, send_kwargs
+    ):
+        """A failed send has no MessageId, so the column must be left NULL
+        (key absent from the update) rather than written as an empty string."""
+        mock_provider.send.return_value = EmailSendResult(
+            message_id="", status="failed", error="MessageRejected"
+        )
+        service = EmailService(provider=mock_provider, db_client=mock_db_client)
+        await service.send_email(**send_kwargs)
+
+        update_data = mock_db_client.table("email_log").update.call_args[0][0]
+        assert "provider_message_id" not in update_data
+
+    @pytest.mark.asyncio
     async def test_retry_count_incremented(self, mock_provider, mock_db_client, send_kwargs):
         """retry_count in email_log should reflect the number of retry attempts."""
         # Fail twice, succeed on third
