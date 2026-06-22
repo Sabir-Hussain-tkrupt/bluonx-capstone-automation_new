@@ -4,6 +4,7 @@ Application settings loaded from environment variables.
 Uses pydantic-settings v2 with model_config (not class Config).
 """
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +38,10 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
 
     # Email
-    EMAIL_PROVIDER: str = "ses"  # "mock" or "ses"
+    # Safe default: "mock" sends no real email. Set EMAIL_PROVIDER=ses (with AWS
+    # creds + a verified SES_FROM_EMAIL) to send real email. Production is
+    # required to use "ses" (enforced in _validate_email_provider below).
+    EMAIL_PROVIDER: str = "mock"  # "mock" or "ses"
     # SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
     SES_FROM_EMAIL: str = "noreply@bluonx.com"
     # SES configuration set name. When set, sends carry ConfigurationSetName so
@@ -87,6 +91,30 @@ class Settings(BaseSettings):
     # Pure config (decision 3b) — sandbox = your own name/email.
     CONTRACT_OWNER_SIGNER_NAME: str | None = None
     CONTRACT_OWNER_SIGNER_EMAIL: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_email_provider(self) -> "Settings":
+        """Fail fast on unsafe / incomplete email configuration at load time.
+
+        - Production must use the real provider, never the mock, so a
+          misconfigured deploy cannot silently drop every email.
+        - Selecting "ses" requires AWS credentials, surfaced at startup
+          instead of lazily on the first send.
+        """
+        if self.APP_ENV.lower() == "production" and self.EMAIL_PROVIDER != "ses":
+            raise ValueError(
+                "EMAIL_PROVIDER must be 'ses' when APP_ENV=production "
+                f"(got '{self.EMAIL_PROVIDER}'); refusing to start so emails "
+                "are not silently dropped."
+            )
+        if self.EMAIL_PROVIDER == "ses" and not (
+            self.AWS_ACCESS_KEY_ID and self.AWS_SECRET_ACCESS_KEY
+        ):
+            raise ValueError(
+                "EMAIL_PROVIDER=ses requires AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY to be set."
+            )
+        return self
 
 
 settings = Settings()

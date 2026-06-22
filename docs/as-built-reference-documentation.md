@@ -84,7 +84,7 @@ These patterns recur across phases. They are stated once here so the phase secti
 
 **Soft deletes on core entities.** `users`, `vendors`, `projects`, and `tasks` use a `deleted_at` timestamp. Rows are never hard-deleted; RLS read policies filter out soft-deleted rows.
 
-**Email has a mock provider for development.** `EMAIL_PROVIDER=mock` in `backend/.env` is the standing development convention. SES credentials are live, but development runs against the mock so no real email is sent during build and test.
+**Email defaults to a mock provider.** `EMAIL_PROVIDER` defaults to `mock` in code, so a fresh checkout sends no real email during build and test. Set `EMAIL_PROVIDER=ses` (with AWS creds and a verified `SES_FROM_EMAIL`) to send real email. Production is required to use `ses`: if `APP_ENV=production` and the provider is not `ses`, the app refuses to start so emails are never silently dropped. The active provider is logged once at startup.
 
 **Scheduling is in-process.** All scheduled jobs run inside the FastAPI process via APScheduler. There is no separate orchestration service.
 

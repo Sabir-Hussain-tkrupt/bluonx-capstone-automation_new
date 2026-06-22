@@ -6,6 +6,7 @@ CORS allows the frontend dev server.
 All routers are mounted under /api/v1 (except /health).
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -40,11 +41,26 @@ from app.routers import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create and store global Supabase client, then start the scheduler
     client = init_supabase(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
     app.state.supabase = client
+    # Make the active email mode unmissable in logs.
+    if settings.EMAIL_PROVIDER == "ses":
+        logger.info(
+            "Email: SES provider active (from=%s, region=%s)",
+            settings.SES_FROM_EMAIL,
+            settings.AWS_REGION,
+        )
+    else:
+        logger.warning(
+            "Email: MOCK provider active (EMAIL_PROVIDER=%s), no real emails will be sent",
+            settings.EMAIL_PROVIDER,
+        )
     start_scheduler()
     yield
     # Shutdown: stop the scheduler (httpx client handles its own pool)
