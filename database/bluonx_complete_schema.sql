@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.33
--- Date:     June 19, 2026
+-- Version:  2.34
+-- Date:     June 22, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -642,7 +642,7 @@ CREATE TABLE email_log (
   reference_id      UUID,
   provider_message_id VARCHAR(255),
   status            VARCHAR(20)   NOT NULL DEFAULT 'queued'
-                                  CHECK (status IN ('queued', 'sent', 'delivered', 'bounced', 'failed')),
+                                  CHECK (status IN ('queued', 'sent', 'delivered', 'bounced', 'failed', 'complained')),
   sent_at           TIMESTAMPTZ,
   opened_at         TIMESTAMPTZ,
   clicked_at        TIMESTAMPTZ,

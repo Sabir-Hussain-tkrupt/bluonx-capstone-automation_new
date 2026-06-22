@@ -279,6 +279,30 @@ class TestDeliveryNotification:
             "ses-msg-configset-evt-001",
         )
 
+    def test_delivery_is_non_clobbering(self, test_client, delivery_notification):
+        """A Delivery update must be restricted to non-terminal rows so a late or
+        reordered delivery cannot overwrite a terminal bounced/complained row."""
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.get_supabase") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            update_chain = MagicMock()
+            update_chain.eq.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
+            mock_db.table.return_value.update.return_value = update_chain
+
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications",
+                json=delivery_notification,
+                headers={"x-amz-sns-message-type": "Notification"},
+            )
+
+        assert resp.status_code == 200
+        # The delivery update is gated on the row still being queued/sent.
+        assert update_chain.eq.return_value.in_.call_args[0] == (
+            "status",
+            ["queued", "sent"],
+        )
+
     def test_delivery_returns_200(self, test_client, delivery_notification):
         """SNS requires 200 response for successful processing."""
         with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
@@ -372,7 +396,10 @@ class TestComplaintNotification:
         # Complaint should trigger an update to email_log
         mock_db.table.assert_called_with("email_log")
         update_call = mock_db.table("email_log").update.call_args[0][0]
-        assert update_call["status"] == "failed"
+        # A complaint is delivered-then-flagged, not a send failure, so it gets
+        # its own status rather than 'failed'.
+        assert update_call["status"] == "complained"
+        assert "Complaint" in update_call.get("error_message", "")
         # Must join on the provider message id, NOT the internal UUID PK.
         assert update_chain.eq.call_args[0] == (
             "provider_message_id",

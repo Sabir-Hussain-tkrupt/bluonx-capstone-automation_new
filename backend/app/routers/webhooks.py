@@ -179,28 +179,50 @@ async def ses_notifications(request: Request) -> Response:
 
             db = get_supabase(request)
 
-            def _update_email_log(fields: dict) -> None:
+            def _update_email_log(
+                fields: dict, restrict_to_statuses: list[str] | None = None
+            ) -> None:
                 """Update the email_log row matched by provider_message_id.
 
-                Logs when no row matched so a missing/mismatched correlation
-                surfaces instead of silently updating nothing.
+                When restrict_to_statuses is given, the update only applies while
+                the row is in one of those states. This keeps a late or reordered
+                Delivery event from clobbering a terminal bounced/complained row.
+
+                A 0-row result is logged so a missing correlation surfaces. For a
+                restricted (Delivery) update, 0 rows can also just mean the row is
+                already terminal (a legitimate skip), so that case is info, not a
+                warning.
                 """
-                resp = (
+                query = (
                     db.table("email_log")
                     .update(fields)
                     .eq("provider_message_id", ses_message_id)
-                    .execute()
                 )
+                if restrict_to_statuses is not None:
+                    query = query.in_("status", restrict_to_statuses)
+                resp = query.execute()
                 if not resp.data:
-                    logger.warning(
-                        "SNS %s: no email_log row matched provider_message_id %s",
-                        notification_type,
-                        ses_message_id,
-                    )
+                    if restrict_to_statuses is not None:
+                        logger.info(
+                            "SNS %s: no eligible email_log row for %s "
+                            "(already terminal or unknown id)",
+                            notification_type,
+                            ses_message_id,
+                        )
+                    else:
+                        logger.warning(
+                            "SNS %s: no email_log row matched provider_message_id %s",
+                            notification_type,
+                            ses_message_id,
+                        )
 
             if notification_type == "Delivery":
                 logger.info("SES delivery confirmed for message %s", ses_message_id)
-                _update_email_log({"status": "delivered"})
+                # Non-clobbering: only advance a row that has not reached a
+                # terminal state (bounced/complained/failed/delivered).
+                _update_email_log(
+                    {"status": "delivered"}, restrict_to_statuses=["queued", "sent"]
+                )
 
             elif notification_type == "Bounce":
                 bounce = message.get("bounce", {})
@@ -218,8 +240,10 @@ async def ses_notifications(request: Request) -> Response:
                 logger.warning(
                     "SES complaint for message %s: %s", ses_message_id, feedback_type,
                 )
+                # A complaint follows a successful delivery, so it is not a send
+                # failure. Use a distinct status instead of 'failed'.
                 _update_email_log({
-                    "status": "failed",
+                    "status": "complained",
                     "error_message": f"Complaint: {feedback_type}",
                 })
 
@@ -227,8 +251,8 @@ async def ses_notifications(request: Request) -> Response:
                 logger.info("Unhandled SNS notification type: %s", notification_type)
 
         except Exception:
-            # Always return 200 — SNS retries on non-2xx and we don't want
-            # a DB error to cause infinite retry loops from AWS.
+            # Always return 200 (SNS retries on non-2xx and we don't want
+            # a DB error to cause infinite retry loops from AWS).
             logger.exception("Error processing SNS notification")
 
     return Response(status_code=200, content="OK")
