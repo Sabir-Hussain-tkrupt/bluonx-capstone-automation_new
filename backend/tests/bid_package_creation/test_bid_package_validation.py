@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from postgrest.exceptions import APIError
 
 from .conftest import (
     BID_TEMPLATE_ID,
@@ -181,13 +182,23 @@ class TestTaskExistenceValidation:
         mock_template_renderer,
         future_deadline,
     ):
-        """Task ID that doesn't exist in the database returns 404."""
+        """A task_id that doesn't exist returns 404.
+
+        Task existence is enforced by the atomic creation RPC's FK, not a
+        pre-write SELECT: a bad task_id makes the RPC raise a foreign-key
+        violation that rolls back the whole transaction (no partial writes),
+        which the service maps to 404.
+        """
         select_chain = MagicMock()
         select_chain.execute.return_value = MagicMock(data=[])
         select_chain.eq.return_value = select_chain
         select_chain.is_.return_value = select_chain
         select_chain.single.return_value = select_chain
         mock_supabase.table.return_value.select.return_value = select_chain
+
+        mock_supabase.rpc.side_effect = APIError(
+            {"code": "23503", "message": "violates foreign key constraint"}
+        )
 
         payload = {
             "task_id": str(NONEXISTENT_TASK_ID),

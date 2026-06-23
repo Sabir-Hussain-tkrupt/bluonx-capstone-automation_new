@@ -63,7 +63,15 @@ class TerminalStatusError(InvitationTrackingError):
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-_ALL_STATUSES = ("sent", "opened", "submitted", "declined", "expired", "no_response")
+# pending_send / send_failed cover invitations whose email has not (yet) been
+# delivered. They are listed here so the per-status summary counts them, but they
+# are deliberately kept OUT of _EXPIRABLE_STATUSES: an invitation that was never
+# delivered should keep its "never reached" status rather than be relabeled
+# 'expired' when the deadline passes.
+_ALL_STATUSES = (
+    "pending_send", "sent", "send_failed", "opened",
+    "submitted", "declined", "expired", "no_response",
+)
 _PM_SETTABLE_STATUSES = frozenset({"declined", "expired", "no_response"})
 _EXPIRABLE_STATUSES = ("sent", "opened")
 # Statuses the deadline sweep / lazy-expiry treat as no-ops: it acts ONLY on an

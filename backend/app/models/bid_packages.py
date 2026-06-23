@@ -68,7 +68,9 @@ class InvitationSummary(BluOnXBase):
     """Per-status counts for invitations in a bid package."""
 
     total: int
+    pending_send: int = 0
     sent: int
+    send_failed: int = 0
     opened: int
     submitted: int
     declined: int

@@ -6,13 +6,16 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import type { InvitationSummary, InvitationStatus } from '@/features/bids/types';
+import type { InvitationSummary } from '@/features/bids/types';
 
 interface SubmissionStatusPieProps {
   summary: InvitationSummary;
 }
 
-type PieStatus = Exclude<InvitationStatus, 'no_response'>;
+// The pie shows outcomes of delivered invitations only. Undelivered states
+// (pending_send / send_failed) and no_response are intentionally excluded;
+// send_failed is surfaced separately as a summary card + per-row badge.
+type PieStatus = 'sent' | 'opened' | 'submitted' | 'declined' | 'expired';
 
 const STATUS_LABELS: Record<PieStatus, string> = {
   sent: 'Sent',

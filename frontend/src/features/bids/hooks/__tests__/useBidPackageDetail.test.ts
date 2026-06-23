@@ -33,7 +33,9 @@ function basePayload(overrides: Partial<BidPackageDetail> = {}): BidPackageDetai
     documents: [],
     invitation_summary: {
       total: 0,
+      pending_send: 0,
       sent: 0,
+      send_failed: 0,
       opened: 0,
       submitted: 0,
       declined: 0,

@@ -18,6 +18,9 @@ import secrets
 from datetime import datetime, timezone
 from uuid import UUID
 
+from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
+
 logger = logging.getLogger(__name__)
 
 # Statuses that block new bid packages
@@ -69,6 +72,44 @@ def _format_date_only(value) -> str:
         return dt.strftime("%B %d, %Y")
     except (ValueError, TypeError):
         return str(value)
+
+
+def _is_unique_violation(err: APIError) -> bool:
+    """supabase-py wraps Postgres 23505 in APIError. Same logic as
+    award_service._is_unique_violation."""
+    code = getattr(err, "code", None)
+    msg = str(err).lower()
+    return code == "23505" or "duplicate key" in msg or "unique" in msg
+
+
+def _is_foreign_key_violation(err: APIError) -> bool:
+    """Postgres 23503 (FK violation) wrapped in APIError. Raised by the creation
+    RPC when task_id / template / vendor / contact / document references don't
+    exist, so we can surface a clean 404 instead of a 500."""
+    code = getattr(err, "code", None)
+    msg = str(err).lower()
+    return code == "23503" or "foreign key" in msg or "violates foreign key" in msg
+
+
+def _set_invitation_send_status(db, invitation_id: str, *, sent: bool) -> None:
+    """Reconcile a 'pending_send' invitation after its email attempt.
+
+    sent=True  -> status 'sent' with sent_at = now.
+    sent=False -> status 'send_failed' (recoverable via Resend / Send Bid Link).
+    No-op when invitation_id is empty (defensive; the RPC always returns one).
+    """
+    if not invitation_id:
+        return
+    if sent:
+        update = {
+            "status": "sent",
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        update = {"status": "send_failed"}
+    db.table("bid_invitations").update(update).eq(
+        "id", str(invitation_id)
+    ).execute()
 
 
 def _query_one(db, table_name: str, record_id: str | UUID) -> dict | None:
@@ -239,44 +280,72 @@ async def create_bid_package_with_invitations(
                 )
             contact_data_map[cid] = contact
 
-    # ── All validation passed — start creating DB rows ───────────────────
+    # ── All validation passed. Create everything atomically, then email. ──
 
-    # ── 7. Create bid_packages row ───────────────────────────────────────
-    bp_row = {
-        "task_id": str(task_id),
-        "deadline": deadline_str,
-        "bid_template_id": str(bid_template_id),
-        "created_by": str(created_by),
-        "status": "open",
+    # ── 7. Generate one magic-link token per vendor ──────────────────────
+    # Raw tokens are emailed and never stored; only their SHA-256 hashes go
+    # into the DB (inside the RPC). Keep the raw tokens in memory keyed by
+    # vendor so the email phase below can build each personalized link.
+    raw_token_by_vendor: dict[str, str] = {}
+    rpc_vendors: list[dict] = []
+    for vs in vendor_selections:
+        raw_token, token_hash = _generate_magic_link_token()
+        raw_token_by_vendor[vs["vendor_id"]] = raw_token
+        rpc_vendors.append({
+            "vendor_id": str(vs["vendor_id"]),
+            "vendor_contact_id": str(vs["vendor_contact_id"]),
+            "token_hash": token_hash,
+        })
+
+    # ── 8. Atomic DB write: package + documents + invitations + tokens ───
+    # fn_create_bid_package_with_invitations runs in a single transaction, so an
+    # interrupted create can never leave a partial package or orphan tokens (the
+    # old per-row inserts could, which led to duplicate packages on PM retry).
+    # Invitations start as 'pending_send'; the email phase below reconciles each
+    # to 'sent' or 'send_failed'. The draft->bidding task flip happens in the RPC.
+    rpc_params = {
+        "p_task_id": str(task_id),
+        "p_deadline": deadline_str,
+        "p_bid_template_id": str(bid_template_id),
+        "p_created_by": str(created_by),
+        "p_instructions": payload.get("instructions"),
+        "p_desired_start_date": desired_start_date,
+        "p_project_document_ids": [str(d) for d in project_document_ids],
+        "p_vendors": rpc_vendors,
     }
-    instructions = payload.get("instructions")
-    if instructions is not None:
-        bp_row["instructions"] = instructions
-    # Always set desired_start_date so an explicit None overrides any
-    # default the DB might apply; both the column default and the
-    # spec's "NULL = flexible" reading are preserved.
-    bp_row["desired_start_date"] = desired_start_date
-    bp_resp = db.table("bid_packages").insert(bp_row).execute()
-    bp_data = bp_resp.data
-    if isinstance(bp_data, list):
-        bp_record = bp_data[0] if bp_data else None
-    else:
-        bp_record = bp_data
-
-    if not bp_record or (isinstance(bp_record, dict) and not bp_record.get("id")):
-        raise BidPackageValidationError(
-            404, "Task not found or bid package creation failed"
+    try:
+        rpc_resp = await run_in_threadpool(
+            lambda: db.rpc(
+                "fn_create_bid_package_with_invitations", rpc_params
+            ).execute()
         )
+    except APIError as exc:
+        # The whole transaction rolls back on any error, so nothing partial
+        # survives. Map the common constraint failures to clean 4xx responses.
+        if _is_unique_violation(exc):
+            raise BidPackageValidationError(
+                409,
+                "A duplicate invitation already exists for this bid package.",
+            ) from exc
+        if _is_foreign_key_violation(exc):
+            raise BidPackageValidationError(
+                404,
+                "Task not found or a referenced record no longer exists.",
+            ) from exc
+        raise
 
-    bid_package_id = bp_record.get("id", "") if isinstance(bp_record, dict) else str(bp_record)
-    round_number = bp_record.get("round_number", 1) if isinstance(bp_record, dict) else 1
+    rpc_data = rpc_resp.data
+    rpc_result = rpc_data[0] if isinstance(rpc_data, list) else rpc_data
+    if not isinstance(rpc_result, dict) or not rpc_result.get("bid_package_id"):
+        raise BidPackageValidationError(500, "Bid package creation failed")
 
-    # ── 8. Create bid_package_documents ──────────────────────────────────
-    for doc_id in project_document_ids:
-        db.table("bid_package_documents").insert({
-            "bid_package_id": str(bid_package_id),
-            "project_document_id": str(doc_id),
-        }).execute()
+    bid_package_id = rpc_result["bid_package_id"]
+    round_number = rpc_result.get("round_number", 1)
+    invitation_id_by_vendor = {
+        row["vendor_id"]: row["invitation_id"]
+        for row in (rpc_result.get("invitations") or [])
+        if isinstance(row, dict)
+    }
 
     # ── 9. Gather shared context for emails ──────────────────────────────
     # Fetch project, PM, template info if not already cached from validation
@@ -317,7 +386,10 @@ async def create_bid_package_with_invitations(
     # template's {% if desired_start_date %} branch omits the row cleanly.
     formatted_desired_start = _format_date_only(desired_start_date)
 
-    # ── 10. Create invitations + tokens + send emails ────────────────────
+    # ── 10. Send emails and reconcile each invitation's status ───────────
+    # The package, invitations (pending_send) and tokens already exist from the
+    # atomic RPC above. Here we only render + send, then flip each invitation to
+    # 'sent' (provider accepted) or 'send_failed' (recoverable via resend).
     invitations_sent = 0
     invitations_failed = 0
     failed_vendors: list[dict] = []
@@ -325,6 +397,9 @@ async def create_bid_package_with_invitations(
     for i, vs in enumerate(vendor_selections):
         vid = vs["vendor_id"]
         cid = vs["vendor_contact_id"]
+
+        invitation_id = invitation_id_by_vendor.get(vid, "")
+        raw_token = raw_token_by_vendor.get(vid, "")
 
         # Get vendor/contact data (from validation cache or fresh query)
         contact = contact_data_map.get(cid)
@@ -338,36 +413,7 @@ async def create_bid_package_with_invitations(
         contact_name = contact.get("full_name", "") if isinstance(contact, dict) else ""
         company_name = vendor.get("company_name", "") if isinstance(vendor, dict) else ""
 
-        # Insert bid_invitations row
-        inv_row = {
-            "bid_package_id": str(bid_package_id),
-            "vendor_id": str(vid),
-            "vendor_contact_id": str(cid),
-            "status": "sent",
-            "sent_at": datetime.now(timezone.utc).isoformat(),
-        }
-        inv_resp = db.table("bid_invitations").insert(inv_row).execute()
-        inv_data = inv_resp.data
-        if isinstance(inv_data, list):
-            inv_record = inv_data[0] if inv_data else {}
-        else:
-            inv_record = inv_data if inv_data else {}
-        invitation_id = inv_record.get("id", "") if isinstance(inv_record, dict) else ""
-
-        # Generate magic link token
-        raw_token, token_hash = _generate_magic_link_token()
-
-        # Insert magic_link_tokens row
-        token_row = {
-            "bid_invitation_id": str(invitation_id),
-            "vendor_id": str(vid),
-            "token_hash": token_hash,
-            "expires_at": deadline_str,
-            "is_used": False,
-        }
-        db.table("magic_link_tokens").insert(token_row).execute()
-
-        # Build magic link URL
+        # Build magic link URL from the raw token minted before the RPC
         magic_link_url = f"{settings.PORTAL_BASE_URL}/bid/{raw_token}"
 
         # Build email template context
@@ -409,12 +455,14 @@ async def create_bid_package_with_invitations(
 
             if result.status == "sent":
                 invitations_sent += 1
+                _set_invitation_send_status(db, invitation_id, sent=True)
             else:
                 invitations_failed += 1
                 failed_vendors.append({
                     "vendor_id": str(vid),
                     "error": result.error or "Unknown error",
                 })
+                _set_invitation_send_status(db, invitation_id, sent=False)
                 logger.warning(
                     "Email failed for vendor %s: %s", vid, result.error
                 )
@@ -424,19 +472,15 @@ async def create_bid_package_with_invitations(
                 "vendor_id": str(vid),
                 "error": str(exc),
             })
+            _set_invitation_send_status(db, invitation_id, sent=False)
             logger.error("Email send exception for vendor %s: %s", vid, exc)
 
         # Rate limiting between sends (skip after last vendor)
         if i < len(vendor_selections) - 1:
             await asyncio.sleep(_RATE_LIMIT_DELAY)
 
-    # ── 11. Update task status ───────────────────────────────────────────
-    if isinstance(task, dict) and task.get("status") == "draft":
-        db.table("tasks").update({"status": "bidding"}).eq(
-            "id", str(task_id)
-        ).execute()
-
-    # ── 12. Build and return response ────────────────────────────────────
+    # ── 11. Build and return response ────────────────────────────────────
+    # (The draft->bidding task flip already happened inside the RPC transaction.)
     return {
         "bid_package_id": str(bid_package_id),
         "round_number": round_number,
@@ -595,9 +639,18 @@ async def resend_bid_link(
     plain_text_body = template_renderer.render_text("bid_invitation.txt", context)
 
     # ── 8. Send email ────────────────────────────────────────────────────
+    # A pending_send / send_failed invitation was never actually delivered, so
+    # this is a first send, not a resend; label the subject accordingly.
+    current_status = invitation.get("status")
+    never_delivered = current_status in ("pending_send", "send_failed")
+    subject = (
+        f"Bid Invitation: {task_name} - {project_name}"
+        if never_delivered
+        else "Bid Link (Resent)"
+    )
     email_result = await email_service.send_email(
         to_email=contact_email,
-        subject="Bid Link (Resent)",
+        subject=subject,
         html_body=html_body,
         plain_text_body=plain_text_body,
         email_type="bid_invitation",
@@ -606,10 +659,19 @@ async def resend_bid_link(
         reference_id=str(invitation_id),
     )
 
-    # ── 9. Refresh sent_at only — status / opened_at stay intact ─────────
-    db.table("bid_invitations").update(
-        {"sent_at": datetime.now(timezone.utc).isoformat()}
-    ).eq("id", str(invitation_id)).execute()
+    # ── 9. Reconcile invitation status ───────────────────────────────────
+    # Never-delivered (pending_send / send_failed): record the real outcome via
+    # the shared helper ('sent' on success, 'send_failed' on failure). Already
+    # delivered: only refresh sent_at and leave status / opened_at intact so a
+    # resend never downgrades an 'opened' invitation back to 'sent'.
+    if never_delivered:
+        _set_invitation_send_status(
+            db, str(invitation_id), sent=email_result.status == "sent"
+        )
+    else:
+        db.table("bid_invitations").update(
+            {"sent_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", str(invitation_id)).execute()
 
     return {
         "invitation_id": str(invitation_id),

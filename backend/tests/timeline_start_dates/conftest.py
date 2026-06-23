@@ -251,6 +251,27 @@ def mock_supabase_admin() -> MagicMock:
         return chain
 
     client.table.return_value = _make_chain()
+
+    # Creation now happens via the atomic RPC; mirror the real return shape
+    # (one invitation per vendor) and echo the desired_start_date back through
+    # the package row so the response-shape tests pass.
+    def _rpc(fn_name, params=None):
+        result = MagicMock()
+        if fn_name == "fn_create_bid_package_with_invitations":
+            vendors = (params or {}).get("p_vendors", [])
+            result.execute.return_value = MagicMock(data={
+                "bid_package_id": str(BID_PACKAGE_ID),
+                "round_number": 1,
+                "invitations": [
+                    {"vendor_id": v["vendor_id"], "invitation_id": str(uuid4())}
+                    for v in vendors
+                ],
+            })
+        else:
+            result.execute.return_value = MagicMock(data=None)
+        return result
+
+    client.rpc.side_effect = _rpc
     return client
 
 

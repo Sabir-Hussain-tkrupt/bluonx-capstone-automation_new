@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.34
--- Date:     June 22, 2026
+-- Version:  2.35
+-- Date:     June 23, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -332,7 +332,8 @@ CREATE TABLE bid_invitations (
   vendor_id         UUID          NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,
   vendor_contact_id UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
   status            VARCHAR(20)   NOT NULL DEFAULT 'sent'
-                                  CHECK (status IN ('sent', 'opened', 'submitted', 'declined',
+                                  CHECK (status IN ('pending_send', 'sent', 'send_failed',
+                                                    'opened', 'submitted', 'declined',
                                                     'expired', 'no_response')),
   sent_at           TIMESTAMPTZ,
   opened_at         TIMESTAMPTZ,
@@ -344,6 +345,7 @@ CREATE TABLE bid_invitations (
 );
 
 COMMENT ON TABLE bid_invitations IS 'Individual invitation per vendor per bid package. Tracks delivery and response status.';
+COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent.';
 
 
 -- Magic link tokens for vendor bid portal access
@@ -1400,6 +1402,110 @@ GRANT EXECUTE ON FUNCTION fn_create_award(
 ) TO service_role;
 
 
+-- 7.2  fn_create_bid_package_with_invitations — atomic bid-package write
+-- ----------------------------------------------------------------------------
+-- Creates the bid_packages row, its bid_package_documents, one bid_invitations
+-- row per vendor (status 'pending_send', sent_at NULL), and one magic_link_tokens
+-- row per invitation, then flips a draft task to 'bidding' -- all in ONE
+-- transaction. Either the whole package exists or none of it does, so a failure
+-- can never leave a partial package or orphan tokens (which previously caused
+-- duplicate packages when the PM retried).
+--
+-- Validation (task/vendor/contact/document checks) runs in Python BEFORE this is
+-- called; this function is the write only. Token HASHES are generated in Python
+-- and passed in via p_vendors; the raw tokens never touch the DB. Emails are sent
+-- AFTER this returns (a side effect that cannot live in a DB transaction); the
+-- service then reconciles each invitation to 'sent' or 'send_failed'.
+--
+-- p_vendors is a JSONB array of objects:
+--   {"vendor_id": uuid, "vendor_contact_id": uuid, "token_hash": text}
+-- Every token shares the package deadline as its expires_at.
+--
+-- Returns JSONB: {bid_package_id, round_number, invitations:[{vendor_id, invitation_id}]}
+-- so the service can match its in-memory raw tokens back to the new invitation ids.
+
+CREATE OR REPLACE FUNCTION fn_create_bid_package_with_invitations(
+  p_task_id              UUID,
+  p_deadline             TIMESTAMPTZ,
+  p_bid_template_id      UUID,
+  p_created_by           UUID,
+  p_instructions         TEXT,
+  p_desired_start_date   DATE,
+  p_project_document_ids UUID[],
+  p_vendors              JSONB
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_bid_package   bid_packages;
+  v_doc_id        UUID;
+  v_vendor        JSONB;
+  v_invitation_id UUID;
+  v_invitations   JSONB := '[]'::jsonb;
+BEGIN
+  -- 1. Bid package (round_number auto-set by trg_bid_packages_round_number)
+  INSERT INTO bid_packages (
+    task_id, deadline, bid_template_id, created_by,
+    instructions, desired_start_date, status
+  ) VALUES (
+    p_task_id, p_deadline, p_bid_template_id, p_created_by,
+    p_instructions, p_desired_start_date, 'open'
+  )
+  RETURNING * INTO v_bid_package;
+
+  -- 2. Bid package documents
+  IF p_project_document_ids IS NOT NULL THEN
+    FOREACH v_doc_id IN ARRAY p_project_document_ids LOOP
+      INSERT INTO bid_package_documents (bid_package_id, project_document_id)
+      VALUES (v_bid_package.id, v_doc_id);
+    END LOOP;
+  END IF;
+
+  -- 3. One invitation (not yet emailed) + one magic link token per vendor
+  FOR v_vendor IN SELECT * FROM jsonb_array_elements(p_vendors) LOOP
+    INSERT INTO bid_invitations (
+      bid_package_id, vendor_id, vendor_contact_id, status, sent_at
+    ) VALUES (
+      v_bid_package.id,
+      (v_vendor->>'vendor_id')::uuid,
+      (v_vendor->>'vendor_contact_id')::uuid,
+      'pending_send',
+      NULL
+    )
+    RETURNING id INTO v_invitation_id;
+
+    INSERT INTO magic_link_tokens (
+      bid_invitation_id, vendor_id, token_hash, expires_at, is_used
+    ) VALUES (
+      v_invitation_id,
+      (v_vendor->>'vendor_id')::uuid,
+      v_vendor->>'token_hash',
+      p_deadline,
+      FALSE
+    );
+
+    v_invitations := v_invitations || jsonb_build_object(
+      'vendor_id',     v_vendor->>'vendor_id',
+      'invitation_id', v_invitation_id
+    );
+  END LOOP;
+
+  -- 4. Move the task into 'bidding' only when it is still a draft
+  UPDATE tasks SET status = 'bidding'
+   WHERE id = p_task_id AND status = 'draft';
+
+  RETURN jsonb_build_object(
+    'bid_package_id', v_bid_package.id,
+    'round_number',   v_bid_package.round_number,
+    'invitations',    v_invitations
+  );
+END;
+$$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION fn_create_bid_package_with_invitations(
+  UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID[], JSONB
+) TO service_role;
+
+
 
 
 -- ============================================================================
@@ -1408,6 +1514,7 @@ GRANT EXECUTE ON FUNCTION fn_create_award(
 -- Total tables:    29
 -- Total indexes:   55 custom (51 regular + 4 partial unique) + auto PK/UNIQUE
 -- Total triggers:  29 (28 active + 1 disabled onboarding sync)
--- Total functions: 15 (14 active + 1 disabled onboarding sync)
---                  (14th active = fn_create_award, SECTION 7 RPC)
+-- Total functions: 16 (15 active + 1 disabled onboarding sync)
+--                  (SECTION 7 RPCs: fn_create_award,
+--                   fn_create_bid_package_with_invitations)
 -- ============================================================================

@@ -64,7 +64,9 @@ export interface BidDocument {
 
 export interface InvitationSummary {
   total: number;
+  pending_send: number;
   sent: number;
+  send_failed: number;
   opened: number;
   submitted: number;
   declined: number;
@@ -72,7 +74,15 @@ export interface InvitationSummary {
   no_response: number;
 }
 
-export type InvitationStatus = 'sent' | 'opened' | 'submitted' | 'declined' | 'expired' | 'no_response';
+export type InvitationStatus =
+  | 'pending_send'
+  | 'sent'
+  | 'send_failed'
+  | 'opened'
+  | 'submitted'
+  | 'declined'
+  | 'expired'
+  | 'no_response';
 
 export interface BidInvitation {
   id: string;
