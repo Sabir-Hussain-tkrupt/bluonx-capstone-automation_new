@@ -247,7 +247,7 @@ export function BidPackageDetailPage() {
         />
         <SummaryCard
           label="Pending"
-          value={summary.sent + summary.opened}
+          value={summary.sent + summary.opened + summary.pending_send}
           color="text-info-600"
         />
         <SummaryCard
@@ -255,6 +255,14 @@ export function BidPackageDetailPage() {
           value={summary.declined + summary.expired}
           color="text-secondary-500"
         />
+        {/* Only shown when sends failed, so the normal flow keeps four cards. */}
+        {summary.send_failed > 0 && (
+          <SummaryCard
+            label="Failed to Send"
+            value={summary.send_failed}
+            color="text-danger-600"
+          />
+        )}
       </div>
 
       {/* Submission Status Pie */}

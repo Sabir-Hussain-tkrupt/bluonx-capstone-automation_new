@@ -277,13 +277,49 @@ def mock_template_renderer() -> MagicMock:
     return renderer
 
 
+def configure_create_rpc(
+    mock_supabase: MagicMock,
+    *,
+    round_number: int = 1,
+    bid_package_id: str | None = None,
+) -> str:
+    """Configure mock_supabase.rpc for fn_create_bid_package_with_invitations.
+
+    The atomic creation now happens in a single RPC instead of per-row table
+    inserts, so tests drive/inspect that call here. One invitation id is
+    generated per vendor passed in p_vendors, mirroring the real function's
+    {vendor_id, invitation_id} mapping. Returns the bid_package_id used.
+    """
+    bpid = str(bid_package_id or uuid4())
+
+    def _side_effect(fn_name, params=None):
+        result = MagicMock()
+        if fn_name == "fn_create_bid_package_with_invitations":
+            vendors = (params or {}).get("p_vendors", [])
+            result.execute.return_value = MagicMock(data={
+                "bid_package_id": bpid,
+                "round_number": round_number,
+                "invitations": [
+                    {"vendor_id": v["vendor_id"], "invitation_id": str(uuid4())}
+                    for v in vendors
+                ],
+            })
+        else:
+            result.execute.return_value = MagicMock(data=None)
+        return result
+
+    mock_supabase.rpc.side_effect = _side_effect
+    return bpid
+
+
 @pytest.fixture()
 def mock_supabase() -> MagicMock:
     """
-    Mock Supabase client with table chain support.
+    Mock Supabase client with table chain + rpc support.
 
-    Configures default return values for common operations.
-    Individual tests can override specific table behaviors.
+    Configures default return values for common operations. The atomic
+    bid-package creation RPC is wired with a sensible default (round 1);
+    individual tests can re-call configure_create_rpc to override.
     """
     client = MagicMock()
 
@@ -306,6 +342,7 @@ def mock_supabase() -> MagicMock:
         return chain
 
     client.table.return_value = _make_chain()
+    configure_create_rpc(client)
     return client
 
 

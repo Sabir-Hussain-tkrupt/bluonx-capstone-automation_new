@@ -139,3 +139,50 @@ describe('InvitationsTable — Request Revision visibility', () => {
     ).toBeNull();
   });
 });
+
+describe('InvitationsTable — Resend / Send Bid Link action', () => {
+  it('labels the action "Send Bid Link" for never-delivered statuses', () => {
+    const pending = makeInvitation({ id: 'inv-pend', status: 'pending_send' });
+    const failed = makeInvitation({ id: 'inv-fail', status: 'send_failed' });
+
+    renderTable([pending, failed]);
+
+    // Table renders mobile + desktop, so each row yields 2 buttons.
+    expect(
+      screen.getAllByRole('button', { name: 'Send Bid Link' }).length,
+    ).toBe(4);
+    expect(
+      screen.queryByRole('button', { name: 'Resend Bid Link' }),
+    ).toBeNull();
+  });
+
+  it('labels the action "Resend Bid Link" for an already-delivered status', () => {
+    renderTable([makeInvitation({ id: 'inv-sent', status: 'sent' })]);
+
+    expect(
+      screen.getAllByRole('button', { name: 'Resend Bid Link' }).length,
+    ).toBe(2);
+    expect(
+      screen.queryByRole('button', { name: 'Send Bid Link' }),
+    ).toBeNull();
+  });
+
+  it('invokes onResendBidLink with the invitation id for a send_failed row', async () => {
+    const user = userEvent.setup();
+    const onResend = vi.fn();
+    render(
+      <InvitationsTable
+        invitations={[makeInvitation({ id: 'inv-fail', status: 'send_failed' })]}
+        isLoading={false}
+        onResendBidLink={onResend}
+        onMarkDeclined={vi.fn()}
+        resendingId={null}
+        updatingId={null}
+      />,
+    );
+
+    const buttons = screen.getAllByRole('button', { name: 'Send Bid Link' });
+    await user.click(buttons[0]);
+    expect(onResend).toHaveBeenCalledWith('inv-fail');
+  });
+});

@@ -43,7 +43,9 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   open: 'info',
   closed: 'neutral',
   // Bid invitation statuses
+  pending_send: 'neutral',
   sent: 'info',
+  send_failed: 'danger',
   opened: 'warning',
   declined: 'danger',
   no_response: 'neutral',

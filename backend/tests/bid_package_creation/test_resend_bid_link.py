@@ -418,6 +418,38 @@ async def test_resend_bid_link_404_when_invitation_missing(
 
 
 @pytest.mark.asyncio
+async def test_resend_bid_link_404_when_invitation_lookup_raises_no_rows(
+    mock_email_service,
+    mock_template_renderer,
+):
+    """Regression: a nonexistent invitation id makes the .single() lookup raise
+    PGRST116 (0 rows). The service must map that to 404, not crash with a 500."""
+    from postgrest.exceptions import APIError
+
+    db = MagicMock()
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.single.return_value = chain
+    chain.execute.side_effect = APIError(
+        {"code": "PGRST116", "message": "JSON object requested, 0 rows returned"}
+    )
+    db.table.return_value = chain
+
+    with pytest.raises(BidPackageValidationError) as exc_info:
+        await resend_bid_link(
+            invitation_id=uuid4(),
+            current_user_id=PM_USER_ID,
+            db=db,
+            email_service=mock_email_service,
+            template_renderer=mock_template_renderer,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert mock_email_service.send_email.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_resend_bid_link_404_when_vendor_contact_missing(
     mock_supabase,
     mock_email_service,
@@ -448,6 +480,99 @@ async def test_resend_bid_link_404_when_vendor_contact_missing(
     assert exc_info.value.status_code == 404
     assert mock_email_service.send_email.call_count == 0, (
         "Email must NOT be sent when the contact lookup fails"
+    )
+
+
+@pytest.fixture()
+def sample_invitation_send_failed() -> dict:
+    """Invitation whose initial email failed — never delivered."""
+    return {
+        "id": str(INVITATION_ID),
+        "bid_package_id": str(BID_PACKAGE_ID),
+        "vendor_id": str(VENDOR_IDS[0]),
+        "vendor_contact_id": str(VENDOR_CONTACT_IDS[0]),
+        "status": "send_failed",
+        "sent_at": None,
+        "opened_at": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resend_reconciles_send_failed_to_sent_on_success(
+    mock_supabase,
+    mock_email_service,
+    mock_template_renderer,
+    sample_invitation_send_failed,
+    sample_bid_package_open,
+    one_existing_token,
+):
+    """A never-delivered (send_failed) invitation is flipped to 'sent' (with
+    sent_at) once the resend succeeds, and the subject is a first-send subject,
+    not '(Resent)'."""
+    _, _, invitation_updates = _setup_resend_mocks(
+        mock_supabase,
+        sample_invitation_send_failed,
+        sample_bid_package_open,
+        one_existing_token,
+    )
+
+    await resend_bid_link(
+        invitation_id=INVITATION_ID,
+        current_user_id=PM_USER_ID,
+        db=mock_supabase,
+        email_service=mock_email_service,
+        template_renderer=mock_template_renderer,
+    )
+
+    merged: dict = {}
+    for payload in invitation_updates:
+        merged.update(payload)
+    assert merged.get("status") == "sent", f"send_failed should flip to sent; got {merged}"
+    assert "sent_at" in merged
+
+    subject = mock_email_service.send_email.call_args.kwargs.get("subject", "")
+    assert subject.startswith("Bid Invitation:"), (
+        f"A never-delivered invitation is a first send, not a resend; got {subject!r}"
+    )
+    assert subject != "Bid Link (Resent)"
+
+
+@pytest.mark.asyncio
+async def test_resend_keeps_send_failed_when_email_fails_again(
+    mock_supabase,
+    mock_email_service,
+    mock_template_renderer,
+    sample_invitation_send_failed,
+    sample_bid_package_open,
+    one_existing_token,
+):
+    """If the resend also fails, the invitation stays 'send_failed'."""
+    from app.services.email_service import EmailSendResult
+
+    mock_email_service.send_email.return_value = EmailSendResult(
+        message_id=f"mock-{uuid4()}", status="failed", error="still rejected",
+    )
+
+    _, _, invitation_updates = _setup_resend_mocks(
+        mock_supabase,
+        sample_invitation_send_failed,
+        sample_bid_package_open,
+        one_existing_token,
+    )
+
+    await resend_bid_link(
+        invitation_id=INVITATION_ID,
+        current_user_id=PM_USER_ID,
+        db=mock_supabase,
+        email_service=mock_email_service,
+        template_renderer=mock_template_renderer,
+    )
+
+    merged: dict = {}
+    for payload in invitation_updates:
+        merged.update(payload)
+    assert merged.get("status") == "send_failed", (
+        f"A failed resend must leave status at send_failed; got {merged}"
     )
 
 

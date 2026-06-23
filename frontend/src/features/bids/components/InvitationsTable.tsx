@@ -21,7 +21,18 @@ function formatDateTime(value: string | null): string {
 }
 
 const canResend = (status: InvitationStatus) =>
-  status === 'sent' || status === 'opened' || status === 'no_response';
+  status === 'pending_send' ||
+  status === 'send_failed' ||
+  status === 'sent' ||
+  status === 'opened' ||
+  status === 'no_response';
+
+// pending_send / send_failed were never actually delivered, so the action is a
+// first send rather than a resend. Same handler, different label.
+const resendLabel = (status: InvitationStatus) =>
+  status === 'pending_send' || status === 'send_failed'
+    ? 'Send Bid Link'
+    : 'Resend Bid Link';
 
 const canMarkStatus = (status: InvitationStatus) =>
   status === 'sent' || status === 'opened';
@@ -198,7 +209,7 @@ export function InvitationsTable({
                 isLoading={resendingId === row.id}
                 disabled={!!resendingId || !!updatingId}
               >
-                Resend Bid Link
+                {resendLabel(row.status)}
               </Button>
             )}
             {canMarkStatus(row.status) && (

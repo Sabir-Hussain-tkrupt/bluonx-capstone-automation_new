@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from postgrest.exceptions import APIError
 
 from .conftest import (
     BID_TEMPLATE_ID,
@@ -181,13 +182,26 @@ class TestTaskExistenceValidation:
         mock_template_renderer,
         future_deadline,
     ):
-        """Task ID that doesn't exist in the database returns 404."""
+        """A task_id that doesn't exist returns 404, never a 500.
+
+        Two real-Supabase behaviors are simulated: the task SELECT uses
+        .single(), which raises PGRST116 (0 rows) for a missing task, and the
+        creation RPC raises a foreign-key violation that rolls the whole
+        transaction back. The service must surface both as a clean 404.
+        """
+        # .single() on a missing row raises PGRST116 (not an empty result).
         select_chain = MagicMock()
-        select_chain.execute.return_value = MagicMock(data=[])
+        select_chain.execute.side_effect = APIError(
+            {"code": "PGRST116", "message": "JSON object requested, 0 rows returned"}
+        )
         select_chain.eq.return_value = select_chain
         select_chain.is_.return_value = select_chain
         select_chain.single.return_value = select_chain
         mock_supabase.table.return_value.select.return_value = select_chain
+
+        mock_supabase.rpc.side_effect = APIError(
+            {"code": "23503", "message": "violates foreign key constraint"}
+        )
 
         payload = {
             "task_id": str(NONEXISTENT_TASK_ID),

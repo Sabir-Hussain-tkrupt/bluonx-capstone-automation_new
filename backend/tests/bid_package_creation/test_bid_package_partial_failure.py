@@ -1,14 +1,15 @@
 """
 Partial failure tests for bid package creation.
 
-When email sending fails for one vendor, the system should still succeed
-for the other vendors. Invitations and tokens are created before emails
-are sent, so they persist even on email failure.
+The DB rows are written atomically by the creation RPC (all invitations start as
+'pending_send'). Emails are then sent best-effort: a send failure for one vendor
+must not block the others, and each invitation must be reconciled to its real
+outcome -- 'sent' on success, 'send_failed' on failure -- so the row is never
+left falsely reading 'sent'.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -18,18 +19,16 @@ from app.services.email_service import EmailSendResult
 
 from .conftest import (
     BID_TEMPLATE_ID,
-    DOC_IDS,
     PM_USER_ID,
     TASK_ID,
     VENDOR_CONTACT_IDS,
     VENDOR_IDS,
 )
 
-# This import will fail until the service is implemented — expected for test-first.
 from app.services.bid_package_service import create_bid_package_with_invitations
 
 
-# The email address that will trigger a simulated failure.
+# The email address that will trigger a simulated failure (vendor index 1).
 FAILING_EMAIL = "maria@apexearth.com"
 
 
@@ -55,12 +54,35 @@ def _make_email_service_with_one_failure() -> AsyncMock:
     return service
 
 
-def _setup_creation_mocks(mock_supabase, deadline_iso: str):
-    """Configure mocks for successful bid package + invitation creation."""
-    bid_package_id = uuid4()
-    invitation_ids = {str(VENDOR_IDS[i]): str(uuid4()) for i in range(3)}
+def _setup_creation_mocks(mock_supabase):
+    """Wire the creation RPC (deterministic invitation ids), the vendor/contact
+    lookups the email phase needs, and capture of bid_invitations status
+    reconciliation updates.
 
-    # Per-ID lookup data for vendors and contacts
+    Returns `reconciled`, a list of (invitation_id, status) tuples recorded as
+    the service flips each invitation to 'sent' / 'send_failed'.
+    """
+    reconciled: list[tuple[str, str]] = []
+
+    def _rpc(fn_name, params=None):
+        result = MagicMock()
+        if fn_name == "fn_create_bid_package_with_invitations":
+            vendors = (params or {}).get("p_vendors", [])
+            result.execute.return_value = MagicMock(data={
+                "bid_package_id": str(uuid4()),
+                "round_number": 1,
+                # Deterministic id per vendor so the test can map outcomes back.
+                "invitations": [
+                    {"vendor_id": v["vendor_id"], "invitation_id": f"inv-{v['vendor_id']}"}
+                    for v in vendors
+                ],
+            })
+        else:
+            result.execute.return_value = MagicMock(data=None)
+        return result
+
+    mock_supabase.rpc.side_effect = _rpc
+
     _vendors_by_id = {
         str(VENDOR_IDS[0]): {"id": str(VENDOR_IDS[0]), "company_name": "Smith Grading Co.", "status": "active", "deleted_at": None},
         str(VENDOR_IDS[1]): {"id": str(VENDOR_IDS[1]), "company_name": "Apex Earthworks", "status": "active", "deleted_at": None},
@@ -68,41 +90,36 @@ def _setup_creation_mocks(mock_supabase, deadline_iso: str):
     }
     _contacts_by_id = {
         str(VENDOR_CONTACT_IDS[0]): {"id": str(VENDOR_CONTACT_IDS[0]), "vendor_id": str(VENDOR_IDS[0]), "full_name": "John Smith", "email": "john@smithgrading.com"},
-        str(VENDOR_CONTACT_IDS[1]): {"id": str(VENDOR_CONTACT_IDS[1]), "vendor_id": str(VENDOR_IDS[1]), "full_name": "Maria Garcia", "email": "maria@apexearth.com"},
+        str(VENDOR_CONTACT_IDS[1]): {"id": str(VENDOR_CONTACT_IDS[1]), "vendor_id": str(VENDOR_IDS[1]), "full_name": "Maria Garcia", "email": FAILING_EMAIL},
         str(VENDOR_CONTACT_IDS[2]): {"id": str(VENDOR_CONTACT_IDS[2]), "vendor_id": str(VENDOR_IDS[2]), "full_name": "David Chen", "email": "david@summitsite.com"},
     }
 
     def table_side_effect(table_name):
         chain = MagicMock()
 
-        if table_name == "bid_packages":
-            insert_result = MagicMock()
-            insert_result.execute.return_value = MagicMock(data=[{
-                "id": str(bid_package_id),
-                "task_id": str(TASK_ID),
-                "round_number": 1,
-                "deadline": deadline_iso,
-                "status": "open",
-                "bid_template_id": str(BID_TEMPLATE_ID),
-                "created_by": str(PM_USER_ID),
-            }])
-            chain.insert.return_value = insert_result
-        elif table_name == "bid_invitations":
-            def inv_insert(row):
-                vendor_id = row.get("vendor_id", "")
-                result = MagicMock()
-                result.execute.return_value = MagicMock(data=[{
-                    **row,
-                    "id": invitation_ids.get(vendor_id, str(uuid4())),
-                }])
-                return result
-            chain.insert.side_effect = inv_insert
-        elif table_name == "magic_link_tokens":
-            def token_insert(row):
-                result = MagicMock()
-                result.execute.return_value = MagicMock(data=[{**row, "id": str(uuid4())}])
-                return result
-            chain.insert.side_effect = token_insert
+        if table_name == "bid_invitations":
+            # Capture the reconciliation: update({...}).eq("id", id).execute()
+            def _update(payload):
+                upd = MagicMock()
+
+                def _eq(field, value):
+                    eqm = MagicMock()
+
+                    def _execute():
+                        reconciled.append((str(value), payload.get("status")))
+                        return MagicMock(data=[])
+
+                    eqm.execute.side_effect = _execute
+                    return eqm
+
+                upd.eq.side_effect = _eq
+                return upd
+
+            chain.update.side_effect = _update
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.single.return_value = chain
+            chain.execute.return_value = MagicMock(data=[])
         elif table_name == "vendors":
             def vendors_eq(field, value):
                 vendor = _vendors_by_id.get(str(value))
@@ -124,143 +141,119 @@ def _setup_creation_mocks(mock_supabase, deadline_iso: str):
             chain.select.return_value = chain
             chain.eq.side_effect = contacts_eq
         else:
-            result = MagicMock()
-            result.execute.return_value = MagicMock(data=[])
-            chain.insert.return_value = result
-            chain.select.return_value = result
-            chain.update.return_value = result
-            result.eq.return_value = result
-
-        chain.select.return_value = chain
-        chain.eq.return_value = chain
-        chain.is_.return_value = chain
-        chain.single.return_value = chain
-        if not hasattr(chain.execute, 'return_value') or chain.execute.return_value is None:
+            chain.select.return_value = chain
+            chain.eq.return_value = chain
+            chain.is_.return_value = chain
+            chain.single.return_value = chain
             chain.execute.return_value = MagicMock(data=[])
 
         return chain
 
     mock_supabase.table.side_effect = table_side_effect
-    return bid_package_id, invitation_ids
+    return reconciled
+
+
+def _payload(future_deadline) -> dict:
+    return {
+        "task_id": str(TASK_ID),
+        "bid_template_id": str(BID_TEMPLATE_ID),
+        "deadline": future_deadline.isoformat(),
+        "project_document_ids": [],
+        "vendor_selections": [
+            {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
+            for i in range(3)
+        ],
+    }
 
 
 class TestPartialEmailFailure:
     """When one vendor's email fails, the rest should still succeed."""
 
     @pytest.mark.asyncio
-    async def test_other_vendors_still_get_invitations(
-        self,
-        mock_supabase,
-        mock_template_renderer,
-        future_deadline,
+    async def test_other_vendors_still_get_emails(
+        self, mock_supabase, mock_template_renderer, future_deadline,
     ):
         """If email fails for vendor 2, vendors 1 and 3 still get their emails."""
         email_service = _make_email_service_with_one_failure()
-        _setup_creation_mocks(mock_supabase, future_deadline.isoformat())
-
-        payload = {
-            "task_id": str(TASK_ID),
-            "bid_template_id": str(BID_TEMPLATE_ID),
-            "deadline": future_deadline.isoformat(),
-            "project_document_ids": [],
-            "vendor_selections": [
-                {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
-                for i in range(3)
-            ],
-        }
+        _setup_creation_mocks(mock_supabase)
 
         result = await create_bid_package_with_invitations(
             task_id=TASK_ID,
-            payload=payload,
+            payload=_payload(future_deadline),
             created_by=PM_USER_ID,
             db=mock_supabase,
             email_service=email_service,
             template_renderer=mock_template_renderer,
         )
 
-        # All 3 vendors should have had send_email called
         assert email_service.send_email.call_count == 3
-
-        # 2 succeeded, 1 failed
         assert result["invitations_sent"] == 2
         assert result["invitations_failed"] == 1
 
     @pytest.mark.asyncio
-    async def test_failed_vendor_invitation_exists_in_db(
-        self,
-        mock_supabase,
-        mock_template_renderer,
-        future_deadline,
+    async def test_all_rows_created_in_one_atomic_rpc(
+        self, mock_supabase, mock_template_renderer, future_deadline,
     ):
-        """Failed vendor's invitation and magic_link_token still exist in DB."""
+        """All 3 invitations + tokens are created in a single atomic RPC call,
+        regardless of email outcome."""
         email_service = _make_email_service_with_one_failure()
-        bid_package_id, invitation_ids = _setup_creation_mocks(
-            mock_supabase, future_deadline.isoformat()
-        )
+        _setup_creation_mocks(mock_supabase)
 
-        payload = {
-            "task_id": str(TASK_ID),
-            "bid_template_id": str(BID_TEMPLATE_ID),
-            "deadline": future_deadline.isoformat(),
-            "project_document_ids": [],
-            "vendor_selections": [
-                {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
-                for i in range(3)
-            ],
-        }
-
-        result = await create_bid_package_with_invitations(
+        await create_bid_package_with_invitations(
             task_id=TASK_ID,
-            payload=payload,
+            payload=_payload(future_deadline),
             created_by=PM_USER_ID,
             db=mock_supabase,
             email_service=email_service,
             template_renderer=mock_template_renderer,
         )
 
-        # bid_invitations insert should have been called 3 times (once per vendor)
-        invitation_calls = [
-            c for c in mock_supabase.table.call_args_list
-            if hasattr(c, 'args') and c.args and c.args[0] == "bid_invitations"
+        rpc_calls = [
+            c
+            for c in mock_supabase.rpc.call_args_list
+            if c.args and c.args[0] == "fn_create_bid_package_with_invitations"
         ]
-        assert len(invitation_calls) >= 3, (
-            "All 3 invitations should be created in DB even if email fails"
+        assert len(rpc_calls) == 1
+        assert len(rpc_calls[0].args[1]["p_vendors"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_failed_vendor_reconciled_to_send_failed(
+        self, mock_supabase, mock_template_renderer, future_deadline,
+    ):
+        """The failed vendor's invitation is flipped to 'send_failed'; the two
+        successful ones to 'sent'. Nothing is left falsely reading 'sent'."""
+        email_service = _make_email_service_with_one_failure()
+        reconciled = _setup_creation_mocks(mock_supabase)
+
+        await create_bid_package_with_invitations(
+            task_id=TASK_ID,
+            payload=_payload(future_deadline),
+            created_by=PM_USER_ID,
+            db=mock_supabase,
+            email_service=email_service,
+            template_renderer=mock_template_renderer,
         )
 
-        # magic_link_tokens insert should have been called 3 times
-        token_calls = [
-            c for c in mock_supabase.table.call_args_list
-            if hasattr(c, 'args') and c.args and c.args[0] == "magic_link_tokens"
-        ]
-        assert len(token_calls) >= 3, (
-            "All 3 tokens should be created in DB even if email fails"
-        )
+        outcomes = dict(reconciled)
+        failed_inv = f"inv-{VENDOR_IDS[1]}"
+        sent_inv_0 = f"inv-{VENDOR_IDS[0]}"
+        sent_inv_2 = f"inv-{VENDOR_IDS[2]}"
+
+        assert outcomes[failed_inv] == "send_failed"
+        assert outcomes[sent_inv_0] == "sent"
+        assert outcomes[sent_inv_2] == "sent"
 
     @pytest.mark.asyncio
     async def test_failed_vendor_in_response_with_error(
-        self,
-        mock_supabase,
-        mock_template_renderer,
-        future_deadline,
+        self, mock_supabase, mock_template_renderer, future_deadline,
     ):
-        """The failed vendor appears in the failed_vendors response array with error reason."""
+        """The failed vendor appears in failed_vendors with an error reason."""
         email_service = _make_email_service_with_one_failure()
-        _setup_creation_mocks(mock_supabase, future_deadline.isoformat())
-
-        payload = {
-            "task_id": str(TASK_ID),
-            "bid_template_id": str(BID_TEMPLATE_ID),
-            "deadline": future_deadline.isoformat(),
-            "project_document_ids": [],
-            "vendor_selections": [
-                {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
-                for i in range(3)
-            ],
-        }
+        _setup_creation_mocks(mock_supabase)
 
         result = await create_bid_package_with_invitations(
             task_id=TASK_ID,
-            payload=payload,
+            payload=_payload(future_deadline),
             created_by=PM_USER_ID,
             db=mock_supabase,
             email_service=email_service,
@@ -269,74 +262,20 @@ class TestPartialEmailFailure:
 
         assert len(result["failed_vendors"]) == 1
         failed = result["failed_vendors"][0]
-        assert failed["vendor_id"] == str(VENDOR_IDS[1])  # maria@apexearth.com is vendor index 1
-        assert "error" in failed
-        assert len(failed["error"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_email_log_status_failed_for_failed_vendor(
-        self,
-        mock_supabase,
-        mock_template_renderer,
-        future_deadline,
-    ):
-        """email_log for the failed vendor has status='failed'."""
-        email_service = _make_email_service_with_one_failure()
-        _setup_creation_mocks(mock_supabase, future_deadline.isoformat())
-
-        payload = {
-            "task_id": str(TASK_ID),
-            "bid_template_id": str(BID_TEMPLATE_ID),
-            "deadline": future_deadline.isoformat(),
-            "project_document_ids": [],
-            "vendor_selections": [
-                {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
-                for i in range(3)
-            ],
-        }
-
-        await create_bid_package_with_invitations(
-            task_id=TASK_ID,
-            payload=payload,
-            created_by=PM_USER_ID,
-            db=mock_supabase,
-            email_service=email_service,
-            template_renderer=mock_template_renderer,
-        )
-
-        # The email service should have been called with reference_type and reference_id
-        # for each vendor. The failed send's email_log should end up with status='failed'.
-        # Since EmailService handles logging internally, we verify the service was called
-        # with the failing email's kwargs.
-        calls = email_service.send_email.call_args_list
-        failing_call = [c for c in calls if c.kwargs.get("to_email") == FAILING_EMAIL]
-        assert len(failing_call) == 1, "Email service should have been called for failing vendor"
+        assert failed["vendor_id"] == str(VENDOR_IDS[1])
+        assert failed["error"]
 
     @pytest.mark.asyncio
     async def test_response_counts_are_correct(
-        self,
-        mock_supabase,
-        mock_template_renderer,
-        future_deadline,
+        self, mock_supabase, mock_template_renderer, future_deadline,
     ):
         """Response shows correct invitations_sent and invitations_failed."""
         email_service = _make_email_service_with_one_failure()
-        _setup_creation_mocks(mock_supabase, future_deadline.isoformat())
-
-        payload = {
-            "task_id": str(TASK_ID),
-            "bid_template_id": str(BID_TEMPLATE_ID),
-            "deadline": future_deadline.isoformat(),
-            "project_document_ids": [],
-            "vendor_selections": [
-                {"vendor_id": str(VENDOR_IDS[i]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[i])}
-                for i in range(3)
-            ],
-        }
+        _setup_creation_mocks(mock_supabase)
 
         result = await create_bid_package_with_invitations(
             task_id=TASK_ID,
-            payload=payload,
+            payload=_payload(future_deadline),
             created_by=PM_USER_ID,
             db=mock_supabase,
             email_service=email_service,
