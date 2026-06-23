@@ -182,15 +182,18 @@ class TestTaskExistenceValidation:
         mock_template_renderer,
         future_deadline,
     ):
-        """A task_id that doesn't exist returns 404.
+        """A task_id that doesn't exist returns 404, never a 500.
 
-        Task existence is enforced by the atomic creation RPC's FK, not a
-        pre-write SELECT: a bad task_id makes the RPC raise a foreign-key
-        violation that rolls back the whole transaction (no partial writes),
-        which the service maps to 404.
+        Two real-Supabase behaviors are simulated: the task SELECT uses
+        .single(), which raises PGRST116 (0 rows) for a missing task, and the
+        creation RPC raises a foreign-key violation that rolls the whole
+        transaction back. The service must surface both as a clean 404.
         """
+        # .single() on a missing row raises PGRST116 (not an empty result).
         select_chain = MagicMock()
-        select_chain.execute.return_value = MagicMock(data=[])
+        select_chain.execute.side_effect = APIError(
+            {"code": "PGRST116", "message": "JSON object requested, 0 rows returned"}
+        )
         select_chain.eq.return_value = select_chain
         select_chain.is_.return_value = select_chain
         select_chain.single.return_value = select_chain

@@ -112,15 +112,37 @@ def _set_invitation_send_status(db, invitation_id: str, *, sent: bool) -> None:
     ).execute()
 
 
+def _is_no_rows_error(err: APIError) -> bool:
+    """PostgREST raises PGRST116 from .single() when zero rows match. Treat that
+    as 'not found' so callers get None instead of a 500 (same principle as the
+    maybe_single handling in routers/vendors.py)."""
+    code = str(getattr(err, "code", "") or "")
+    msg = str(getattr(err, "message", "") or str(err)).lower()
+    return "PGRST116" in code or "0 rows" in msg or "no rows" in msg
+
+
 def _query_one(db, table_name: str, record_id: str | UUID) -> dict | None:
-    """Fetch a single record by ID. Returns None if not found or empty."""
-    resp = (
-        db.table(table_name)
-        .select("*")
-        .eq("id", str(record_id))
-        .single()
-        .execute()
-    )
+    """Fetch a single record by ID. Returns None if not found or empty.
+
+    .single() raises an APIError (PGRST116) when no row matches; we map that to
+    None so a missing task / template / vendor / contact / invitation surfaces
+    as a clean 4xx rather than crashing the request with a 500. Other API errors
+    propagate unchanged.
+    """
+    try:
+        resp = (
+            db.table(table_name)
+            .select("*")
+            .eq("id", str(record_id))
+            .single()
+            .execute()
+        )
+    except APIError as exc:
+        if _is_no_rows_error(exc):
+            return None
+        raise
+    if not resp:
+        return None
     data = resp.data
     if isinstance(data, list):
         return data[0] if data else None

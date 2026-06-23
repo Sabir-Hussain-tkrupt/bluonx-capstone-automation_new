@@ -418,6 +418,38 @@ async def test_resend_bid_link_404_when_invitation_missing(
 
 
 @pytest.mark.asyncio
+async def test_resend_bid_link_404_when_invitation_lookup_raises_no_rows(
+    mock_email_service,
+    mock_template_renderer,
+):
+    """Regression: a nonexistent invitation id makes the .single() lookup raise
+    PGRST116 (0 rows). The service must map that to 404, not crash with a 500."""
+    from postgrest.exceptions import APIError
+
+    db = MagicMock()
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.single.return_value = chain
+    chain.execute.side_effect = APIError(
+        {"code": "PGRST116", "message": "JSON object requested, 0 rows returned"}
+    )
+    db.table.return_value = chain
+
+    with pytest.raises(BidPackageValidationError) as exc_info:
+        await resend_bid_link(
+            invitation_id=uuid4(),
+            current_user_id=PM_USER_ID,
+            db=db,
+            email_service=mock_email_service,
+            template_renderer=mock_template_renderer,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert mock_email_service.send_email.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_resend_bid_link_404_when_vendor_contact_missing(
     mock_supabase,
     mock_email_service,
