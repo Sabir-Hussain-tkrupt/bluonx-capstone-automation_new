@@ -10,17 +10,19 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 MOCK_NEARBY_RESULTS = [
     {
-        "id": "v1",
+        "id": "11111111-1111-1111-1111-111111111111",
         "company_name": "Nearby Vendor",
         "city": "Austin",
         "state": "TX",
+        "status": "active",
         "distance_miles": 5.2,
     },
     {
-        "id": "v2",
+        "id": "22222222-2222-2222-2222-222222222222",
         "company_name": "Another Vendor",
         "city": "Round Rock",
         "state": "TX",
+        "status": "active",
         "distance_miles": 18.7,
     },
 ]
