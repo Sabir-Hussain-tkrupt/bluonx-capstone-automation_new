@@ -1,13 +1,33 @@
 """
 Tests for GET /api/v1/projects/{id}/nearby-vendors endpoint.
 
-Uses mocked filter_vendors_by_distance service.
+Fully mocked: the endpoint delegates to filter_vendors_by_distance (patched
+here) and never touches the DB directly, so we override get_supabase with a
+harmless fake and get_current_active_user with a static user. No real Supabase
+instance, no rows created — consistent with the project-wide mock pattern.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from uuid import uuid4
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.core.auth import get_current_active_user
+from app.core.supabase_client import get_supabase
+from tests._fakes import FakeResponse, FakeSupabase
 
 
+FAKE_USER = {
+    "user_id": str(uuid4()),
+    "email": "pm@bluonx.dev",
+    "full_name": "Test PM",
+    "role": "project_manager",
+    "is_active": True,
+}
+
+# Schema-accurate rows matching NearbyVendorResponse (UUID id + status field).
 MOCK_NEARBY_RESULTS = [
     {
         "id": "11111111-1111-1111-1111-111111111111",
@@ -28,40 +48,33 @@ MOCK_NEARBY_RESULTS = [
 ]
 
 
+@pytest.fixture()
+def client():
+    """TestClient with auth + Supabase dependencies overridden.
+
+    The Supabase fake is never actually queried by this endpoint (the distance
+    service is mocked), but get_supabase must resolve to *something*.
+    """
+    app.dependency_overrides[get_current_active_user] = lambda: FAKE_USER
+    app.dependency_overrides[get_supabase] = lambda: FakeSupabase(
+        lambda table, op, payload: FakeResponse([])
+    )
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
 class TestNearbyVendorsEndpoint:
     """Tests for the nearby-vendors API endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_get_nearby_vendors(self, client, auth_headers):
+    def test_get_nearby_vendors(self, client):
         """Returns vendors with distance_miles when project has coords."""
+        project_id = uuid4()
         with patch(
             "app.routers.geocoding.filter_vendors_by_distance",
             new_callable=AsyncMock,
             return_value=MOCK_NEARBY_RESULTS,
         ):
-            # We need a real project to exist for the endpoint
-            # Create one first
-            with patch(
-                "app.routers.projects.geocode_address",
-                new_callable=AsyncMock,
-                return_value=(30.2672, -97.7431),
-            ):
-                create_resp = client.post(
-                    "/api/v1/projects",
-                    json={
-                        "name": "Nearby Test Project",
-                        "address": "123 Main St",
-                        "city": "Austin",
-                        "state": "TX",
-                    },
-                    headers=auth_headers,
-                )
-            project_id = create_resp.json()["id"]
-
-            resp = client.get(
-                f"/api/v1/projects/{project_id}/nearby-vendors",
-                headers=auth_headers,
-            )
+            resp = client.get(f"/api/v1/projects/{project_id}/nearby-vendors")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -69,99 +82,59 @@ class TestNearbyVendorsEndpoint:
         assert len(data) == 2
         assert data[0]["distance_miles"] == 5.2
 
-    @pytest.mark.asyncio
-    async def test_get_nearby_vendors_with_trade_filter(self, client, auth_headers):
+    def test_get_nearby_vendors_with_trade_filter(self, client):
         """Query param trade_id is passed to the filtering service."""
+        project_id = uuid4()
         with patch(
             "app.routers.geocoding.filter_vendors_by_distance",
             new_callable=AsyncMock,
             return_value=[MOCK_NEARBY_RESULTS[0]],
         ) as mock_filter:
-            with patch(
-                "app.routers.projects.geocode_address",
-                new_callable=AsyncMock,
-                return_value=(30.2672, -97.7431),
-            ):
-                create_resp = client.post(
-                    "/api/v1/projects",
-                    json={"name": "Trade Filter Project", "city": "Austin", "state": "TX"},
-                    headers=auth_headers,
-                )
-            project_id = create_resp.json()["id"]
-
             resp = client.get(
-                f"/api/v1/projects/{project_id}/nearby-vendors?trade_id=some-trade-uuid",
-                headers=auth_headers,
+                f"/api/v1/projects/{project_id}/nearby-vendors?trade_id=some-trade-uuid"
             )
 
         assert resp.status_code == 200
-        # Verify trade_id was passed to the service
-        call_kwargs = mock_filter.call_args
-        assert call_kwargs is not None
+        # Verify trade_id was forwarded to the service.
+        assert mock_filter.await_args.kwargs["trade_id"] == "some-trade-uuid"
 
-    @pytest.mark.asyncio
-    async def test_get_nearby_vendors_custom_radius(self, client, auth_headers):
+    def test_get_nearby_vendors_custom_radius(self, client):
         """Query param radius=50 is respected."""
+        project_id = uuid4()
         with patch(
             "app.routers.geocoding.filter_vendors_by_distance",
             new_callable=AsyncMock,
             return_value=[],
         ) as mock_filter:
-            with patch(
-                "app.routers.projects.geocode_address",
-                new_callable=AsyncMock,
-                return_value=(30.2672, -97.7431),
-            ):
-                create_resp = client.post(
-                    "/api/v1/projects",
-                    json={"name": "Radius Project", "city": "Austin", "state": "TX"},
-                    headers=auth_headers,
-                )
-            project_id = create_resp.json()["id"]
-
             resp = client.get(
-                f"/api/v1/projects/{project_id}/nearby-vendors?radius=50",
-                headers=auth_headers,
+                f"/api/v1/projects/{project_id}/nearby-vendors?radius=50"
             )
 
         assert resp.status_code == 200
-        # Verify radius was passed
-        call_kwargs = mock_filter.call_args
-        assert call_kwargs is not None
+        # Verify radius was forwarded to the service.
+        assert mock_filter.await_args.kwargs["radius_miles"] == 50
 
-    @pytest.mark.asyncio
-    async def test_get_nearby_vendors_project_no_coords(self, client, auth_headers):
+    def test_get_nearby_vendors_project_no_coords(self, client):
         """Project without lat/lng → 400 error."""
+        project_id = uuid4()
         with patch(
             "app.routers.geocoding.filter_vendors_by_distance",
             new_callable=AsyncMock,
             side_effect=ValueError("Project has no coordinates"),
         ):
-            with patch(
-                "app.routers.projects.geocode_address",
-                new_callable=AsyncMock,
-                return_value=(None, None),
-            ):
-                create_resp = client.post(
-                    "/api/v1/projects",
-                    json={"name": "No Coords Project"},
-                    headers=auth_headers,
-                )
-            project_id = create_resp.json()["id"]
-
-            resp = client.get(
-                f"/api/v1/projects/{project_id}/nearby-vendors",
-                headers=auth_headers,
-            )
+            resp = client.get(f"/api/v1/projects/{project_id}/nearby-vendors")
 
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
-    async def test_get_nearby_vendors_project_not_found(self, client, auth_headers):
+    def test_get_nearby_vendors_project_not_found(self, client):
         """Non-existent project → 404 error."""
-        resp = client.get(
-            "/api/v1/projects/00000000-0000-0000-0000-000000000000/nearby-vendors",
-            headers=auth_headers,
-        )
+        with patch(
+            "app.routers.geocoding.filter_vendors_by_distance",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Project not found"),
+        ):
+            resp = client.get(
+                "/api/v1/projects/00000000-0000-0000-0000-000000000000/nearby-vendors"
+            )
 
         assert resp.status_code == 404
