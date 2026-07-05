@@ -87,10 +87,19 @@ class Settings(BaseSettings):
     # reach us (an ngrok tunnel in dev). None ⇒ no eventNotification attached.
     DOCUSIGN_CONNECT_WEBHOOK_URL: str | None = None
 
-    # Internal countersigner (routingOrder 2) for the contract envelope.
-    # Pure config (decision 3b) — sandbox = your own name/email.
+    # Internal BluOnX signer (routingOrder 1 — signs first) for the contract
+    # envelope. Pure config (decision 3b) — sandbox = your own name/email.
     CONTRACT_OWNER_SIGNER_NAME: str | None = None
     CONTRACT_OWNER_SIGNER_EMAIL: str | None = None
+
+    # Firm contact-information block on the contract PDF. Name defaults
+    # to the legal entity; the rest are optional and render only when set (supply
+    # real values via env). Kept as pure config so the boilerplate is a one-place
+    # swap, mirroring CONTRACT_OWNER_SIGNER_*.
+    CONTRACT_FIRM_NAME: str = "BluOnX Development LLC"
+    CONTRACT_FIRM_CONTACT_EMAIL: str | None = None
+    CONTRACT_FIRM_CONTACT_PHONE: str | None = None
+    CONTRACT_FIRM_CONTACT_ADDRESS: str | None = None
 
     @model_validator(mode="after")
     def _validate_email_provider(self) -> "Settings":

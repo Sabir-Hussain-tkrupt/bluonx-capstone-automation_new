@@ -1,5 +1,5 @@
 """
-Contract record lifecycle (Task 9.5), built together with the envelope send (9.3b).
+Contract record lifecycle, built together with the envelope send (9.3b).
 
 Per the "Contract lifecycle reframe" in CURRENT_PHASE_TASKS.md, the contracts row
 is born at ENVELOPE-SEND time in `sent_for_signature` (not at acceptance) so the
@@ -18,7 +18,7 @@ award_service convention). No schema change.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -125,14 +125,24 @@ def create_contract_for_award(
     return row
 
 
-def mark_contract_executed(contract_id: str, *, db: Client) -> dict:
-    """Connect `completed` → contract `executed`, signed_at = now."""
+def mark_contract_executed(
+    contract_id: str, *, contract_valid_days: int | None = None, db: Client
+) -> dict:
+    """Connect `completed` → contract `executed`, signed_at = now, and
+    valid_until = signed_at + contract_valid_days — the realized expiry, frozen at
+    the moment of signing. Both dates share the single signed_at timestamp and are
+    written in one update, so they can never drift. Defaults to a 365-day term when
+    the award parameter is missing."""
+    signed_at = datetime.now(timezone.utc)
+    valid_days = contract_valid_days if contract_valid_days is not None else 365
+    valid_until = (signed_at.date() + timedelta(days=int(valid_days))).isoformat()
     resp = (
         db.table("contracts")
         .update(
             {
                 "status": "executed",
-                "signed_at": datetime.now(timezone.utc).isoformat(),
+                "signed_at": signed_at.isoformat(),
+                "valid_until": valid_until,
             }
         )
         .eq("id", str(contract_id))

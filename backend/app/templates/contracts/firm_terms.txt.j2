@@ -21,18 +21,24 @@ as full compensation for the complete and satisfactory performance of the work,
 subject to the terms of this agreement.
 
 3. SCHEDULE
-The Subcontractor shall commence work on or about {{ start_date_formatted }} and
-shall complete the work by {{ end_date_formatted }}, time being of the essence.
+{{ schedule_sentence }}
+{% if sow_signed_date %}
+Date of signed scope of work: {{ sow_signed_date }}
+{% endif %}
 
-4. PAYMENT TERMS
+4. TERM
+This agreement is valid for {{ contract_valid_days }} days from the effective date.
+The effective date is the date on which both parties have executed this agreement.
+
+5. PAYMENT TERMS
 {{ payment_terms }}
 
-5. INSURANCE AND BONDING
+6. INSURANCE AND BONDING
 The Subcontractor shall maintain insurance and bonding in the amounts required by
 the Contractor and shall provide certificates evidencing such coverage prior to
 commencing work.
 
-6. GENERAL CONDITIONS
+7. GENERAL CONDITIONS
 This agreement incorporates the Contractor's general conditions and any exhibits
 attached hereto. In the event of a conflict, the terms of this agreement shall
 govern. This agreement is binding upon execution by both parties below.

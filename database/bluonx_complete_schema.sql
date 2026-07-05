@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.35
--- Date:     June 23, 2026
+-- Version:  2.37
+-- Date:     July 04, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -506,6 +506,9 @@ CREATE TABLE awards (
   has_override            BOOLEAN       NOT NULL DEFAULT FALSE,
   override_justification  TEXT,
   validation_results      JSONB,
+  contract_valid_days     INTEGER       NOT NULL DEFAULT 365
+                                        CHECK (contract_valid_days >= 0),
+  work_duration_days      INTEGER       CHECK (work_duration_days > 0),
   status                  VARCHAR(30)   NOT NULL DEFAULT 'pending_acceptance'
                                         CHECK (status IN ('pending_acceptance', 'accepted',
                                                           'declined_by_vendor', 'cancelled')),
@@ -517,7 +520,8 @@ COMMENT ON TABLE  awards                        IS 'Award decision. Partial uniq
 COMMENT ON COLUMN awards.vendor_id              IS 'Denormalized for query perf. Enforced = bid_submissions.vendor_id by trigger.';
 COMMENT ON COLUMN awards.has_override           IS 'TRUE if PM overrode validation warnings. override_justification required when TRUE.';
 COMMENT ON COLUMN awards.validation_results     IS 'JSONB snapshot of all pre-award validation checks at time of award.';
-
+COMMENT ON COLUMN awards.contract_valid_days    IS 'PM-set contract term length in days (parameter). Default 365 (1-year). Realized onto contracts.valid_until at execution.';
+COMMENT ON COLUMN awards.work_duration_days     IS 'PM-set duration of the awarded work in days (parameter). Realized onto contracts.end_date at envelope-send as proposed_start + duration.';
 
 -- Contracts: one per accepted award
 CREATE TABLE contracts (
@@ -528,6 +532,7 @@ CREATE TABLE contracts (
   contract_number   VARCHAR(50)   NOT NULL UNIQUE,
   start_date        DATE,
   end_date          DATE,
+  valid_until       DATE,
   contract_amount   DECIMAL(15,2) NOT NULL CHECK (contract_amount >= 0),
   payment_terms     TEXT,
   status            VARCHAR(20)   NOT NULL DEFAULT 'draft'
@@ -539,8 +544,9 @@ CREATE TABLE contracts (
 );
 
 COMMENT ON TABLE  contracts              IS 'Contract record. One per accepted award. Partial unique on task_id allows re-contracting. RULE: must not be created for tasks with bid_type = internal (enforced at application layer).';
-COMMENT ON COLUMN contracts.vendor_id   IS 'Denormalized for query perf. Enforced = awards.vendor_id by trigger.';
-COMMENT ON COLUMN contracts.task_id     IS 'Denormalized for query perf. Enforced = awards.task_id (via bid_submission) by trigger.';
+COMMENT ON COLUMN contracts.vendor_id    IS 'Denormalized for query perf. Enforced = awards.vendor_id by trigger.';
+COMMENT ON COLUMN contracts.task_id      IS 'Denormalized for query perf. Enforced = awards.task_id (via bid_submission) by trigger.';
+COMMENT ON COLUMN contracts.valid_until  IS 'Realized contract expiry = signed_at + awards.contract_valid_days. NULL until the DocuSign completed webhook fires (execution-anchored).';
 
 
 -- DocuSign envelope tracking
@@ -1373,6 +1379,8 @@ CREATE OR REPLACE FUNCTION fn_create_award(
   p_has_override           BOOLEAN,
   p_override_justification TEXT,
   p_instructions           TEXT,
+  p_contract_valid_days    INTEGER,
+  p_work_duration_days     INTEGER,
   p_validation_results     JSONB
 )
 RETURNS SETOF awards AS $$
@@ -1381,10 +1389,12 @@ DECLARE
 BEGIN
   INSERT INTO awards (
     task_id, bid_submission_id, vendor_id, awarded_by, award_amount,
-    instructions, has_override, override_justification, validation_results, status
+    instructions, contract_valid_days, work_duration_days,
+    has_override, override_justification, validation_results, status
   ) VALUES (
     p_task_id, p_bid_submission_id, p_vendor_id, p_awarded_by, p_award_amount,
-    p_instructions, p_has_override, p_override_justification, p_validation_results,
+    p_instructions, COALESCE(p_contract_valid_days, 365), p_work_duration_days,
+    p_has_override, p_override_justification, p_validation_results,
     'pending_acceptance'
   )
   RETURNING * INTO v_award;
@@ -1398,7 +1408,7 @@ $$ LANGUAGE plpgsql;
 -- Writes go through the service_role key (FastAPI write path); not exposed to
 -- the authenticated role, which only ever reads.
 GRANT EXECUTE ON FUNCTION fn_create_award(
-  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, JSONB
+  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB
 ) TO service_role;
 
 

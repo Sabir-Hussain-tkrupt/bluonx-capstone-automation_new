@@ -44,6 +44,13 @@ class AwardCreateRequest(BluOnXBase):
     # PM-authored free-text guidance (mobilization, site access, etc.). Persisted
     # on the award and rendered in the award email. Optional.
     instructions: str | None = None
+    # Contract-term parameters — PM knobs set at award time, realized
+    # onto the contract later. contract_valid_days defaults to 365 (1-year term)
+    # when omitted; work_duration_days is optional. Both must be > 0 when given
+    # and are capped at 3650 days (10 years) — a sane ceiling for a legal term
+    # that also blocks fat-finger input on a direct API call.
+    contract_valid_days: int | None = Field(default=None, gt=0, le=3650)
+    work_duration_days: int | None = Field(default=None, gt=0, le=3650)
 
 
 class AwardUpdate(BluOnXBase):
@@ -62,6 +69,8 @@ class AwardResponse(BluOnXBase):
     has_override: bool
     override_justification: str | None = None
     instructions: str | None = None
+    contract_valid_days: int
+    work_duration_days: int | None = None
     validation_results: dict | None = None
     status: str
     created_at: datetime

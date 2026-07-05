@@ -79,6 +79,8 @@ export function BidPackageComparePage() {
     has_override: boolean;
     override_justification?: string;
     instructions?: string;
+    contract_valid_days?: number;
+    work_duration_days?: number;
   }) => {
     if (!awardTarget) return;
     setAwardError(null);
