@@ -122,6 +122,7 @@ async def handle_envelope_event(
             "id, status, contract_id,"
             " contracts!inner(id, status, award_id,"
             "   awards!inner(id, status, vendor_id, task_id, bid_submission_id,"
+            "     contract_valid_days,"
             "     bid_submissions!inner(bid_invitations!inner(bid_package_id))))"
         )
         .eq("envelope_id", str(envelope_id))
@@ -149,7 +150,9 @@ async def handle_envelope_event(
     award = _embed_one(contract.get("awards"))
 
     if status == "completed":
-        contract_service.mark_contract_executed(contract_id, db=db)
+        contract_service.mark_contract_executed(
+            contract_id, contract_valid_days=award.get("contract_valid_days"), db=db
+        )
         if award.get("status") != "accepted":
             db.table("awards").update({"status": "accepted"}).eq(
                 "id", award["id"]

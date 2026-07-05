@@ -291,7 +291,7 @@ def build_envelope_definition(
     `documents`: [{document_base64, name, document_id, file_extension="pdf"}].
     `signers`:   [{name, email, recipient_id, routing_order, anchor_string}] —
                  each gets a `SignHere` anchor tab on its anchor string. Sequential
-                 routing comes from `routing_order` (vendor 1, owner 2).
+                 routing comes from `routing_order` (owner 1, vendor 2).
     `webhook_url`: when set, an envelope-level `eventNotification` is attached so
                  Connect status callbacks are self-contained (no account-level
                  Connect config needed).

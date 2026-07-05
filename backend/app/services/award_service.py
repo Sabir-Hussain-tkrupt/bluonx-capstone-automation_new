@@ -100,6 +100,8 @@ async def create_award(
     has_override: bool,
     override_justification: str | None,
     instructions: str | None = None,
+    contract_valid_days: int | None = None,
+    work_duration_days: int | None = None,
     awarded_by: str,
     db: Client,
 ) -> dict:
@@ -169,6 +171,11 @@ async def create_award(
         "p_has_override": has_override_final,
         "p_override_justification": justification_final,
         "p_instructions": (instructions or "").strip() or None,
+        # Contract-term parameters. Default validity to 365 in the
+        # service so the persisted 1-year term is explicit (COALESCE in the RPC
+        # is the backstop); work_duration_days passes through nullable.
+        "p_contract_valid_days": contract_valid_days if contract_valid_days is not None else 365,
+        "p_work_duration_days": work_duration_days,
         "p_validation_results": _json_safe(result),
     }
     try:

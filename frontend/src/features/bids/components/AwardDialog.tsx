@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FormField } from '@/components/ui/FormField';
+import { TextInput } from '@/components/ui/TextInput';
 import { useAwardValidation } from '@/features/bids/hooks/useAwardValidation';
 import { cn } from '@/utils/cn';
 import type { PreAwardCheck, PreAwardSeverity } from '@/features/bids/types';
@@ -21,6 +22,8 @@ export interface AwardDialogProps {
     has_override: boolean;
     override_justification?: string;
     instructions?: string;
+    contract_valid_days?: number;
+    work_duration_days?: number;
   }) => void;
   isSubmitting: boolean;
   serverError?: string | null;
@@ -49,10 +52,24 @@ export function AwardDialog({
   // Fresh per submission — the page remounts this dialog via `key`.
   const [justification, setJustification] = useState('');
   const [instructions, setInstructions] = useState('');
+  // Contract-term inputs (Task 9.8). Validity defaults to 365 (1-year); duration
+  // is optional. Kept as strings so the fields can be cleared/edited freely.
+  const [contractValidDays, setContractValidDays] = useState('365');
+  const [workDurationDays, setWorkDurationDays] = useState('');
 
   const hasBlocking = result?.has_blocking ?? false;
   const hasWarnings = result?.has_warnings ?? false;
   const justificationMissing = hasWarnings && justification.trim().length === 0;
+
+  // Light validation: validity required; duration optional. Each must be a whole
+  // number from 1 to 3650 (10-year cap, mirrors the backend Field bound).
+  const MAX_TERM_DAYS = 3650;
+  const isValidDays = (s: string) =>
+    /^\d+$/.test(s.trim()) && Number(s) > 0 && Number(s) <= MAX_TERM_DAYS;
+  const contractValidDaysValid = isValidDays(contractValidDays);
+  const workDurationValid =
+    workDurationDays.trim() === '' || isValidDays(workDurationDays);
+  const termsInvalid = !contractValidDaysValid || !workDurationValid;
 
   const confirmDisabled =
     isLoading ||
@@ -60,6 +77,7 @@ export function AwardDialog({
     !result ||
     hasBlocking ||
     justificationMissing ||
+    termsInvalid ||
     isSubmitting;
 
   const handleConfirm = () => {
@@ -68,6 +86,10 @@ export function AwardDialog({
       has_override: hasWarnings,
       override_justification: hasWarnings ? justification.trim() : undefined,
       instructions: instructions.trim() || undefined,
+      contract_valid_days: Number(contractValidDays),
+      work_duration_days: workDurationDays.trim()
+        ? Number(workDurationDays)
+        : undefined,
     });
   };
 
@@ -165,7 +187,7 @@ export function AwardDialog({
               <FormField
                 label="Instructions (optional)"
                 htmlFor="award-instructions"
-                hint="PM guidance for the vendor (mobilization, site access, etc.). Included in the award email."
+                hint="PM guidance for the vendor (mobilization, site access, etc.). Included in the notification email only."
               >
                 <textarea
                   id="award-instructions"
@@ -184,6 +206,68 @@ export function AwardDialog({
                   {instructions.length}/{INSTRUCTIONS_MAX}
                 </p>
               </FormField>
+            )}
+
+            {!hasBlocking && (
+              <div className="space-y-3 rounded-lg border border-secondary-200 bg-secondary-50/60 p-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-secondary-900">
+                    Contract terms
+                  </h3>
+                  <p className="text-xs text-secondary-500">
+                    These appear in the signed contract.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                  {/* Helper text sits BELOW the input so the two inputs stay
+                      vertically aligned regardless of description length. */}
+                  <FormField
+                    label="Contract validity (days)"
+                    htmlFor="award-contract-valid-days"
+                    error={
+                      !contractValidDaysValid
+                        ? `Enter a whole number from 1 to ${MAX_TERM_DAYS}.`
+                        : undefined
+                    }
+                  >
+                    <TextInput
+                      id="award-contract-valid-days"
+                      type="number"
+                      min="1"
+                      max={MAX_TERM_DAYS}
+                      value={contractValidDays}
+                      onChange={(e) => setContractValidDays(e.target.value)}
+                      error={!contractValidDaysValid}
+                    />
+                    <p className="text-xs text-secondary-500">
+                      How long the contract stays valid. Defaults to 365 (1 year).
+                    </p>
+                  </FormField>
+                  <FormField
+                    label="Work duration (days, optional)"
+                    htmlFor="award-work-duration-days"
+                    error={
+                      !workDurationValid
+                        ? `Enter a whole number from 1 to ${MAX_TERM_DAYS}.`
+                        : undefined
+                    }
+                  >
+                    <TextInput
+                      id="award-work-duration-days"
+                      type="number"
+                      min="1"
+                      max={MAX_TERM_DAYS}
+                      value={workDurationDays}
+                      onChange={(e) => setWorkDurationDays(e.target.value)}
+                      error={!workDurationValid}
+                    />
+                    <p className="text-xs text-secondary-500">
+                      Estimated time the work takes. Sets the scheduled work
+                      completion date (start + duration). Leave blank if unknown.
+                    </p>
+                  </FormField>
+                </div>
+              </div>
             )}
           </>
         )}

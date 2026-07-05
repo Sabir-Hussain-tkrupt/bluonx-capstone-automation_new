@@ -1,5 +1,5 @@
 """
-Contract PDF generation (Task 9.3b / 9.5 document).
+Contract PDF generation.
 
 Generates the firm standard-terms subcontract PDF from award data using
 reportlab (pure-Python, no system deps). The legal terms body lives in an
@@ -83,6 +83,39 @@ def _fmt_date(value: Any) -> str:
         return s
 
 
+def build_schedule_sentence(
+    start_date: Any, end_date: Any, work_duration_days: Any
+) -> str:
+    """The SCHEDULE clause, in three shapes:
+      - concrete window  → both a start and a duration resolve ("{start} to {end},
+        a duration of {N} days")
+      - relative         → a duration but no start ("{N} days of the effective date")
+      - schedule-only    → no duration → omit the day count entirely
+
+    Kept pure and separate so each case is directly unit-testable."""
+    if work_duration_days and start_date and end_date:
+        return (
+            f"The Subcontractor shall commence work on or about {_fmt_date(start_date)} "
+            f"and complete the work by {_fmt_date(end_date)}, a duration of "
+            f"{work_duration_days} days, time being of the essence."
+        )
+    if work_duration_days:
+        return (
+            f"The Subcontractor shall complete the work within {work_duration_days} "
+            "days of the effective date, time being of the essence."
+        )
+    if start_date:
+        return (
+            f"The Subcontractor shall commence work on or about {_fmt_date(start_date)} "
+            "and complete the work in accordance with the agreed schedule, time being "
+            "of the essence."
+        )
+    return (
+        "The Subcontractor shall complete the work in accordance with the agreed "
+        "schedule, time being of the essence."
+    )
+
+
 def render_terms_text(context: dict) -> str:
     """Render the swappable legal-terms body. Pure (no PDF) — easy to unit-test."""
     template = _terms_env.get_template(_TERMS_TEMPLATE)
@@ -91,8 +124,16 @@ def render_terms_text(context: dict) -> str:
         task_name=context.get("task_name") or "the contracted scope",
         project_name=context.get("project_name") or "the project",
         award_amount_formatted=_fmt_money(context.get("award_amount")),
-        start_date_formatted=_fmt_date(context.get("start_date")),
-        end_date_formatted=_fmt_date(context.get("end_date")),
+        schedule_sentence=build_schedule_sentence(
+            context.get("start_date"),
+            context.get("end_date"),
+            context.get("work_duration_days"),
+        ),
+        # Validity is rendered relatively at send-time; the concrete valid_until is
+        # not known until signing. Defaults to the 1-year term.
+        contract_valid_days=context.get("contract_valid_days") or 365,
+        # Dormant seam — absent until the signed-SOW date task supplies it.
+        sow_signed_date=context.get("sow_signed_date"),
         payment_terms=context.get("payment_terms") or DEFAULT_PAYMENT_TERMS,
     )
 
@@ -102,7 +143,10 @@ def build_contract_pdf(context: dict) -> bytes:
 
     `context` keys (all optional, defensively defaulted):
       contract_number, vendor_company, vendor_contact_name, owner_signer_name,
-      award_amount, start_date, end_date, project_name, task_name, payment_terms
+      award_amount, start_date, end_date, project_name, task_name, payment_terms,
+      contract_valid_days, work_duration_days, sow_signed_date, and the firm
+      contact block (firm_name, firm_contact_email, firm_contact_phone,
+      firm_contact_address).
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -138,11 +182,29 @@ def build_contract_pdf(context: dict) -> bytes:
     flow.append(Spacer(1, 6))
     flow.append(
         Paragraph(
-            f"Between BluOnX Development LLC (Contractor) and "
+            f"Between {context.get('firm_name') or 'BluOnX Development LLC'} "
+            f"(Contractor) and "
             f"{context.get('vendor_company', 'Subcontractor')} (Subcontractor).",
             meta,
         )
     )
+
+    # Firm contact-information block. One Paragraph per set value so the
+    # lines are not flattened; blanks are omitted so a partially-configured block
+    # still renders cleanly.
+    firm_lines = [
+        context.get("firm_name"),
+        context.get("firm_contact_address"),
+        context.get("firm_contact_phone"),
+        context.get("firm_contact_email"),
+    ]
+    firm_lines = [str(v) for v in firm_lines if v]
+    if firm_lines:
+        flow.append(Spacer(1, 8))
+        flow.append(Paragraph("Contractor contact:", meta))
+        for line in firm_lines:
+            flow.append(Paragraph(line, meta))
+
     flow.append(Spacer(1, 14))
 
     # Legal terms body — rendered from the swappable template, one paragraph per
@@ -179,8 +241,10 @@ def build_contract_pdf(context: dict) -> bytes:
         )
         flow.append(Spacer(1, 30))
 
-    _signature_block("Subcontractor", vendor_name, VENDOR_SIGN_ANCHOR)  # routingOrder 1
-    _signature_block("Contractor", owner_name, OWNER_SIGN_ANCHOR)  # routingOrder 2
+    # Visual block order is independent of signing order; the DocuSign routing
+    # (owner routingOrder 1, vendor 2) is set in contract_envelope_service.
+    _signature_block("Contractor", owner_name, OWNER_SIGN_ANCHOR)  # signs first (routingOrder 1)
+    _signature_block("Subcontractor", vendor_name, VENDOR_SIGN_ANCHOR)  # signs second (routingOrder 2)
 
     doc.build(flow, canvasmaker=_uncompressed_canvas)
     return buffer.getvalue()

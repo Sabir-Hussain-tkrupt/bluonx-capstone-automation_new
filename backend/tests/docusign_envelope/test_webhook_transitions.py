@@ -4,6 +4,7 @@ handle_envelope_event is called directly with a recording mock DB so we can asse
 the exact contract/award status writes and decline dispatch on each event.
 """
 
+from datetime import date
 from uuid import uuid4
 
 import pytest
@@ -22,7 +23,7 @@ PKG = str(uuid4())
 ENVELOPE_ID = "env-abc-123"
 
 
-def _env_row(status="sent"):
+def _env_row(status="sent", contract_valid_days=365):
     return {
         "id": EID,
         "status": status,
@@ -37,6 +38,7 @@ def _env_row(status="sent"):
                 "vendor_id": VID,
                 "task_id": TID,
                 "bid_submission_id": SID,
+                "contract_valid_days": contract_valid_days,
                 "bid_submissions": {"bid_invitations": {"bid_package_id": PKG}},
             },
         },
@@ -51,9 +53,11 @@ def _other_invitation():
     }
 
 
-def _spec(env_status="sent", other_invites=None):
+def _spec(env_status="sent", other_invites=None, contract_valid_days=365):
     return {
-        "docusign_envelopes": {"select": [_env_row(env_status)], "default": [{}]},
+        "docusign_envelopes": {
+            "select": [_env_row(env_status, contract_valid_days)], "default": [{}]
+        },
         "contracts": {"default": [{}]},
         "awards": {"default": [{}]},
         "bid_invitations": {"select": other_invites if other_invites is not None else []},
@@ -82,6 +86,24 @@ async def test_completed_executes_contract_accepts_award_and_declines(fake_email
     # Declines fired to the backup pool.
     assert len(fake_email.sent) == 1
     assert fake_email.sent[0]["email_type"] == "decline_notification"
+
+
+async def test_completed_writes_valid_until_from_signed_at_plus_valid_days(fake_email):
+    """Execution realization (Task 9.8): valid_until = signed_at + the award's
+    contract_valid_days, frozen onto the contract in the same update as signed_at."""
+    calls: dict = {}
+    db = make_db(_spec(contract_valid_days=730), calls)
+    result = await handle_envelope_event(
+        envelope_id=ENVELOPE_ID, status="completed", payload={}, db=db,
+        email_service=fake_email,
+    )
+    assert result == "applied"
+    cu = calls["contracts"]["update"][0]
+    assert cu["status"] == "executed"
+    assert "signed_at" in cu and "valid_until" in cu
+    signed = date.fromisoformat(cu["signed_at"][:10])
+    valid = date.fromisoformat(cu["valid_until"])
+    assert (valid - signed).days == 730
 
 
 async def test_declined_terminates_contract_and_declines_award(fake_email):

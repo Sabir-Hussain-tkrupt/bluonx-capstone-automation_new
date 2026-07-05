@@ -9,7 +9,7 @@ resend route. It:
   2. creates the `contracts` row in `sent_for_signature` (9.5; re-entrant)
   3. returns early if an envelope already exists for the contract (idempotent resend)
   4. generates the contract PDF (+ signed SOW exhibit(s) when on file)
-  5. builds + sends the two-signer envelope (vendor routingOrder 1, owner 2)
+  5. builds + sends the two-signer envelope (BluOnX/owner routingOrder 1, vendor 2)
   6. persists the `docusign_envelopes` row (status `sent`)
   7. sends the award email (9.4)
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -73,6 +73,27 @@ def _fmt_money(value: Any) -> str:
         return str(value)
 
 
+def _compute_end_date(start_date: Any, work_duration_days: Any) -> str | None:
+    """Realize the task-scoped work end date as proposed_start + work_duration_days.
+    Returns an ISO date string only when BOTH inputs are present;
+    otherwise None — a null start or null duration leaves end_date unset and the
+    PDF falls back to relative phrasing. Never raises on a null/blank/malformed
+    start (the "Start Date SKIPPED" case). Fixes the prior bug where end_date was
+    wrongly sourced from the whole project's estimated_end_date."""
+    if start_date in (None, "") or not work_duration_days:
+        return None
+    if isinstance(start_date, datetime):
+        base = start_date.date()
+    elif isinstance(start_date, date):
+        base = start_date
+    else:
+        try:
+            base = date.fromisoformat(str(start_date)[:10])
+        except ValueError:
+            return None
+    return (base + timedelta(days=int(work_duration_days))).isoformat()
+
+
 def _fmt_date(value: Any) -> str | None:
     if value in (None, ""):
         return None
@@ -91,7 +112,7 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
         db.table("awards")
         .select(
             "id, vendor_id, task_id, award_amount, bid_submission_id, status,"
-            " instructions,"
+            " instructions, contract_valid_days, work_duration_days,"
             " bid_submissions!inner(proposed_start_date,"
             "   bid_invitations!inner(vendor_contacts!inner(full_name, email))),"
             " vendors!inner(company_name),"
@@ -172,7 +193,9 @@ async def send_contract_envelope(
     project = _embed_one(task.get("projects"))
 
     start_date = submission.get("proposed_start_date")
-    end_date = project.get("estimated_end_date")
+    # Task-scoped end date: proposed_start + work_duration_days. NULL
+    # when either is missing — no longer the whole project's estimated_end_date.
+    end_date = _compute_end_date(start_date, ctx.get("work_duration_days"))
 
     # 2) Contract row (re-entrant) — born in sent_for_signature so the FK holds.
     contract = await run_in_threadpool(
@@ -206,6 +229,17 @@ async def send_contract_envelope(
         "project_name": project.get("name"),
         "task_name": task.get("name"),
         "payment_terms": contract.get("payment_terms"),
+        # Contract-term rendering. Validity is relative at send-time
+        # (the concrete valid_until is unknown until signing); work duration drives
+        # the schedule clause. sow_signed_date is a dormant seam (filled later).
+        "contract_valid_days": ctx.get("contract_valid_days"),
+        "work_duration_days": ctx.get("work_duration_days"),
+        "sow_signed_date": None,
+        # Firm contact-information block, from config (values supplied via env).
+        "firm_name": settings.CONTRACT_FIRM_NAME,
+        "firm_contact_email": settings.CONTRACT_FIRM_CONTACT_EMAIL,
+        "firm_contact_phone": settings.CONTRACT_FIRM_CONTACT_PHONE,
+        "firm_contact_address": settings.CONTRACT_FIRM_CONTACT_ADDRESS,
     }
     pdf_bytes = await run_in_threadpool(build_contract_pdf, pdf_context)
     documents = [
@@ -222,21 +256,24 @@ async def send_contract_envelope(
         )
     )
 
-    # 5) Two sequential signers — vendor (1) then internal countersigner (2).
+    # 5) Two sequential signers — BluOnX signs first (routingOrder 1), then the
+    #    vendor countersigns (routingOrder 2). Sequential routing means the vendor
+    #    only receives the DocuSign request once BluOnX has signed. recipient_id
+    #    tracks the signing order; the anchor tab stays bound to the correct party.
     signers = [
-        {
-            "name": contact.get("full_name") or vendor.get("company_name") or "Subcontractor",
-            "email": contact.get("email"),
-            "recipient_id": "1",
-            "routing_order": "1",
-            "anchor_string": VENDOR_SIGN_ANCHOR,
-        },
         {
             "name": settings.CONTRACT_OWNER_SIGNER_NAME or "BluOnX Authorized Signer",
             "email": settings.CONTRACT_OWNER_SIGNER_EMAIL or "owner@example.com",
+            "recipient_id": "1",
+            "routing_order": "1",
+            "anchor_string": OWNER_SIGN_ANCHOR,
+        },
+        {
+            "name": contact.get("full_name") or vendor.get("company_name") or "Subcontractor",
+            "email": contact.get("email"),
             "recipient_id": "2",
             "routing_order": "2",
-            "anchor_string": OWNER_SIGN_ANCHOR,
+            "anchor_string": VENDOR_SIGN_ANCHOR,
         },
     ]
     definition = build_envelope_definition(

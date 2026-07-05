@@ -429,6 +429,10 @@ export interface CreateAwardPayload {
   override_justification?: string;
   /** Optional PM-authored guidance (mobilization, site access, etc.), rendered in the award email. */
   instructions?: string;
+  /** Contract term length in days (Task 9.8). Appears in the signed contract; defaults to 365 (1-year). */
+  contract_valid_days?: number;
+  /** Duration of the awarded work in days (Task 9.8). Optional; realized as the contract end date. */
+  work_duration_days?: number;
 }
 
 export interface Award {

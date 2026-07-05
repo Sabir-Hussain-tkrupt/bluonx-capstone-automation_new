@@ -10,7 +10,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.contract_envelope_service import send_contract_envelope
+from app.services.contract_envelope_service import (
+    _compute_end_date,
+    send_contract_envelope,
+)
+from app.services.contract_pdf import OWNER_SIGN_ANCHOR, VENDOR_SIGN_ANCHOR
 
 from .conftest import make_db
 
@@ -30,6 +34,8 @@ def _award_ctx():
         "award_amount": "145000.00",
         "bid_submission_id": SID,
         "status": "pending_acceptance",
+        "contract_valid_days": 365,
+        "work_duration_days": 21,
         "bid_submissions": {
             "proposed_start_date": "2026-07-01",
             "bid_invitations": {
@@ -82,6 +88,9 @@ async def test_send_creates_contract_persists_envelope_and_emails(fake_email, st
     assert contract_insert["award_id"] == AID
     assert contract_insert["contract_amount"] == "145000.00"
     assert contract_insert["start_date"] == "2026-07-01"
+    # end_date is the task-scoped realization: proposed_start + work_duration_days
+    # (21) — NOT the whole project's estimated_end_date (Task 9.8 bug fix).
+    assert contract_insert["end_date"] == "2026-07-22"
     # Envelope persisted as sent, linked to the contract.
     env_insert = calls["docusign_envelopes"]["insert"][0]
     assert env_insert["status"] == "sent"
@@ -143,6 +152,42 @@ async def test_post_commit_hook_swallows_send_failure(monkeypatch):
     # Award still returned despite the send blowing up.
     assert result["id"] == AID
     assert result["status"] == "pending_acceptance"
+
+
+async def test_bluonx_signs_first_then_vendor(fake_email, stub_client):
+    """Signing order: BluOnX (owner) is routingOrder 1, the vendor is 2. The
+    anchor tab bound to each routing slot proves who signs when."""
+    calls: dict = {}
+    db = make_db(_send_spec(), calls)
+    await send_contract_envelope(
+        AID, db=db, client=stub_client, email_service=fake_email
+    )
+    ed = stub_client.sent_definitions[0]
+    by_order = {
+        s.routing_order: s.tabs.sign_here_tabs[0].anchor_string
+        for s in ed.recipients.signers
+    }
+    assert by_order["1"] == OWNER_SIGN_ANCHOR  # BluOnX signs first
+    assert by_order["2"] == VENDOR_SIGN_ANCHOR  # vendor countersigns
+
+
+# ── end-date realization (Task 9.8 bug fix) ──────────────────────────────
+
+
+def test_compute_end_date_both_present():
+    """start + work_duration_days → an ISO date string."""
+    assert _compute_end_date("2026-07-01", 21) == "2026-07-22"
+
+
+def test_compute_end_date_null_start_returns_none():
+    """No start → no computable end (relative phrasing takes over in the PDF)."""
+    assert _compute_end_date(None, 21) is None
+    assert _compute_end_date("", 21) is None
+
+
+def test_compute_end_date_null_duration_returns_none():
+    """No duration → no end date (must not fall back to the project end)."""
+    assert _compute_end_date("2026-07-01", None) is None
 
 
 def _clean_chain_row():

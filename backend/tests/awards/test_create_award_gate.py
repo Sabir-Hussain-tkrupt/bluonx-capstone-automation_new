@@ -97,6 +97,8 @@ def award_row(**over) -> dict:
         "has_override": False,
         "override_justification": None,
         "validation_results": {},
+        "contract_valid_days": 365,
+        "work_duration_days": None,
         "status": "pending_acceptance",
         "created_at": now,
         "updated_at": now,
@@ -149,6 +151,30 @@ def test_clean_award_ignores_client_supplied_override(recording_client_factory):
     params = calls["rpc"]["fn_create_award"]
     assert params["p_has_override"] is False
     assert params["p_override_justification"] is None
+
+
+# ── contract-term params (Task 9.8) ──────────────────────────────────────
+
+
+def test_award_persists_contract_term_params(recording_client_factory):
+    """PM-set contract_valid_days + work_duration_days flow through the RPC,
+    exactly as instructions do (server threads them into fn_create_award)."""
+    c, calls = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body(contract_valid_days=730, work_duration_days=21))
+    assert r.status_code == 201
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_contract_valid_days"] == 730
+    assert params["p_work_duration_days"] == 21
+
+
+def test_award_defaults_contract_valid_days_to_365(recording_client_factory):
+    """Omitting validity persists the 1-year default; duration stays NULL."""
+    c, calls = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 201
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_contract_valid_days"] == 365
+    assert params["p_work_duration_days"] is None
 
 
 # ── warn → override gate ─────────────────────────────────────────────────
