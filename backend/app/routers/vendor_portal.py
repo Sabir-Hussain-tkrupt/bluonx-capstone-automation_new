@@ -99,6 +99,7 @@ def _fetch_owned_submission(
         .select(
             "id, bid_invitation_id, vendor_id, status, is_draft,"
             " total_amount, vendor_notes, proposed_start_date,"
+            " sow_attested_name, sow_attested_at,"
             " submitted_at, updated_at"
         )
         .eq("id", str(submission_id))
@@ -120,6 +121,43 @@ def _fetch_owned_submission(
             detail="Submission not found",
         )
     return sub
+
+
+def _resolve_package_sow_path(
+    db: Client, bid_package_id: UUID, project_document_id: UUID
+) -> str | None:
+    """Return the SoW file_path iff `project_document_id` is this package's SoW.
+
+    The SoW lives on `bid_packages.scope_of_work_document_id`, outside the
+    `bid_package_documents` junction that gates reference docs. Returns None
+    (→ 404 at the caller) when the doc is not this package's SoW, so a vendor
+    can't probe for documents on other packages.
+
+    Two explicit lookups (package → SoW id, then the doc by id) avoid a nested
+    PostgREST embed, which would be ambiguous (bid_packages has both a direct
+    FK to project_documents and a many-to-many via bid_package_documents).
+    """
+    pkg_resp = (
+        db.table("bid_packages")
+        .select("scope_of_work_document_id")
+        .eq("id", str(bid_package_id))
+        .eq("scope_of_work_document_id", str(project_document_id))
+        .limit(1)
+        .execute()
+    )
+    rows = pkg_resp.data or []
+    if not rows:
+        return None
+
+    doc_resp = (
+        db.table("project_documents")
+        .select("file_path")
+        .eq("id", str(project_document_id))
+        .limit(1)
+        .execute()
+    )
+    doc_rows = doc_resp.data or []
+    return doc_rows[0].get("file_path") if doc_rows else None
 
 
 def _assert_draft(sub: dict) -> None:
@@ -310,6 +348,9 @@ async def create_draft(
             if payload.proposed_start_date is not None
             else None
         ),
+        # Attestation is saved on the draft but only stamped (sow_attested_at)
+        # at submit. Never prefilled on a revision — the vendor re-types it.
+        "sow_attested_name": payload.sow_attested_name,
         "status": "draft",
         "is_draft": True,
         "is_direct_assign": False,
@@ -421,6 +462,9 @@ async def update_draft(
                 if payload.proposed_start_date is not None
                 else None
             ),
+            # Persisted on autosave; the finalize stamp (sow_attested_at) is
+            # set only at submit.
+            "sow_attested_name": payload.sow_attested_name,
         }
     ).eq("id", str(submission_id)).execute()
 
@@ -527,6 +571,10 @@ async def submit_bid(
                 "is_draft": False,
                 "status": "submitted",
                 "submitted_at": submitted_at.isoformat(),
+                # Server-stamp the attestation timestamp ONLY at finalize —
+                # never on draft create/autosave. This is what realizes onto
+                # contracts.sow_signed_date at envelope-send.
+                "sow_attested_at": submitted_at.isoformat(),
             }
         )
         .eq("id", str(submission_id))
@@ -737,12 +785,20 @@ async def download_project_document(
         .execute()
     )
     rows = resp.data or []
-    if not rows or not rows[0].get("project_documents"):
+    file_path: str | None = None
+    if rows and rows[0].get("project_documents"):
+        file_path = rows[0]["project_documents"]["file_path"]
+    else:
+        # The Scope of Work is pinned on the package via
+        # bid_packages.scope_of_work_document_id, NOT the bid_package_documents
+        # junction — so allow it here when the requested doc is this package's SoW.
+        file_path = _resolve_package_sow_path(db, ctx.bid_package_id, project_document_id)
+
+    if not file_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found in this bid package",
         )
-    file_path = rows[0]["project_documents"]["file_path"]
     url = get_signed_url(db, PROJECT_DOCUMENTS_BUCKET, file_path, SIGNED_URL_EXPIRY_SECONDS)
     return SignedUrlResponse(url=url, expires_in=SIGNED_URL_EXPIRY_SECONDS)
 

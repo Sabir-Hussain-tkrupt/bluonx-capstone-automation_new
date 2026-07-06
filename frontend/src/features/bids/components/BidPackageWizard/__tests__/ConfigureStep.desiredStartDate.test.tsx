@@ -31,6 +31,8 @@ function buildData(overrides: Partial<WizardData> = {}): WizardData {
     vendorSelections: [],
     instructions: '',
     desiredStartDate: null,
+    scopeOfWorkDocumentId: null,
+    scopeOfWorkFileName: null,
     ...overrides,
   };
 }

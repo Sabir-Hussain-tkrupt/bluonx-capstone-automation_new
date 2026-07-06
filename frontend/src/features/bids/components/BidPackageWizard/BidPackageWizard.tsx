@@ -40,10 +40,12 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
   const [wizardData, setWizardData] = useState<WizardData>({
     deadline: getDefaultDeadline(),
     bidTemplateId: null,
-    documentIds: [],
+    documentIds: null,
     vendorSelections: [],
     instructions: '',
     desiredStartDate: null,
+    scopeOfWorkDocumentId: null,
+    scopeOfWorkFileName: null,
   });
 
   const updateData = (partial: Partial<WizardData>) => {
@@ -52,12 +54,23 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
 
   const handleSubmit = () => {
     if (!wizardData.bidTemplateId) return;
+    // A Scope of Work is mandatory — the Configure step blocks Next without it,
+    // but guard here too so submit can never fire without one.
+    if (!wizardData.scopeOfWorkDocumentId) {
+      toast({
+        variant: 'danger',
+        message: 'A Scope of Work document is required before sending the bid package.',
+      });
+      setStep(1);
+      return;
+    }
 
     createMutation.mutate(
       {
         deadline: new Date(wizardData.deadline).toISOString(),
         bid_template_id: wizardData.bidTemplateId,
-        project_document_ids: wizardData.documentIds,
+        scope_of_work_document_id: wizardData.scopeOfWorkDocumentId,
+        project_document_ids: wizardData.documentIds ?? [],
         vendor_selections: wizardData.vendorSelections,
         ...(wizardData.instructions.trim() ? { instructions: wizardData.instructions.trim() } : {}),
         ...(wizardData.desiredStartDate

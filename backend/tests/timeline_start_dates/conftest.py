@@ -64,6 +64,9 @@ def owned_submission_row(**overrides) -> dict:
         "total_amount": "50000.00",
         "vendor_notes": "Original notes.",
         "proposed_start_date": PROPOSED_START_ISO,
+        # SoW attestation is unconditionally required at submit; a valid
+        # all-CAPS value keeps these timeline tests focused on the date rule.
+        "sow_attested_name": "APEX",
         "submitted_at": None,
         "updated_at": now,
     }

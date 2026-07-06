@@ -36,7 +36,12 @@ export function Step4Review({
     ? state.pricing.total_amount ?? 0
     : computeGrandTotal(state.pricing.line_items);
 
-  const canSubmit = grandTotal > 0 && !disabled;
+  // SoW attestation is mandatory: a non-empty, all-CAPS company name.
+  // The server validator is authoritative; this is the client gate.
+  const attestation = (state.companyInfo.sow_attested_name ?? '').trim();
+  const attestationValid = attestation.length > 0 && attestation === attestation.toUpperCase();
+
+  const canSubmit = grandTotal > 0 && attestationValid && !disabled;
 
   async function handleConfirm() {
     await onSubmit();
@@ -86,6 +91,12 @@ export function Step4Review({
               </dd>
             </div>
           )}
+          <div className="sm:col-span-2">
+            <dt className="text-xs text-secondary-500">Scope of Work attestation</dt>
+            <dd className="font-medium text-secondary-900">
+              {attestation ? attestation : <span className="text-danger-600">Not attested</span>}
+            </dd>
+          </div>
         </dl>
       </Card>
 
@@ -214,6 +225,11 @@ export function Step4Review({
       ) : grandTotal <= 0 ? (
         <Alert variant="warning" title="Grand total must be greater than zero">
           Go back to the Pricing step and enter valid amounts before submitting.
+        </Alert>
+      ) : !attestationValid ? (
+        <Alert variant="warning" title="Scope of Work attestation required">
+          Go back to step 1 and type your company name in capital letters to attest to the
+          Scope of Work before submitting.
         </Alert>
       ) : null}
 

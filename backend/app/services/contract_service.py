@@ -81,6 +81,7 @@ def create_contract_for_award(
     start_date: Any = None,
     end_date: Any = None,
     payment_terms: str | None = None,
+    sow_signed_date: Any = None,
     db: Client,
 ) -> dict:
     """INSERT the contract row at `sent_for_signature`. Re-entrant: if a contract
@@ -88,6 +89,8 @@ def create_contract_for_award(
     re-inserting — so a best-effort resend after a partial failure is safe.
 
     `award` must carry: id, vendor_id, task_id, award_amount.
+    `sow_signed_date` is realized from the awarded submission's sow_attested_at
+    and lights the "Date of signed scope of work" line in the contract PDF.
     """
     award_id = award["id"]
 
@@ -108,6 +111,7 @@ def create_contract_for_award(
         "end_date": _date_str(end_date),
         "contract_amount": _str_amount(award.get("award_amount")),
         "payment_terms": payment_terms,
+        "sow_signed_date": _date_str(sow_signed_date),
         "status": "sent_for_signature",
     }
     try:

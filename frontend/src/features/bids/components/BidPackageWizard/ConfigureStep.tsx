@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/Alert';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useBidTemplates } from '@/features/bid-templates/hooks/useBidTemplates';
 import { useProjectDocuments } from '@/features/bids/hooks/useProjectDocuments';
+import { uploadProjectDocument } from '@/features/projects/api/project-documents.mutations';
 import type { Task } from '@/features/tasks/api/task.queries';
 import type { WizardData } from '@/features/bids/types';
 import type { BidTemplate } from '@/features/bid-templates/api/bid-template.queries';
@@ -33,14 +34,42 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
   const { data: templatesData, isLoading: templatesLoading } = useBidTemplates({ page_size: 100 });
   const { data: documents = [], isLoading: docsLoading } = useProjectDocuments(projectId);
 
-  const [errors, setErrors] = useState<{ deadline?: string; template?: string }>({});
+  const [errors, setErrors] = useState<{ deadline?: string; template?: string; sow?: string }>(
+    {},
+  );
+  const [sowUploading, setSowUploading] = useState(false);
 
-  // Initialize document IDs on first load (all pre-checked)
+  const handleSowSelect = async (file: File | undefined) => {
+    if (!file) return;
+    setSowUploading(true);
+    setErrors((prev) => ({ ...prev, sow: undefined }));
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('document_kind', 'scope_of_work');
+      const doc = (await uploadProjectDocument(projectId, formData)) as {
+        id: string;
+        file_name: string;
+      };
+      onUpdate({ scopeOfWorkDocumentId: doc.id, scopeOfWorkFileName: doc.file_name });
+    } catch {
+      setErrors((prev) => ({ ...prev, sow: 'Failed to upload the Scope of Work. Try again.' }));
+    } finally {
+      setSowUploading(false);
+    }
+  };
+
+  // Seed document IDs on first load (all pre-checked). Guard on `null`
+  // (not-yet-seeded), NOT on length: an empty array means the user
+  // deliberately deselected everything and must be left untouched.
   useEffect(() => {
-    if (documents.length > 0 && data.documentIds.length === 0) {
+    if (data.documentIds === null && documents.length > 0) {
       onUpdate({ documentIds: documents.map((d) => d.id) });
     }
-  }, [documents, data.documentIds.length, onUpdate]);
+  }, [documents, data.documentIds, onUpdate]);
+
+  // Safe view for reads while documentIds is still null (pre-seed render).
+  const selectedIds = data.documentIds ?? [];
 
   const templates = templatesData?.items ?? [];
 
@@ -64,14 +93,14 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
   }, [templates, task.trade_id]);
 
   const handleDocToggle = (docId: string) => {
-    const next = data.documentIds.includes(docId)
-      ? data.documentIds.filter((id) => id !== docId)
-      : [...data.documentIds, docId];
+    const next = selectedIds.includes(docId)
+      ? selectedIds.filter((id) => id !== docId)
+      : [...selectedIds, docId];
     onUpdate({ documentIds: next });
   };
 
   const handleNext = () => {
-    const newErrors: { deadline?: string; template?: string } = {};
+    const newErrors: { deadline?: string; template?: string; sow?: string } = {};
 
     if (!data.deadline) {
       newErrors.deadline = 'Deadline is required.';
@@ -81,6 +110,10 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
 
     if (!data.bidTemplateId) {
       newErrors.template = 'Please select a bid template.';
+    }
+
+    if (!data.scopeOfWorkDocumentId) {
+      newErrors.sow = 'A Scope of Work document is required.';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -138,6 +171,65 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
               }}
             />
           </FormField>
+        </div>
+      </Card>
+
+      {/* Scope of Work (required) */}
+      <Card>
+        <div className="p-6">
+          <h3 className="mb-1 text-sm font-semibold text-secondary-900">
+            Scope of Work
+            <span className="ml-1 text-danger-500">*</span>
+          </h3>
+          <p className="mb-4 text-xs text-secondary-500">
+            Upload the Scope of Work for this bid package. Vendors must review and attest to
+            it before submitting a bid. Required.
+          </p>
+
+          {errors.sow && (
+            <Alert variant="danger" className="mb-4">
+              {errors.sow}
+            </Alert>
+          )}
+
+          {data.scopeOfWorkDocumentId ? (
+            <div className="flex items-center justify-between rounded-lg border border-success-200 bg-success-50 px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-secondary-900">
+                  {data.scopeOfWorkFileName ?? 'Scope of Work uploaded'}
+                </p>
+                <p className="text-xs text-success-700">Uploaded</p>
+              </div>
+              <label className="shrink-0 cursor-pointer text-xs font-medium text-primary-600 hover:text-primary-700">
+                Replace
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.tiff"
+                  disabled={sowUploading}
+                  onChange={(e) => handleSowSelect(e.target.files?.[0])}
+                />
+              </label>
+            </div>
+          ) : (
+            <label
+              className={cn(
+                'flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-sm',
+                sowUploading
+                  ? 'border-secondary-200 text-secondary-400'
+                  : 'border-secondary-300 text-secondary-600 hover:border-primary-400 hover:text-primary-600',
+              )}
+            >
+              {sowUploading ? 'Uploading…' : 'Click to upload a Scope of Work document'}
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png,.tiff"
+                disabled={sowUploading}
+                onChange={(e) => handleSowSelect(e.target.files?.[0])}
+              />
+            </label>
+          )}
         </div>
       </Card>
 
@@ -246,12 +338,12 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
               <button
                 type="button"
                 onClick={() => {
-                  const allSelected = data.documentIds.length === documents.length;
+                  const allSelected = selectedIds.length === documents.length;
                   onUpdate({ documentIds: allSelected ? [] : documents.map((d) => d.id) });
                 }}
                 className="text-xs font-medium text-primary-600 hover:text-primary-700"
               >
-                {data.documentIds.length === documents.length ? 'Deselect All' : 'Select All'}
+                {selectedIds.length === documents.length ? 'Deselect All' : 'Select All'}
               </button>
             )}
           </div>
@@ -272,7 +364,7 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
                   description={[doc.file_type, formatFileSize(doc.file_size)]
                     .filter(Boolean)
                     .join(' · ')}
-                  checked={data.documentIds.includes(doc.id)}
+                  checked={selectedIds.includes(doc.id)}
                   onChange={() => handleDocToggle(doc.id)}
                 />
               ))}

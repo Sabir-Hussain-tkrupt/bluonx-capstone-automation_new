@@ -33,6 +33,7 @@ def test_bid_package_create_request_accepts_desired_start_date():
     req = BidPackageCreateRequest(
         deadline="2026-09-01T00:00:00+00:00",
         bid_template_id=uuid4(),
+        scope_of_work_document_id=uuid4(),
         vendor_selections=[
             {"vendor_id": uuid4(), "vendor_contact_id": uuid4()}
         ],
@@ -45,6 +46,7 @@ def test_bid_package_create_request_desired_start_date_optional():
     req = BidPackageCreateRequest(
         deadline="2026-09-01T00:00:00+00:00",
         bid_template_id=uuid4(),
+        scope_of_work_document_id=uuid4(),
         vendor_selections=[
             {"vendor_id": uuid4(), "vendor_contact_id": uuid4()}
         ],

@@ -26,6 +26,7 @@ class BidPackageCreateRequest(BluOnXBase):
 
     deadline: datetime
     bid_template_id: UUID
+    scope_of_work_document_id: UUID
     project_document_ids: list[UUID] = Field(default_factory=list)
     vendor_selections: list[VendorSelection] = Field(..., min_length=1)
     instructions: str | None = Field(default=None, max_length=2000)

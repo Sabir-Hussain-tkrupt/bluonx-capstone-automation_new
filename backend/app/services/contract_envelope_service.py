@@ -44,7 +44,7 @@ from app.services.template_renderer import template_renderer
 
 logger = logging.getLogger(__name__)
 
-_SOW_BUCKET = "bid-attachments"
+_SOW_BUCKET = "project-documents"
 
 
 class ContractEnvelopeError(Exception):
@@ -94,6 +94,15 @@ def _compute_end_date(start_date: Any, work_duration_days: Any) -> str | None:
     return (base + timedelta(days=int(work_duration_days))).isoformat()
 
 
+def _date_only(value: Any) -> str | None:
+    """Date part (YYYY-MM-DD) of a date/datetime/ISO string; None if blank."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()[:10]
+    return str(value)[:10]
+
+
 def _fmt_date(value: Any) -> str | None:
     if value in (None, ""):
         return None
@@ -113,7 +122,7 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
         .select(
             "id, vendor_id, task_id, award_amount, bid_submission_id, status,"
             " instructions, contract_valid_days, work_duration_days,"
-            " bid_submissions!inner(proposed_start_date,"
+            " bid_submissions!inner(proposed_start_date, sow_attested_at,"
             "   bid_invitations!inner(vendor_contacts!inner(full_name, email))),"
             " vendors!inner(company_name),"
             " tasks!inner(name, project_id,"
@@ -130,43 +139,75 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
 
 
 def _fetch_sow_exhibits(submission_id: str, *, db: Client) -> list[dict]:
-    """Download the awarded submission's attachments (signed SOW lives here) from
-    Storage and return them as envelope documents. Best-effort — a storage error
-    drops the exhibit rather than failing the whole send.
+    """Return the awarded package's Scope of Work as the single envelope exhibit.
 
-    NOTE: `bid_attachments` has no SOW-type discriminator, so we exhibit ALL of the
-    submission's attachments (flagged in DEFERRED — a type field would refine this)."""
+    The SoW is the PM-uploaded `project_documents` row pinned on the package
+    (`bid_packages.scope_of_work_document_id`), NOT a vendor bid_attachment.
+    Resolve it via the awarded submission → bid_invitation → bid_package, then
+    download from the project-documents bucket and attach as document 2 (the
+    contract PDF is document 1). No SignHere tab is placed on the exhibit — only
+    the contract PDF carries the signing anchors.
+
+    Best-effort: a missing SoW or storage error drops the exhibit rather than
+    failing the whole send (the signed-SoW DATE still rides on the contract PDF).
+
+    Two explicit lookups (submission chain → SoW id, then the doc by id) rather
+    than a nested PostgREST embed: bid_packages has both a direct FK to
+    project_documents AND a many-to-many via bid_package_documents, so an
+    embedded select would be ambiguous."""
     try:
-        resp = (
-            db.table("bid_attachments")
-            .select("file_name, file_path")
-            .eq("bid_submission_id", str(submission_id))
+        chain = (
+            db.table("bid_submissions")
+            .select("bid_invitations!inner(bid_packages!inner(scope_of_work_document_id))")
+            .eq("id", str(submission_id))
+            .limit(1)
             .execute()
         )
     except Exception:
-        logger.exception("Failed to list SOW attachments for submission %s", submission_id)
+        logger.exception("Failed to resolve SOW document for submission %s", submission_id)
         return []
 
-    exhibits: list[dict] = []
-    storage = db.storage.from_(_SOW_BUCKET)
-    for i, att in enumerate(resp.data or []):
-        path = att.get("file_path")
-        if not path:
-            continue
-        try:
-            raw = storage.download(path)
-        except Exception:
-            logger.exception("Failed to download SOW exhibit %s", path)
-            continue
-        exhibits.append(
-            {
-                "document_base64": base64.b64encode(raw).decode("ascii"),
-                "name": att.get("file_name") or f"Exhibit {i + 1}",
-                "document_id": str(i + 2),  # contract PDF is document 1
-                "file_extension": (att.get("file_name") or "exhibit.pdf").split(".")[-1],
-            }
+    row = _first(chain.data)
+    invitation = _embed_one((row or {}).get("bid_invitations"))
+    package = _embed_one(invitation.get("bid_packages"))
+    sow_doc_id = package.get("scope_of_work_document_id")
+    if not sow_doc_id:
+        logger.warning("No SOW document on package for submission %s", submission_id)
+        return []
+
+    try:
+        doc_resp = (
+            db.table("project_documents")
+            .select("file_name, file_path")
+            .eq("id", str(sow_doc_id))
+            .limit(1)
+            .execute()
         )
-    return exhibits
+    except Exception:
+        logger.exception("Failed to load SOW document %s", sow_doc_id)
+        return []
+
+    sow_doc = _first(doc_resp.data) or {}
+    path = sow_doc.get("file_path")
+    if not path:
+        logger.warning("SOW document %s has no file_path", sow_doc_id)
+        return []
+
+    try:
+        raw = db.storage.from_(_SOW_BUCKET).download(path)
+    except Exception:
+        logger.exception("Failed to download SOW exhibit %s", path)
+        return []
+
+    file_name = sow_doc.get("file_name") or "scope-of-work.pdf"
+    return [
+        {
+            "document_base64": base64.b64encode(raw).decode("ascii"),
+            "name": file_name,
+            "document_id": "2",  # contract PDF is document 1
+            "file_extension": file_name.split(".")[-1],
+        }
+    ]
 
 
 async def send_contract_envelope(
@@ -197,10 +238,27 @@ async def send_contract_envelope(
     # when either is missing — no longer the whole project's estimated_end_date.
     end_date = _compute_end_date(start_date, ctx.get("work_duration_days"))
 
+    # Signed-SoW date = the awarded submission's attestation timestamp (date part).
+    # Every post-feature submission is stamped at submit, so a NULL here means an
+    # award on a pre-feature/never-attested submission — fail loud rather than
+    # silently send a contract with no signed-SoW date.
+    sow_attested_at = submission.get("sow_attested_at")
+    if sow_attested_at in (None, ""):
+        raise ContractEnvelopeError(
+            422,
+            "Awarded submission has no Scope of Work attestation timestamp; "
+            "cannot send a contract without a signed-SoW date.",
+        )
+    sow_signed_date = _date_only(sow_attested_at)
+
     # 2) Contract row (re-entrant) — born in sent_for_signature so the FK holds.
     contract = await run_in_threadpool(
         lambda: contract_service.create_contract_for_award(
-            ctx, start_date=start_date, end_date=end_date, db=db
+            ctx,
+            start_date=start_date,
+            end_date=end_date,
+            sow_signed_date=sow_signed_date,
+            db=db,
         )
     )
     contract_id = contract["id"]
@@ -231,10 +289,10 @@ async def send_contract_envelope(
         "payment_terms": contract.get("payment_terms"),
         # Contract-term rendering. Validity is relative at send-time
         # (the concrete valid_until is unknown until signing); work duration drives
-        # the schedule clause. sow_signed_date is a dormant seam (filled later).
+        # the schedule clause. sow_signed_date = awarded submission's attestation date.
         "contract_valid_days": ctx.get("contract_valid_days"),
         "work_duration_days": ctx.get("work_duration_days"),
-        "sow_signed_date": None,
+        "sow_signed_date": sow_signed_date,
         # Firm contact-information block, from config (values supplied via env).
         "firm_name": settings.CONTRACT_FIRM_NAME,
         "firm_contact_email": settings.CONTRACT_FIRM_CONTACT_EMAIL,

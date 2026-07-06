@@ -72,7 +72,7 @@ export function ReviewStep({ data, task, onSubmit, onBack, isSubmitting }: Revie
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <SummaryCard label="Deadline" value={formatDeadline(data.deadline)} />
         <SummaryCard label="Template" value={templateName} />
-        <SummaryCard label="Documents" value={`${data.documentIds.length}`} />
+        <SummaryCard label="Documents" value={`${(data.documentIds ?? []).length}`} />
         <SummaryCard label="Vendors" value={`${data.vendorSelections.length}`} />
       </div>
 

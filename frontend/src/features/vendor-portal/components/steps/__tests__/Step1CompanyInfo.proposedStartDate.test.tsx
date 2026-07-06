@@ -57,6 +57,8 @@ function renderStep1(opts: RenderOpts = {}) {
       onSaveDraft={vi.fn()}
       proposedStartDate={opts.proposed ?? null}
       onUpdateProposedStartDate={opts.onUpdateProposedStartDate ?? vi.fn()}
+      sowAttestedName=""
+      onUpdateSowAttestation={vi.fn()}
     />,
   );
 }

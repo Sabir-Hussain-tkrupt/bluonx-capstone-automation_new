@@ -68,6 +68,7 @@ async def create_bid_package_endpoint(
         "task_id": str(task_id),
         "bid_template_id": str(body.bid_template_id),
         "deadline": body.deadline.isoformat(),
+        "scope_of_work_document_id": str(body.scope_of_work_document_id),
         "project_document_ids": [str(d) for d in body.project_document_ids],
         "vendor_selections": [
             {

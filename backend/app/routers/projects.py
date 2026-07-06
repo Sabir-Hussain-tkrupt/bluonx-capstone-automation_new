@@ -4,7 +4,7 @@ from uuid import UUID
 
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
 from supabase import Client
 
@@ -366,6 +366,10 @@ async def unarchive_project(
 
 PROJECT_BUCKET = "project-documents"
 
+# Documents are either general reference material (selectable into bid packages)
+# or a per-package Scope of Work (reached via the package, not the reference pool).
+_DOCUMENT_KINDS = {"reference", "scope_of_work"}
+
 
 # ── Project Documents ────────────────────────────────────────────────────
 
@@ -373,16 +377,28 @@ PROJECT_BUCKET = "project-documents"
 @router.get("/projects/{project_id}/documents", response_model=list[ProjectDocumentResponse])
 async def list_project_documents(
     project_id: UUID,
+    kind: str = Query(
+        "reference",
+        description="Filter by document_kind. Defaults to 'reference' so SoW "
+        "documents stay out of the selectable reference pool.",
+    ),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """List documents for a project."""
+    """List documents for a project, filtered by document_kind (default reference)."""
+    if kind not in _DOCUMENT_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"document_kind must be one of {sorted(_DOCUMENT_KINDS)}",
+        )
+
     _get_project_or_404(db, project_id)
 
     response = (
         db.table("project_documents")
         .select("*")
         .eq("project_id", str(project_id))
+        .eq("document_kind", kind)
         .order("uploaded_at", desc=True)
         .execute()
     )
@@ -398,6 +414,7 @@ async def list_project_documents(
 async def upload_project_document(
     project_id: UUID,
     file: UploadFile = File(...),
+    document_kind: str = Form("reference"),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
@@ -405,7 +422,16 @@ async def upload_project_document(
 
     Accepts multipart/form-data with:
     - file: the document file (PDF, JPEG, PNG, TIFF; max 50MB)
+    - document_kind: 'reference' (default) or 'scope_of_work'. SoW documents
+      are uploaded here during bid-package creation and referenced by
+      bid_packages.scope_of_work_document_id.
     """
+    if document_kind not in _DOCUMENT_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"document_kind must be one of {sorted(_DOCUMENT_KINDS)}",
+        )
+
     project = _get_project_or_404(db, project_id)
     _ensure_project_not_archived(project, resource="documents")
 
@@ -422,8 +448,9 @@ async def upload_project_document(
     filename = sanitize_filename(file.filename or "document")
     validate_upload(file_bytes, filename, content_type, PROJECT_BUCKET)
 
-    # Upload to storage: {project_id}/{filename}
-    storage_path = f"{project_id}/{filename}"
+    # Upload to storage: {project_id}/{filename}, or {project_id}/sow/{filename} for SoW.
+    prefix = f"{project_id}/sow" if document_kind == "scope_of_work" else str(project_id)
+    storage_path = f"{prefix}/{filename}"
     upload_file(db, PROJECT_BUCKET, storage_path, file_bytes, content_type)
 
     # Insert project_documents row
@@ -433,6 +460,7 @@ async def upload_project_document(
         "file_path": storage_path,
         "file_type": content_type,
         "file_size": len(file_bytes),
+        "document_kind": document_kind,
         "uploaded_by": user["user_id"],
     }
 

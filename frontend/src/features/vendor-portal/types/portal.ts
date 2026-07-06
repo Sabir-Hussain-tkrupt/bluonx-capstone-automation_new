@@ -36,6 +36,9 @@ export interface PortalBidPackage {
   instructions: string;
   /** PM-set target start date (Task 8.1.5). ISO date string or null. */
   desired_start_date: string | null;
+  /** PM-pinned Scope of Work the vendor must review and attest to. */
+  scope_of_work_document_id: string | null;
+  scope_of_work_file_name: string | null;
 }
 
 export interface PortalTemplateItem {
@@ -76,6 +79,8 @@ export interface BidDraft {
   last_saved_at: string;
   /** Vendor's committed start date (Task 8.1.5). ISO date string or null. */
   proposed_start_date: string | null;
+  /** Vendor's typed CAPS SoW attestation (saved on draft, re-typed on revision). */
+  sow_attested_name: string | null;
 }
 
 /**
@@ -213,6 +218,8 @@ export interface BidFormState {
     vendor_notes: string;
     /** Vendor's proposed start date (Task 8.1.5). ISO date string or null. */
     proposed_start_date: string | null;
+    /** Vendor's typed CAPS SoW attestation. Empty until the vendor types it. */
+    sow_attested_name: string;
   };
   pricing: {
     total_amount: number | null;

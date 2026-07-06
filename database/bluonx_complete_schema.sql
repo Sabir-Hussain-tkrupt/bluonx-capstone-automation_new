@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.37
--- Date:     July 04, 2026
+-- Version:  2.38
+-- Date:     July 06, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
 -- Engine:   PostgreSQL via Supabase
@@ -13,7 +13,7 @@
 --   1. Access Control            (1 table)
 --   2. Trade & Vendor Management (5 tables)
 --   3. Project & Task Management (3 tables)
---   4. Bid Lifecycle             (11 tables)  ← was 10; +bid_revision_requests
+--   4. Bid Lifecycle             (11 tables)
 --   5. Award & Contract          (3 tables)
 --   6. Milestone Tracking        (3 tables)
 --   7. Communication & Audit     (3 tables)
@@ -224,12 +224,14 @@ CREATE TABLE project_documents (
   file_path     TEXT          NOT NULL,
   file_type     VARCHAR(50),
   file_size     BIGINT,
+  document_kind VARCHAR(20)   NOT NULL DEFAULT 'reference' CHECK (document_kind IN ('reference', 'scope_of_work')),
   uploaded_by   UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   uploaded_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE  project_documents           IS 'Docs uploaded at project level. Shared to vendors via bid_package_documents.';
 COMMENT ON COLUMN project_documents.file_path IS 'Reference path in Supabase Storage (project-documents bucket).';
+COMMENT ON COLUMN project_documents.document_kind IS 'reference = general project doc, selectable into bid packages. scope_of_work = per-package SoW uploaded during bid-package creation (referenced by bid_packages.scope_of_work_document_id); filtered OUT of the selectable reference pool.';
 
 
 -- Tasks (one task = one trade = one award = one contract)
@@ -298,6 +300,7 @@ CREATE TABLE bid_packages (
   deadline      TIMESTAMPTZ   NOT NULL,
   instructions  TEXT,
   desired_start_date  DATE,
+  scope_of_work_document_id UUID REFERENCES project_documents(id) ON DELETE RESTRICT,
   status        VARCHAR(20)   NOT NULL DEFAULT 'open'
                               CHECK (status IN ('open', 'closed', 'evaluating', 'cancelled')),
 
@@ -309,6 +312,7 @@ CREATE TABLE bid_packages (
 
 COMMENT ON TABLE  bid_packages              IS 'A bidding round for a task. Multiple rounds via round_number for rebidding. RULE: must not be created for tasks with bid_type = internal (enforced at application layer).';
 COMMENT ON COLUMN bid_packages.round_number IS 'Auto-set by trigger: round 1 = first attempt, round 2 = rebid, etc.';
+COMMENT ON COLUMN bid_packages.scope_of_work_document_id IS 'PM-uploaded Scope of Work for this round (a project_documents row, document_kind=scope_of_work, project-documents bucket). One SoW per package; not re-uploaded on per-vendor revision. Mandatory at the application layer (required request field + service check); nullable in-DB only to avoid backfilling pre-feature rows. ON DELETE RESTRICT protects it as a contract record.';
 COMMENT ON COLUMN bid_packages.instructions IS 'Optional PM-supplied bid-submission instructions shown to vendors in the bid portal and invitation email. Distinct from tasks.description (scope of work). Examples: include mobilization as separate line item, bid held firm for 30 days, unit prices all-inclusive.';
 COMMENT ON COLUMN bid_packages.desired_start_date IS 'PM-communicated target start date for this bidding round. NULL = flexible/none; timeline dimension neutralized in scoring when NULL.';
 
@@ -384,6 +388,8 @@ CREATE TABLE bid_submissions (
   submitted_at        TIMESTAMPTZ,
   vendor_notes        TEXT,
   proposed_start_date  DATE,
+  sow_attested_name   VARCHAR(255),
+  sow_attested_at     TIMESTAMPTZ,
   supersedes_submission_id UUID    REFERENCES bid_submissions(id) ON DELETE RESTRICT,
   is_superseded       BOOLEAN       NOT NULL DEFAULT FALSE,
   revision_number     INTEGER       NOT NULL DEFAULT 1 CHECK (revision_number >= 1),
@@ -402,6 +408,8 @@ COMMENT ON COLUMN bid_submissions.supersedes_submission_id IS 'Chain pointer to 
 COMMENT ON COLUMN bid_submissions.is_superseded IS 'TRUE when a newer revision exists. Trigger-maintained by fn_flip_superseded_on_revision_finalize.';
 COMMENT ON COLUMN bid_submissions.revision_number IS 'Human-visible version number. 1 = original. Each revision increments by 1 (enforced by fn_enforce_supersession_chain).';
 COMMENT ON COLUMN bid_submissions.proposed_start_date IS 'Vendor''s committed start date. Pre-filled with bid_packages.desired_start_date in the form; required on submit when a desired date exists. proposed <= desired = on time.';
+COMMENT ON COLUMN bid_submissions.sow_attested_name IS 'Vendor-typed company name (CAPS) attesting they reviewed the package SoW and their bid reflects it. Saved on the draft; required at submit (unconditional). Re-typed fresh on every revision (never prefilled).';
+COMMENT ON COLUMN bid_submissions.sow_attested_at IS 'Server-stamped UTC attestation timestamp. Set only at finalize (submit_bid), never on draft/autosave. Realized onto contracts.sow_signed_date at envelope-send for the awarded submission.';
 
 -- Bid line items: pricing breakdown within a submission
 CREATE TABLE bid_line_items (
@@ -533,6 +541,7 @@ CREATE TABLE contracts (
   start_date        DATE,
   end_date          DATE,
   valid_until       DATE,
+  sow_signed_date   DATE,
   contract_amount   DECIMAL(15,2) NOT NULL CHECK (contract_amount >= 0),
   payment_terms     TEXT,
   status            VARCHAR(20)   NOT NULL DEFAULT 'draft'
@@ -547,7 +556,7 @@ COMMENT ON TABLE  contracts              IS 'Contract record. One per accepted a
 COMMENT ON COLUMN contracts.vendor_id    IS 'Denormalized for query perf. Enforced = awards.vendor_id by trigger.';
 COMMENT ON COLUMN contracts.task_id      IS 'Denormalized for query perf. Enforced = awards.task_id (via bid_submission) by trigger.';
 COMMENT ON COLUMN contracts.valid_until  IS 'Realized contract expiry = signed_at + awards.contract_valid_days. NULL until the DocuSign completed webhook fires (execution-anchored).';
-
+COMMENT ON COLUMN contracts.sow_signed_date IS 'Realized date the awarded vendor attested to the SoW = awarded bid_submissions.sow_attested_at::date. NULL until envelope-send copies it. Feeds the contract PDF "Date of signed scope of work" line.';
 
 -- DocuSign envelope tracking
 CREATE TABLE docusign_envelopes (
@@ -786,6 +795,8 @@ CREATE INDEX idx_bid_attachments_submission_id      ON bid_attachments (bid_subm
 
 -- Create later on when added bid_template_id foreign key to bid_packages
 CREATE INDEX idx_bid_packages_bid_template_id       ON bid_packages (bid_template_id);
+
+CREATE INDEX idx_bid_packages_sow_document          ON bid_packages (scope_of_work_document_id) WHERE scope_of_work_document_id IS NOT NULL;
 
 -- ---- Group 5: Award & Contract ----
 CREATE INDEX idx_awards_task_id                     ON awards (task_id);
@@ -1435,14 +1446,15 @@ GRANT EXECUTE ON FUNCTION fn_create_award(
 -- so the service can match its in-memory raw tokens back to the new invitation ids.
 
 CREATE OR REPLACE FUNCTION fn_create_bid_package_with_invitations(
-  p_task_id              UUID,
-  p_deadline             TIMESTAMPTZ,
-  p_bid_template_id      UUID,
-  p_created_by           UUID,
-  p_instructions         TEXT,
-  p_desired_start_date   DATE,
-  p_project_document_ids UUID[],
-  p_vendors              JSONB
+  p_task_id                    UUID,
+  p_deadline                   TIMESTAMPTZ,
+  p_bid_template_id            UUID,
+  p_created_by                 UUID,
+  p_instructions               TEXT,
+  p_desired_start_date         DATE,
+  p_scope_of_work_document_id  UUID,
+  p_project_document_ids       UUID[],
+  p_vendors                    JSONB
 )
 RETURNS JSONB AS $$
 DECLARE
@@ -1455,10 +1467,10 @@ BEGIN
   -- 1. Bid package (round_number auto-set by trg_bid_packages_round_number)
   INSERT INTO bid_packages (
     task_id, deadline, bid_template_id, created_by,
-    instructions, desired_start_date, status
+    instructions, desired_start_date, scope_of_work_document_id, status
   ) VALUES (
     p_task_id, p_deadline, p_bid_template_id, p_created_by,
-    p_instructions, p_desired_start_date, 'open'
+    p_instructions, p_desired_start_date, p_scope_of_work_document_id, 'open'
   )
   RETURNING * INTO v_bid_package;
 
@@ -1512,7 +1524,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 GRANT EXECUTE ON FUNCTION fn_create_bid_package_with_invitations(
-  UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID[], JSONB
+  UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID, UUID[], JSONB
 ) TO service_role;
 
 
@@ -1522,7 +1534,7 @@ GRANT EXECUTE ON FUNCTION fn_create_bid_package_with_invitations(
 -- END OF SCHEMA
 -- ============================================================================
 -- Total tables:    29
--- Total indexes:   55 custom (51 regular + 4 partial unique) + auto PK/UNIQUE
+-- Total indexes:   56 custom (52 regular + 4 partial unique) + auto PK/UNIQUE
 -- Total triggers:  29 (28 active + 1 disabled onboarding sync)
 -- Total functions: 16 (15 active + 1 disabled onboarding sync)
 --                  (SECTION 7 RPCs: fn_create_award,

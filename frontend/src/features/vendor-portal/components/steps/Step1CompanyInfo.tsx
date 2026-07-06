@@ -16,6 +16,10 @@ export interface Step1CompanyInfoProps {
   proposedStartDate: string | null;
   /** Sent on every keystroke — empty string is normalized to null. */
   onUpdateProposedStartDate: (value: string | null) => void;
+  /** Vendor's typed CAPS SoW attestation. */
+  sowAttestedName: string;
+  /** Sent on every keystroke; the reducer auto-uppercases. */
+  onUpdateSowAttestation: (value: string) => void;
 }
 
 export function Step1CompanyInfo({
@@ -23,6 +27,8 @@ export function Step1CompanyInfo({
   onSaveDraft,
   proposedStartDate,
   onUpdateProposedStartDate,
+  sowAttestedName,
+  onUpdateSowAttestation,
 }: Step1CompanyInfoProps) {
   const { vendor, project, task, bid_package, project_documents } = useBidContext();
   const { toast } = useToast();
@@ -111,6 +117,56 @@ export function Step1CompanyInfo({
               const v = e.target.value;
               onUpdateProposedStartDate(v === '' ? null : v);
             }}
+          />
+        </FormField>
+      </Card>
+
+      <Card
+        title="Scope of Work"
+        subtitle="Review the Scope of Work and attest that your bid reflects it"
+        padding="md"
+      >
+        {bid_package.scope_of_work_document_id ? (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-secondary-200 bg-secondary-50 px-4 py-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-secondary-900">
+                {bid_package.scope_of_work_file_name ?? 'Scope of Work'}
+              </p>
+              <p className="text-xs text-secondary-500">Provided by the project manager</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                handleDownload(
+                  bid_package.scope_of_work_document_id as string,
+                  bid_package.scope_of_work_file_name ?? 'Scope of Work',
+                )
+              }
+            >
+              Download
+            </Button>
+          </div>
+        ) : (
+          <p className="mb-4 text-sm text-secondary-500">
+            No Scope of Work document is available for this package.
+          </p>
+        )}
+
+        <FormField
+          label={`Type your company name (${vendor.company_name.toUpperCase()}) in capital letters to attest`}
+          htmlFor="sow-attestation"
+          required
+          hint="By typing your company name in CAPS you confirm you have reviewed the Scope of Work and your bid reflects it."
+        >
+          <TextInput
+            id="sow-attestation"
+            required
+            autoComplete="off"
+            placeholder={vendor.company_name.toUpperCase()}
+            value={sowAttestedName}
+            onChange={(e) => onUpdateSowAttestation(e.target.value)}
           />
         </FormField>
       </Card>

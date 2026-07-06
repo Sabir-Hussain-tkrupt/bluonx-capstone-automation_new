@@ -222,6 +222,8 @@ export interface VendorSelection {
 export interface CreateBidPackageRequest {
   deadline: string;
   bid_template_id: string;
+  /** REQUIRED. The PM-uploaded Scope of Work document for this package. */
+  scope_of_work_document_id: string;
   project_document_ids: string[];
   vendor_selections: VendorSelection[];
   instructions?: string;
@@ -307,11 +309,16 @@ export interface ProjectDocument {
 export interface WizardData {
   deadline: string;
   bidTemplateId: string | null;
-  documentIds: string[];
+  /** null = not yet seeded (pre-check all on first load); [] = user explicitly chose none. */
+  documentIds: string[] | null;
   vendorSelections: VendorSelection[];
   instructions: string;
   /** Optional PM-set desired start date (Task 8.1.5). ISO date or "". */
   desiredStartDate: string | null;
+  /** REQUIRED. project_documents id of the uploaded Scope of Work. */
+  scopeOfWorkDocumentId: string | null;
+  /** File name of the uploaded SoW, for display. */
+  scopeOfWorkFileName: string | null;
 }
 
 // ─── Bid Scoring & Recommendation (Task 8.2 / 8.3 / 8.4) ────────────

@@ -63,6 +63,9 @@ class PortalBidPackageModel(BluOnXBase):
     deadline: datetime
     instructions: str
     desired_start_date: date | None = None
+    # The PM-pinned Scope of Work the vendor must review and attest to.
+    scope_of_work_document_id: UUID | None = None
+    scope_of_work_file_name: str | None = None
 
 
 class PortalTemplateItemModel(BluOnXBase):
@@ -102,6 +105,7 @@ class BidDraftModel(BluOnXBase):
     attachment_ids: list[UUID]
     last_saved_at: datetime
     proposed_start_date: date | None = None
+    sow_attested_name: str | None = None
 
 
 class RevisionPrefillLineItem(BluOnXBase):
@@ -187,6 +191,10 @@ class DraftPayload(BluOnXBase):
     line_items: list[DraftLineItemInput] = Field(default_factory=list)
     attachment_ids: list[UUID] = Field(default_factory=list)
     proposed_start_date: date | None = None
+    # Vendor-typed CAPS company name attesting to the package Scope of Work.
+    # Saved on the draft; required (unconditionally) at submit. Never prefilled
+    # on a revision — the vendor re-types it each round.
+    sow_attested_name: str | None = Field(default=None, max_length=255)
 
 
 # ── Submit response ──────────────────────────────────────────────────────

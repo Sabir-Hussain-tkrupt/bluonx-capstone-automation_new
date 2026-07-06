@@ -186,6 +186,7 @@ async def create_bid_package_with_invitations(
     # ── 1. Parse payload ─────────────────────────────────────────────────
     deadline_str = payload["deadline"]
     bid_template_id = payload["bid_template_id"]
+    scope_of_work_document_id = payload.get("scope_of_work_document_id")
     project_document_ids = payload.get("project_document_ids", [])
     vendor_selections = payload.get("vendor_selections", [])
     desired_start_date = payload.get("desired_start_date")
@@ -302,6 +303,24 @@ async def create_bid_package_with_invitations(
                 )
             contact_data_map[cid] = contact
 
+        # Validate the mandatory Scope of Work document: it must exist, belong
+        # to the task's project, and be a SoW (not a general reference doc).
+        sow_doc = _query_one(db, "project_documents", scope_of_work_document_id)
+        if not sow_doc:
+            raise BidPackageValidationError(
+                422, f"Scope of Work document {scope_of_work_document_id} not found"
+            )
+        if sow_doc.get("project_id") != task_project_id:
+            raise BidPackageValidationError(
+                422,
+                "Scope of Work document does not belong to the task's project",
+            )
+        if sow_doc.get("document_kind") != "scope_of_work":
+            raise BidPackageValidationError(
+                422,
+                "Scope of Work document must have document_kind='scope_of_work'",
+            )
+
     # ── All validation passed. Create everything atomically, then email. ──
 
     # ── 7. Generate one magic-link token per vendor ──────────────────────
@@ -332,6 +351,9 @@ async def create_bid_package_with_invitations(
         "p_created_by": str(created_by),
         "p_instructions": payload.get("instructions"),
         "p_desired_start_date": desired_start_date,
+        "p_scope_of_work_document_id": (
+            str(scope_of_work_document_id) if scope_of_work_document_id else None
+        ),
         "p_project_document_ids": [str(d) for d in project_document_ids],
         "p_vendors": rpc_vendors,
     }
