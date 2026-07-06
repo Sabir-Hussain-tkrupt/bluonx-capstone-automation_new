@@ -94,6 +94,10 @@ def build_bid_context(
     )
 
     pkg = invitation_row["bid_packages"]
+    # Resolve the SoW file name with a dedicated lookup (no nested embed —
+    # bid_packages → project_documents is ambiguous in PostgREST because of the
+    # bid_package_documents junction).
+    sow_file_name = _fetch_sow_file_name(db, pkg.get("scope_of_work_document_id"))
     task = pkg["tasks"]
     project = task["projects"]
     trade = task["trades"]
@@ -127,6 +131,8 @@ def build_bid_context(
             deadline=pkg["deadline"],
             instructions=pkg.get("instructions") or "",
             desired_start_date=pkg.get("desired_start_date"),
+            scope_of_work_document_id=pkg.get("scope_of_work_document_id"),
+            scope_of_work_file_name=sow_file_name,
         ),
         bid_template=PortalBidTemplateModel(
             id=template["id"],
@@ -153,7 +159,7 @@ def _fetch_invitation_tree(db, bid_invitation_id: UUID) -> dict:
             " vendor_contacts(id, full_name, email, phone),"
             " bid_packages("
             "   id, round_number, deadline, instructions, bid_template_id, task_id,"
-            "   desired_start_date,"
+            "   desired_start_date, scope_of_work_document_id,"
             "   tasks("
             "     id, name, description,"
             "     projects(id, name, city, address),"
@@ -171,6 +177,21 @@ def _fetch_invitation_tree(db, bid_invitation_id: UUID) -> dict:
         # invitation exists. Raise a plain error — the router wraps it.
         raise RuntimeError(f"Bid invitation not found: {bid_invitation_id}")
     return resp.data
+
+
+def _fetch_sow_file_name(db, scope_of_work_document_id: str | None) -> str | None:
+    """File name of the package's Scope of Work document, or None if unset."""
+    if not scope_of_work_document_id:
+        return None
+    resp = (
+        db.table("project_documents")
+        .select("file_name")
+        .eq("id", str(scope_of_work_document_id))
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0].get("file_name") if rows else None
 
 
 def _fetch_template_items(db, bid_template_id: str | None) -> list[PortalTemplateItemModel]:
@@ -272,7 +293,7 @@ def _fetch_existing_draft(
         db.table("bid_submissions")
         .select(
             "id, vendor_notes, total_amount, updated_at, is_draft,"
-            " proposed_start_date"
+            " proposed_start_date, sow_attested_name"
         )
         .eq("bid_invitation_id", str(bid_invitation_id))
         .eq("is_draft", True)
@@ -343,6 +364,7 @@ def _fetch_existing_draft(
         attachment_ids=attachment_ids,
         last_saved_at=draft["updated_at"],
         proposed_start_date=draft.get("proposed_start_date"),
+        sow_attested_name=draft.get("sow_attested_name"),
     )
 
 
@@ -619,6 +641,7 @@ def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
         db.table("bid_submissions")
         .select(
             "id, vendor_notes, total_amount, updated_at, proposed_start_date,"
+            " sow_attested_name,"
             " bid_invitations!inner(bid_packages!inner(bid_template_id))"
         )
         .eq("id", bid_submission_id)
@@ -673,6 +696,7 @@ def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
         attachment_ids=attachment_ids,
         last_saved_at=row["updated_at"],
         proposed_start_date=row.get("proposed_start_date"),
+        sow_attested_name=row.get("sow_attested_name"),
     )
 
 

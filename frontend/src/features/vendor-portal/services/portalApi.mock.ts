@@ -74,6 +74,8 @@ const SEED_CONTEXT: VendorBidContext = {
     desired_start_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10),
+    scope_of_work_document_id: 'doc-sow-grading-001',
+    scope_of_work_file_name: 'scope-of-work-grading.pdf',
   },
   bid_template: {
     id: 'tpl-grading-001',
@@ -213,6 +215,7 @@ async function createDraft(payload: DraftPayload): Promise<BidDraft> {
     attachment_ids: payload.attachment_ids,
     last_saved_at: new Date().toISOString(),
     proposed_start_date: payload.proposed_start_date,
+    sow_attested_name: payload.sow_attested_name,
   };
   // eslint-disable-next-line no-console
   console.log('[portalApi:mock] createDraft →', draft);
@@ -229,6 +232,7 @@ async function updateDraft(id: string, payload: DraftPayload): Promise<BidDraft>
     attachment_ids: payload.attachment_ids,
     last_saved_at: new Date().toISOString(),
     proposed_start_date: payload.proposed_start_date,
+    sow_attested_name: payload.sow_attested_name,
   };
   // eslint-disable-next-line no-console
   console.log('[portalApi:mock] updateDraft →', id, draft);

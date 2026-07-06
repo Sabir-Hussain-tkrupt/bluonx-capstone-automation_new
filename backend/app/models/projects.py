@@ -96,6 +96,7 @@ class ProjectDocumentResponse(BluOnXBase):
     file_path: str
     file_type: str | None = None
     file_size: int | None = None
+    document_kind: str = "reference"
     uploaded_by: UUID
     uploaded_at: datetime
 

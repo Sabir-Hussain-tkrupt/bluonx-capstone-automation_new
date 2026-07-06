@@ -24,6 +24,8 @@ export interface DraftPayload {
   attachment_ids: string[];
   /** Vendor's proposed start date (Task 8.1.5). ISO date string or null. */
   proposed_start_date: string | null;
+  /** Vendor's typed CAPS SoW attestation. Empty until typed. */
+  sow_attested_name: string | null;
 }
 
 /**

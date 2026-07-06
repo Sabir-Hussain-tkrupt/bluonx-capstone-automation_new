@@ -62,6 +62,8 @@ function prefillToHydration(pf: RevisionPrefillResponse) {
 function stepForField(field: string): StepIndex {
   // Task 8.1.5: proposed_start_date lives on Step 1 alongside vendor info.
   if (field.startsWith('proposed_start_date')) return 1;
+  // SoW attestation lives on Step 1 next to Project Timing.
+  if (field.startsWith('sow_attested')) return 1;
   if (field.startsWith('vendor_notes')) return 3;
   if (field.startsWith('line_items') || field.startsWith('total_amount')) return 2;
   return 2;
@@ -135,6 +137,7 @@ export function BidFormPage() {
     return {
       vendor_notes: state.companyInfo.vendor_notes,
       proposed_start_date: state.companyInfo.proposed_start_date,
+      sow_attested_name: state.companyInfo.sow_attested_name || null,
       total_amount: bidContext.bid_template.is_lump_sum
         ? state.pricing.total_amount
         : computeGrandTotal(state.pricing.line_items),
@@ -447,6 +450,8 @@ export function BidFormPage() {
             onSaveDraft={handleManualSave}
             proposedStartDate={form.state.companyInfo.proposed_start_date}
             onUpdateProposedStartDate={form.updateProposedStartDate}
+            sowAttestedName={form.state.companyInfo.sow_attested_name}
+            onUpdateSowAttestation={form.updateSowAttestation}
           />
         )}
         {form.state.step === 2 && (

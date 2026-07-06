@@ -25,7 +25,7 @@ function makeState(proposed: string | null): BidFormState {
     step: 4,
     completedSteps: [1, 2, 3],
     dirty: false,
-    companyInfo: { vendor_notes: '', proposed_start_date: proposed },
+    companyInfo: { vendor_notes: '', proposed_start_date: proposed, sow_attested_name: 'ACME' },
     pricing: { total_amount: 1000, line_items: [] },
     attachments: [],
     submissionId: 's1',

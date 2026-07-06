@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer()
 
+# Clock-skew tolerance for time-based JWT claims (iat / nbf / exp). Supabase
+# stamps `iat` from its own clock, so a validating host running a second or two
+# behind would otherwise reject a freshly-issued, valid token as "not yet valid".
+# 30s is the conventional allowance.
+_JWT_LEEWAY_SECONDS = 30
+
 # JWKS client for ES256 verification — caches keys automatically.
 # Supabase publishes public keys at /.well-known/jwks.json.
 _jwks_client = PyJWKClient(
@@ -60,6 +66,7 @@ def _decode_token(token: str) -> dict:
             signing_key.key,
             algorithms=["ES256"],
             audience="authenticated",
+            leeway=_JWT_LEEWAY_SECONDS,
         )
     elif alg == "HS256":
         # Legacy: shared secret verification
@@ -68,6 +75,7 @@ def _decode_token(token: str) -> dict:
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
             audience="authenticated",
+            leeway=_JWT_LEEWAY_SECONDS,
         )
     else:
         raise jwt.InvalidTokenError(f"Unsupported algorithm: {alg}")

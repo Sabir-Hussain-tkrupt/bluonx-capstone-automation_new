@@ -38,6 +38,7 @@ def _award_ctx():
         "work_duration_days": 21,
         "bid_submissions": {
             "proposed_start_date": "2026-07-01",
+            "sow_attested_at": "2026-06-15T10:00:00+00:00",
             "bid_invitations": {
                 "vendor_contacts": {"full_name": "Jane Doe", "email": "jane@acme.com"}
             },
@@ -91,6 +92,8 @@ async def test_send_creates_contract_persists_envelope_and_emails(fake_email, st
     # end_date is the task-scoped realization: proposed_start + work_duration_days
     # (21) — NOT the whole project's estimated_end_date (Task 9.8 bug fix).
     assert contract_insert["end_date"] == "2026-07-22"
+    # Signed-SoW date is realized from the awarded submission's attestation.
+    assert contract_insert["sow_signed_date"] == "2026-06-15"
     # Envelope persisted as sent, linked to the contract.
     env_insert = calls["docusign_envelopes"]["insert"][0]
     assert env_insert["status"] == "sent"
@@ -169,6 +172,43 @@ async def test_bluonx_signs_first_then_vendor(fake_email, stub_client):
     }
     assert by_order["1"] == OWNER_SIGN_ANCHOR  # BluOnX signs first
     assert by_order["2"] == VENDOR_SIGN_ANCHOR  # vendor countersigns
+
+
+async def test_pdf_context_receives_signed_sow_date(fake_email, stub_client, monkeypatch):
+    """The contract PDF is built with the realized (non-None) signed-SoW date."""
+    import app.services.contract_envelope_service as ces
+
+    captured: dict = {}
+
+    def _capture_build(context):
+        captured.update(context)
+        return b"%PDF-fake"
+
+    monkeypatch.setattr(ces, "build_contract_pdf", _capture_build)
+
+    db = make_db(_send_spec(), {})
+    await send_contract_envelope(AID, db=db, client=stub_client, email_service=fake_email)
+
+    assert captured["sow_signed_date"] == "2026-06-15"
+
+
+async def test_send_fails_loud_when_attestation_missing(fake_email, stub_client):
+    """An award on a submission with no attestation stamp must not silently send."""
+    from app.services.contract_envelope_service import ContractEnvelopeError
+
+    spec = _send_spec()
+    ctx = _award_ctx()
+    ctx["bid_submissions"] = {
+        "proposed_start_date": "2026-07-01",
+        "sow_attested_at": None,
+        "bid_invitations": {
+            "vendor_contacts": {"full_name": "Jane Doe", "email": "jane@acme.com"}
+        },
+    }
+    spec["awards"] = {"select": [ctx]}
+    db = make_db(spec, {})
+    with pytest.raises(ContractEnvelopeError):
+        await send_contract_envelope(AID, db=db, client=stub_client, email_service=fake_email)
 
 
 # ── end-date realization (Task 9.8 bug fix) ──────────────────────────────

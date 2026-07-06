@@ -8,6 +8,7 @@ never on the request body — so tampered drafts can't slip past.
 
 Rules enforced (per Task 5.4 spec):
   1. vendor_notes length ≤ 2000
+  1c. sow_attested_name present and all-CAPS (unconditional SoW attestation)
   2. total_amount > 0
   3. Structured template: len(line_items) == len(template_items)
   4. Per line, required pricing fields are present and ≥ 0 (or > 0 for qty)
@@ -70,6 +71,25 @@ def validate_for_submit(
                     ),
                 )
             )
+
+    # 1c. Scope of Work attestation — UNCONDITIONALLY required at submit.
+    # Every package carries a SoW, so the vendor must type their company name
+    # in CAPS to attest. No "if package has SoW" branch.
+    attest = (submission.get("sow_attested_name") or "").strip()
+    if not attest:
+        errors.append(
+            FieldError(
+                field="sow_attested_name",
+                message="You must type your company name to attest to the Scope of Work",
+            )
+        )
+    elif attest != attest.upper():
+        errors.append(
+            FieldError(
+                field="sow_attested_name",
+                message="Please type your company name in capital letters",
+            )
+        )
 
     # 2. total_amount > 0
     total = _as_decimal(submission.get("total_amount"))

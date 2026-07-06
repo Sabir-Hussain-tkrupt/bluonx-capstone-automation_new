@@ -88,7 +88,12 @@ def _setup_rendering_mocks(mock_supabase, deadline_iso: str, pm_user: dict, task
             chain.eq.return_value = chain
             chain.single.return_value = chain
             chain.execute.return_value = MagicMock(data=[
-                {"id": str(DOC_IDS[0]), "project_id": str(PROJECT_ID), "file_name": "grading_plan.pdf"},
+                {
+                    "id": str(DOC_IDS[0]),
+                    "project_id": str(PROJECT_ID),
+                    "file_name": "grading_plan.pdf",
+                    "document_kind": "scope_of_work",
+                },
                 {"id": str(DOC_IDS[1]), "project_id": str(PROJECT_ID), "file_name": "site_survey.dwg"},
             ])
             chain.in_.return_value = chain
@@ -167,6 +172,7 @@ class TestEmailContextVariables:
             "task_id": str(TASK_ID),
             "bid_template_id": str(BID_TEMPLATE_ID),
             "deadline": future_deadline.isoformat(),
+            "scope_of_work_document_id": str(DOC_IDS[0]),
             "project_document_ids": [str(DOC_IDS[0]), str(DOC_IDS[1])],
             "vendor_selections": [
                 {"vendor_id": str(VENDOR_IDS[0]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[0])},
@@ -249,6 +255,7 @@ class TestHTMLAndPlainTextRendering:
             "task_id": str(TASK_ID),
             "bid_template_id": str(BID_TEMPLATE_ID),
             "deadline": future_deadline.isoformat(),
+            "scope_of_work_document_id": str(DOC_IDS[0]),
             "project_document_ids": [],
             "vendor_selections": [
                 {"vendor_id": str(VENDOR_IDS[0]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[0])},
@@ -313,6 +320,7 @@ class TestPMInfoInEmail:
             "task_id": str(TASK_ID),
             "bid_template_id": str(BID_TEMPLATE_ID),
             "deadline": future_deadline.isoformat(),
+            "scope_of_work_document_id": str(DOC_IDS[0]),
             "project_document_ids": [],
             "vendor_selections": [
                 {"vendor_id": str(VENDOR_IDS[0]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[0])},

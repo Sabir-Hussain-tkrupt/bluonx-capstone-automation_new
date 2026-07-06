@@ -15,6 +15,7 @@ type Action =
   | { type: 'MARK_COMPLETED'; step: StepIndex }
   | { type: 'UPDATE_COMPANY_NOTES'; value: string }
   | { type: 'UPDATE_PROPOSED_START_DATE'; value: string | null }
+  | { type: 'UPDATE_SOW_ATTESTATION'; value: string }
   | { type: 'SET_LUMP_TOTAL'; value: number | null }
   | {
       type: 'UPDATE_LINE_ITEM';
@@ -77,6 +78,9 @@ export function buildInitialFormState(
     companyInfo: {
       vendor_notes: '',
       proposed_start_date: initialProposedStartDate,
+      // Always starts empty — the vendor must type it fresh each round
+      // (never prefilled on a revision).
+      sow_attested_name: '',
     },
     pricing: {
       total_amount: null,
@@ -128,6 +132,17 @@ function reducer(state: BidFormState, action: Action): BidFormState {
         companyInfo: {
           ...state.companyInfo,
           proposed_start_date: action.value,
+        },
+      };
+
+    case 'UPDATE_SOW_ATTESTATION':
+      return {
+        ...state,
+        dirty: true,
+        companyInfo: {
+          ...state.companyInfo,
+          // Auto-uppercase so the typed value always matches the CAPS rule.
+          sow_attested_name: action.value.toUpperCase(),
         },
       };
 
@@ -186,6 +201,8 @@ function reducer(state: BidFormState, action: Action): BidFormState {
         companyInfo: {
           vendor_notes: action.draft.vendor_notes,
           proposed_start_date: action.draft.proposed_start_date,
+          // Restore the vendor's saved attestation for this round's draft.
+          sow_attested_name: action.draft.sow_attested_name ?? '',
         },
         pricing: { total_amount: action.draft.total_amount, line_items: lineItems },
       };
@@ -212,6 +229,9 @@ function reducer(state: BidFormState, action: Action): BidFormState {
         companyInfo: {
           vendor_notes: action.prefill.vendor_notes,
           proposed_start_date: action.prefill.proposed_start_date,
+          // Attestation is NEVER prefilled on a revision — the vendor
+          // re-attests fresh each round.
+          sow_attested_name: '',
         },
         pricing: { total_amount: action.prefill.total_amount, line_items: lineItems },
       };
@@ -233,6 +253,7 @@ export interface UseBidFormStateResult {
   markCompleted: (step: StepIndex) => void;
   updateCompanyNotes: (value: string) => void;
   updateProposedStartDate: (value: string | null) => void;
+  updateSowAttestation: (value: string) => void;
   setLumpTotal: (value: number | null) => void;
   updateLineItem: (
     template_item_id: string,
@@ -266,6 +287,10 @@ export function useBidFormState(
     ),
     updateProposedStartDate: useCallback(
       (value) => dispatch({ type: 'UPDATE_PROPOSED_START_DATE', value }),
+      [],
+    ),
+    updateSowAttestation: useCallback(
+      (value) => dispatch({ type: 'UPDATE_SOW_ATTESTATION', value }),
       [],
     ),
     setLumpTotal: useCallback(
