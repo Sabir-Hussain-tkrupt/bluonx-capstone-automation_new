@@ -35,12 +35,17 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
 
   const [errors, setErrors] = useState<{ deadline?: string; template?: string }>({});
 
-  // Initialize document IDs on first load (all pre-checked)
+  // Seed document IDs on first load (all pre-checked). Guard on `null`
+  // (not-yet-seeded), NOT on length: an empty array means the user
+  // deliberately deselected everything and must be left untouched.
   useEffect(() => {
-    if (documents.length > 0 && data.documentIds.length === 0) {
+    if (data.documentIds === null && documents.length > 0) {
       onUpdate({ documentIds: documents.map((d) => d.id) });
     }
-  }, [documents, data.documentIds.length, onUpdate]);
+  }, [documents, data.documentIds, onUpdate]);
+
+  // Safe view for reads while documentIds is still null (pre-seed render).
+  const selectedIds = data.documentIds ?? [];
 
   const templates = templatesData?.items ?? [];
 
@@ -64,9 +69,9 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
   }, [templates, task.trade_id]);
 
   const handleDocToggle = (docId: string) => {
-    const next = data.documentIds.includes(docId)
-      ? data.documentIds.filter((id) => id !== docId)
-      : [...data.documentIds, docId];
+    const next = selectedIds.includes(docId)
+      ? selectedIds.filter((id) => id !== docId)
+      : [...selectedIds, docId];
     onUpdate({ documentIds: next });
   };
 
@@ -246,12 +251,12 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
               <button
                 type="button"
                 onClick={() => {
-                  const allSelected = data.documentIds.length === documents.length;
+                  const allSelected = selectedIds.length === documents.length;
                   onUpdate({ documentIds: allSelected ? [] : documents.map((d) => d.id) });
                 }}
                 className="text-xs font-medium text-primary-600 hover:text-primary-700"
               >
-                {data.documentIds.length === documents.length ? 'Deselect All' : 'Select All'}
+                {selectedIds.length === documents.length ? 'Deselect All' : 'Select All'}
               </button>
             )}
           </div>
@@ -272,7 +277,7 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
                   description={[doc.file_type, formatFileSize(doc.file_size)]
                     .filter(Boolean)
                     .join(' · ')}
-                  checked={data.documentIds.includes(doc.id)}
+                  checked={selectedIds.includes(doc.id)}
                   onChange={() => handleDocToggle(doc.id)}
                 />
               ))}

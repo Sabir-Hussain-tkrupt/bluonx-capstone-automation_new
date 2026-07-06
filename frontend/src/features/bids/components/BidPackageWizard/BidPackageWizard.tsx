@@ -40,7 +40,7 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
   const [wizardData, setWizardData] = useState<WizardData>({
     deadline: getDefaultDeadline(),
     bidTemplateId: null,
-    documentIds: [],
+    documentIds: null,
     vendorSelections: [],
     instructions: '',
     desiredStartDate: null,
@@ -57,7 +57,7 @@ export function BidPackageWizard({ projectId, taskId, task }: BidPackageWizardPr
       {
         deadline: new Date(wizardData.deadline).toISOString(),
         bid_template_id: wizardData.bidTemplateId,
-        project_document_ids: wizardData.documentIds,
+        project_document_ids: wizardData.documentIds ?? [],
         vendor_selections: wizardData.vendorSelections,
         ...(wizardData.instructions.trim() ? { instructions: wizardData.instructions.trim() } : {}),
         ...(wizardData.desiredStartDate

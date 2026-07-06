@@ -307,7 +307,8 @@ export interface ProjectDocument {
 export interface WizardData {
   deadline: string;
   bidTemplateId: string | null;
-  documentIds: string[];
+  /** null = not yet seeded (pre-check all on first load); [] = user explicitly chose none. */
+  documentIds: string[] | null;
   vendorSelections: VendorSelection[];
   instructions: string;
   /** Optional PM-set desired start date (Task 8.1.5). ISO date or "". */
