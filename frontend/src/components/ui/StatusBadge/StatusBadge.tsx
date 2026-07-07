@@ -39,6 +39,9 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   // Milestone statuses
   pending: 'warning',
   overdue: 'danger',
+  scheduled: 'neutral',
+  delayed: 'warning',
+  unresponsive: 'danger',
   // Bid package statuses
   open: 'info',
   closed: 'neutral',

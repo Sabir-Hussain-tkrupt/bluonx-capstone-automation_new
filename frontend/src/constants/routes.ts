@@ -29,6 +29,7 @@ export const ROUTES = {
   CREATE_BID_PACKAGE: '/projects/:id/tasks/:taskId/create-bid-package',
   BID_PACKAGE_DETAIL: '/projects/:id/tasks/:taskId/bid-packages/:bidPackageId',
   BID_PACKAGE_COMPARE: '/projects/:id/tasks/:taskId/bid-packages/:bidPackageId/compare',
+  MILESTONE_DETAIL: '/projects/:id/tasks/:taskId/milestones/:milestoneId',
   NOTIFICATIONS: '/notifications',
   SETTINGS: '/settings',
   SETTINGS_TRADES: '/settings/trades',
