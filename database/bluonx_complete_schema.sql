@@ -2,7 +2,7 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.38
+-- Version:  2.39
 -- Date:     July 06, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   29
@@ -593,7 +593,7 @@ CREATE TABLE milestones (
   actual_start_date DATE,
   actual_end_date   DATE,
   status            VARCHAR(20)   NOT NULL DEFAULT 'scheduled'
-                                  CHECK (status IN ('scheduled', 'started', 'on_track', 'delayed', 'completed')),
+                                  CHECK (status IN ('scheduled','in_progress','delayed','unresponsive','completed','cancelled')),
   sort_order        INTEGER       NOT NULL DEFAULT 0,
   notes             TEXT,
   created_by        UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
