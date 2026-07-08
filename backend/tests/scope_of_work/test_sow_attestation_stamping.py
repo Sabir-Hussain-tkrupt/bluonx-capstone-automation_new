@@ -230,10 +230,47 @@ def test_submit_sets_attestation_stamp(client_and_db, monkeypatch):
         },
     )
 
-    # Package row (no desired date) for the timeline check.
-    client, db = client_and_db(selects={"bid_packages": [{"desired_start_date": None}]})
+    # Package row (no desired date) + the vendor's company name so the
+    # signature-match rule runs (attestation "ACME GRADING" matches).
+    client, db = client_and_db(selects={
+        "bid_packages": [{"desired_start_date": None}],
+        "vendors": [{"company_name": "ACME GRADING"}],
+    })
     resp = client.post(f"/api/v1/vendor-portal/submissions/{SUBMISSION_ID}/submit")
     assert resp.status_code == 200, resp.text
     update = db.writes["bid_submissions.update"][0]
     assert update["is_draft"] is False
     assert "sow_attested_at" in update and update["sow_attested_at"]
+
+
+def test_submit_rejects_signature_not_matching_company(client_and_db, monkeypatch):
+    """Backend is authoritative: a signature that isn't the company name → 422."""
+    async def _tmpl_id(_db, _inv):
+        return "tmpl-id"
+
+    monkeypatch.setattr(vp, "_fetch_template_id_for_invitation", _tmpl_id)
+    monkeypatch.setattr(vp, "fetch_template_metadata", lambda *_a: {"is_lump_sum": True})
+    monkeypatch.setattr(vp, "fetch_template_items_map", lambda *_a: {})
+    monkeypatch.setattr(vp, "assert_package_open_and_before_deadline", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        vp, "_fetch_owned_submission",
+        lambda *_a, **_k: {
+            "id": str(SUBMISSION_ID),
+            "is_draft": True,
+            "total_amount": "1000.00",
+            "vendor_notes": "",
+            "proposed_start_date": None,
+            "sow_attested_name": "NOT MY COMPANY",  # bypassed the UI
+        },
+    )
+
+    client, db = client_and_db(selects={
+        "bid_packages": [{"desired_start_date": None}],
+        "vendors": [{"company_name": "ACME GRADING"}],
+    })
+    resp = client.post(f"/api/v1/vendor-portal/submissions/{SUBMISSION_ID}/submit")
+    assert resp.status_code == 422, resp.text
+    fields = [e["field"] for e in resp.json()["detail"]["errors"]]
+    assert "sow_attested_name" in fields
+    # And nothing was finalized.
+    assert "bid_submissions.update" not in db.writes

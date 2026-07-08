@@ -1,6 +1,7 @@
 import { Button, Card, FormField, TextInput, useToast } from '@/components/ui';
 import { useBidContext } from '../../hooks/useBidContext';
 import { downloadProjectDocument } from '../../services/portalApi';
+import { signatureMatches } from '../../utils/attestation';
 import { ProjectContextPanel } from '../ProjectContextPanel';
 
 function formatBytes(bytes: number): string {
@@ -33,6 +34,10 @@ export function Step1CompanyInfo({
   const { vendor, project, task, bid_package, project_documents } = useBidContext();
   const { toast } = useToast();
   const requiredStart = !!bid_package.desired_start_date;
+  // Signature must match the vendor's company name. Only surface the error
+  // once the vendor has typed something (don't shout on an untouched field).
+  const sigTouched = sowAttestedName.trim().length > 0;
+  const sigMatches = signatureMatches(sowAttestedName, vendor.company_name);
 
   async function handleDownload(documentId: string, fileName: string) {
     try {
@@ -155,10 +160,15 @@ export function Step1CompanyInfo({
         )}
 
         <FormField
-          label={`Type your company name (${vendor.company_name.toUpperCase()}) in capital letters to attest`}
+          label={`Sign by typing your company name (${vendor.company_name})`}
           htmlFor="sow-attestation"
           required
-          hint="By typing your company name in CAPS you confirm you have reviewed the Scope of Work and your bid reflects it."
+          hint="Type your company name exactly as shown to confirm you have reviewed the Scope of Work and your bid reflects it."
+          error={
+            sigTouched && !sigMatches
+              ? 'This must exactly match your company name to sign.'
+              : undefined
+          }
         >
           <TextInput
             id="sow-attestation"
@@ -166,6 +176,7 @@ export function Step1CompanyInfo({
             autoComplete="off"
             placeholder={vendor.company_name.toUpperCase()}
             value={sowAttestedName}
+            error={sigTouched && !sigMatches}
             onChange={(e) => onUpdateSowAttestation(e.target.value)}
           />
         </FormField>

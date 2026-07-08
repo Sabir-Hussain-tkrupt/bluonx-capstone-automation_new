@@ -547,12 +547,25 @@ async def submit_bid(
     )
     line_items = li_resp.data or []
 
+    # The SoW signature must match the vendor's on-file company name. Resolve it
+    # from the JWT-derived vendor id (never the request) for the validator.
+    vendor_resp = (
+        db.table("vendors")
+        .select("company_name")
+        .eq("id", str(ctx.vendor_id))
+        .limit(1)
+        .execute()
+    )
+    vendor_rows = vendor_resp.data or []
+    vendor_company_name = vendor_rows[0].get("company_name") if vendor_rows else None
+
     errors = validate_for_submit(
         submission=sub,
         line_items=line_items,
         template_items=template_items,
         is_lump_sum_template=bool(template_meta["is_lump_sum"]),
         package_has_desired_date=package_has_desired_date,
+        vendor_company_name=vendor_company_name,
     )
     if errors:
         raise HTTPException(
