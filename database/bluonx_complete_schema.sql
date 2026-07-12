@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  2.39
--- Date:     July 06, 2026
+-- Version:  3.0
+-- Date:     July 12, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   29
+-- Tables:   30
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -15,7 +15,7 @@
 --   3. Project & Task Management (3 tables)
 --   4. Bid Lifecycle             (11 tables)
 --   5. Award & Contract          (3 tables)
---   6. Milestone Tracking        (3 tables)
+--   6. Milestone Tracking        (4 tables)
 --   7. Communication & Audit     (3 tables)
 --
 -- CONVENTIONS:
@@ -590,10 +590,12 @@ CREATE TABLE milestones (
   name              VARCHAR(255)  NOT NULL,
   start_date        DATE          NOT NULL,
   end_date          DATE          NOT NULL,
+  baseline_end_date DATE          NOT NULL,
   actual_start_date DATE,
   actual_end_date   DATE,
   status            VARCHAR(20)   NOT NULL DEFAULT 'scheduled'
                                   CHECK (status IN ('scheduled','in_progress','delayed','unresponsive','completed','cancelled')),
+  cycle_number      INTEGER       NOT NULL DEFAULT 1,
   sort_order        INTEGER       NOT NULL DEFAULT 0,
   notes             TEXT,
   created_by        UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -604,6 +606,9 @@ CREATE TABLE milestones (
 COMMENT ON TABLE  milestones                    IS 'Work milestones for awarded tasks. Tracked via automated email check-ins. RULE: must not be created for tasks with bid_type = internal (enforced at application layer).';
 COMMENT ON COLUMN milestones.task_id            IS 'Denormalized for query perf. Enforced = contracts.task_id by trigger.';
 COMMENT ON COLUMN milestones.actual_start_date  IS 'Set when vendor confirms start. Compared with planned start_date.';
+COMMENT ON COLUMN milestones.baseline_end_date IS 'The originally committed finish. Frozen once the plan is live; a reschedule moves end_date but never this. On-time = actual_end_date <= baseline_end_date. No baseline_start_date exists: reschedule is end-only and trg_milestones_guard_dates locks start_date once live, so start_date IS the committed start.';
+COMMENT ON COLUMN milestones.cycle_number IS 'Generation counter. +1 on every reschedule. A check-in token is valid only while milestone_alerts.cycle_number = milestones.cycle_number; older cycles are stale by definition.';
+COMMENT ON COLUMN milestones.start_date IS 'The committed start. Editable only while status = scheduled and no check-in has been sent (enforced by trg_milestones_guard_dates); immutable thereafter.';
 
 
 -- Milestone responses: vendor yes/no from email links (immutable audit)
@@ -633,13 +638,52 @@ CREATE TABLE milestone_alerts (
                                                             'completion_check', 'delay_alert',
                                                             'no_response_alert', 'completion_notification')),
   recipient_type        VARCHAR(20)   NOT NULL CHECK (recipient_type IN ('vendor', 'pm')),
+  cycle_number          INTEGER,
   response_token_hash   VARCHAR(255),
   created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE  milestone_alerts             IS 'Milestone-specific email tracking. References email_log for delivery details (no duplication).';
 COMMENT ON COLUMN milestone_alerts.email_log_id IS 'FK to email_log. Delivery status lives there, milestone context lives here.';
+COMMENT ON COLUMN milestone_alerts.cycle_number IS 'Milestone cycle this check-in was sent under. The token is stale when this != milestones.cycle_number.';
+COMMENT ON COLUMN milestone_alerts.response_token_hash IS 'DEPRECATED / UNUSED. Milestone check-in tokens live in magic_link_tokens (with a milestone_alert_id discriminator), mirroring the bid-revision flow. Retained only to avoid a destructive migration.';
 
+
+-- Milestone events: append-only transition ledger (feeds the PM activity timeline)
+CREATE TABLE milestone_events (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  milestone_id  UUID        NOT NULL REFERENCES milestones(id) ON DELETE CASCADE,
+
+  from_status   VARCHAR(20),
+  to_status     VARCHAR(20) NOT NULL,
+
+  trigger_type  VARCHAR(30) NOT NULL
+                CHECK (trigger_type IN ('creation','vendor_response','pm_action','system_no_response')),
+
+  actor_user_id           UUID REFERENCES users(id)               ON DELETE SET NULL,
+  actor_vendor_contact_id UUID REFERENCES vendor_contacts(id)     ON DELETE SET NULL,
+  milestone_response_id   UUID REFERENCES milestone_responses(id) ON DELETE SET NULL,
+  milestone_alert_id      UUID REFERENCES milestone_alerts(id)    ON DELETE SET NULL,
+
+  cycle_number     INTEGER,
+  working_end_date DATE,
+  note             TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT chk_milestone_events_actor CHECK (
+       (trigger_type IN ('creation','pm_action')
+          AND actor_user_id IS NOT NULL AND actor_vendor_contact_id IS NULL)
+    OR (trigger_type = 'vendor_response'
+          AND actor_vendor_contact_id IS NOT NULL AND actor_user_id IS NULL)
+    OR (trigger_type = 'system_no_response'
+          AND actor_user_id IS NULL AND actor_vendor_contact_id IS NULL)
+  )
+);
+
+COMMENT ON TABLE  milestone_events IS 'Append-only audit ledger. One immutable row per milestone transition, written inside transition_milestone(). Feeds the unified PM activity timeline. UPDATE/DELETE blocked by trg_milestone_events_immutable.';
+COMMENT ON COLUMN milestone_events.trigger_type IS 'Also determines the actor kind, so no separate actor_type column: creation/pm_action = user, vendor_response = vendor contact, system_no_response = scheduler.';
+COMMENT ON COLUMN milestone_events.milestone_alert_id IS 'WHICH check-in this event relates to. Required even when milestone_response_id is NULL (a system_no_response event has no response row).';
+COMMENT ON COLUMN milestone_events.working_end_date IS 'The plan at event time. The only date snapshotted: reschedule is end-only, and actual dates are write-once, so the milestone row stays authoritative for those.';
 
 -- ========================================
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -815,6 +859,7 @@ CREATE INDEX idx_milestones_dates                   ON milestones (start_date, e
 CREATE INDEX idx_milestone_responses_milestone_id   ON milestone_responses (milestone_id);
 CREATE INDEX idx_milestone_alerts_milestone_id      ON milestone_alerts (milestone_id);
 CREATE INDEX idx_milestone_alerts_email_log_id      ON milestone_alerts (email_log_id);
+CREATE INDEX idx_milestone_events_milestone ON milestone_events (milestone_id, created_at DESC);
 
 -- ---- Group 7: Communication & Audit ----
 CREATE INDEX idx_email_log_type_status              ON email_log (email_type, status);
@@ -1358,6 +1403,74 @@ CREATE TRIGGER trg_on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION fn_handle_new_auth_user();
 
+  -- ────────────────────────────────────────────────────────────────────────────
+-- 6.10  MILESTONE_EVENTS IMMUTABILITY
+-- ────────────────────────────────────────────────────────────────────────────
+-- The ledger IS the audit trail. Not even a service_role bug may rewrite it.
+
+CREATE OR REPLACE FUNCTION fn_block_milestone_event_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'milestone_events is append-only (attempted % on event %)',
+    TG_OP, COALESCE(OLD.id, NEW.id)
+    USING ERRCODE = 'PT403';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_milestone_events_immutable
+  BEFORE UPDATE OR DELETE ON milestone_events
+  FOR EACH ROW EXECUTE FUNCTION fn_block_milestone_event_mutation();
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.11  MILESTONE DATE GUARD (closes the backdoor-reschedule hole)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Without this, a plain UPDATE on end_date would move the date WITHOUT bumping
+-- cycle_number and WITHOUT writing a ledger event, leaving every outstanding
+-- check-in token valid against a plan that no longer exists.
+--
+-- Live = status has left 'scheduled', OR any check-in email has been sent.
+-- transition_milestone() sets a transaction-local flag to identify itself as the
+-- legitimate writer; every other writer is blocked.
+
+CREATE OR REPLACE FUNCTION fn_guard_milestone_dates()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_is_authoritative BOOLEAN;
+  v_alerts_sent      BOOLEAN;
+BEGIN
+  IF NEW.start_date IS NOT DISTINCT FROM OLD.start_date
+     AND NEW.end_date IS NOT DISTINCT FROM OLD.end_date THEN
+    RETURN NEW;
+  END IF;
+
+  v_is_authoritative := COALESCE(
+    current_setting('bluonx.milestone_transition', TRUE) = 'on', FALSE
+  );
+  IF v_is_authoritative THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT EXISTS (SELECT 1 FROM milestone_alerts WHERE milestone_id = OLD.id)
+    INTO v_alerts_sent;
+
+  IF OLD.status <> 'scheduled' OR v_alerts_sent THEN
+    RAISE EXCEPTION
+      'Dates are locked once the milestone is live (status=%, check-ins sent=%). Use reschedule.',
+      OLD.status, v_alerts_sent
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  -- Still scheduled and never announced: a plan CORRECTION, not a slip.
+  NEW.baseline_end_date := NEW.end_date;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_milestones_guard_dates
+  BEFORE UPDATE OF start_date, end_date ON milestones
+  FOR EACH ROW EXECUTE FUNCTION fn_guard_milestone_dates();
+
 
 
 
@@ -1368,6 +1481,13 @@ CREATE TRIGGER trg_on_auth_user_created
 -- backend through db.rpc(). Each runs in a single implicit transaction, which
 -- is how the app gets multi-statement atomicity that PostgREST otherwise can't
 -- express (one statement per HTTP request).
+-- ----------------------------------------------------------------------------
+
+-- PRIVILEGE RULE (Supabase): GRANT alone is NOT sufficient. Supabase's default
+-- privileges already grant EXECUTE on public functions to anon and authenticated,
+-- so every write RPC needs BOTH:
+--   REVOKE ALL   ON FUNCTION <fn>(<args>) FROM PUBLIC, anon, authenticated;
+--   GRANT EXECUTE ON FUNCTION <fn>(<args>) TO service_role;
 -- ----------------------------------------------------------------------------
 
 -- 7.1  fn_create_award — atomic award write (Task 9.2 / fix #1)
@@ -1418,10 +1538,13 @@ $$ LANGUAGE plpgsql;
 
 -- Writes go through the service_role key (FastAPI write path); not exposed to
 -- the authenticated role, which only ever reads.
+REVOKE ALL ON FUNCTION fn_create_award(
+  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB
+) FROM PUBLIC, anon, authenticated;
+
 GRANT EXECUTE ON FUNCTION fn_create_award(
   UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB
 ) TO service_role;
-
 
 -- 7.2  fn_create_bid_package_with_invitations — atomic bid-package write
 -- ----------------------------------------------------------------------------
@@ -1523,20 +1646,217 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+REVOKE ALL ON FUNCTION fn_create_bid_package_with_invitations(
+  UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID, UUID[], JSONB
+) FROM PUBLIC, anon, authenticated;
+
 GRANT EXECUTE ON FUNCTION fn_create_bid_package_with_invitations(
   UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID, UUID[], JSONB
 ) TO service_role;
 
 
 
+-- ----------------------------------------------------------------------------
+-- 7.3 fn_create_milestone() — atomic create + creation event
+-- ----------------------------------------------------------------------------
+-- Freezes the baseline and writes the opening ledger entry in one transaction,
+-- so a milestone can never exist without its creation event.
+-- Contract resolution and date validation run in Python BEFORE this call; this
+-- function is the write only. The existing fn_enforce_milestone_task_consistency
+-- trigger still fires inside this transaction and backstops task_id/contract_id.
+
+CREATE OR REPLACE FUNCTION fn_create_milestone(
+  p_task_id     UUID,
+  p_contract_id UUID,
+  p_name        TEXT,
+  p_start_date  DATE,
+  p_end_date    DATE,
+  p_notes       TEXT,
+  p_sort_order  INTEGER,
+  p_created_by  UUID
+)
+RETURNS SETOF milestones AS $$
+DECLARE
+  v_milestone milestones;
+BEGIN
+  INSERT INTO milestones (
+    task_id, contract_id, name,
+    start_date, end_date, baseline_end_date,
+    status, cycle_number, sort_order, notes, created_by
+  ) VALUES (
+    p_task_id, p_contract_id, p_name,
+    p_start_date, p_end_date,
+    p_end_date,                        -- baseline frozen = the original committed finish
+    'scheduled', 1, COALESCE(p_sort_order, 0), p_notes, p_created_by
+  )
+  RETURNING * INTO v_milestone;
+
+  INSERT INTO milestone_events (
+    milestone_id, from_status, to_status, trigger_type,
+    actor_user_id, cycle_number, working_end_date, note
+  ) VALUES (
+    v_milestone.id, NULL, 'scheduled', 'creation',
+    p_created_by, 1, p_end_date, 'Milestone created'
+  );
+
+  RETURN NEXT v_milestone;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL   ON FUNCTION fn_create_milestone(UUID, UUID, TEXT, DATE, DATE, TEXT, INTEGER, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_create_milestone(UUID, UUID, TEXT, DATE, DATE, TEXT, INTEGER, UUID) TO service_role;
+
+
+-- ----------------------------------------------------------------------------
+-- 7.4 transition_milestone() — THE single authoritative writer
+-- ----------------------------------------------------------------------------
+-- Every status change, from any actor (PM dashboard, vendor click handler,
+-- daily scheduler), goes through here. Nothing else writes milestones.status.
+--
+--   1. FOR UPDATE row lock  -> concurrent clicks / job races serialize.
+--                              First writer wins; the second re-reads the
+--                              already-changed status, and its transition is
+--                              no longer legal.
+--   2. Legality check       -> any pair outside the transition table raises
+--                              PT409. Callers decide what that means:
+--                                PM action    -> 409 Conflict (a dead button is bad UX)
+--                                vendor click -> resolve to the "already recorded" page
+--                                scheduler    -> log and skip
+--   3. Apply status, actual dates, and on reschedule the new end date + a cycle
+--      bump, which staleness-kills every outstanding token at a stroke.
+--   4. Write exactly ONE immutable milestone_events row.
+--
+-- PostgREST convention: SQLSTATE 'PT<nnn>' sets the HTTP status directly, so
+-- PT404/PT409/PT422 surface as real 404/409/422 rather than opaque 500s.
+
+CREATE OR REPLACE FUNCTION transition_milestone(
+  p_milestone_id            UUID,
+  p_target_status           TEXT,
+  p_trigger_type            TEXT,             -- vendor_response | pm_action | system_no_response
+  p_actor_user_id           UUID    DEFAULT NULL,   -- set for pm_action
+  p_actor_vendor_contact_id UUID    DEFAULT NULL,   -- set for vendor_response
+  p_milestone_response_id   UUID    DEFAULT NULL,
+  p_milestone_alert_id      UUID    DEFAULT NULL,
+  p_actual_start_date       DATE    DEFAULT NULL,
+  p_actual_end_date         DATE    DEFAULT NULL,
+  p_new_end_date            DATE    DEFAULT NULL,   -- present = this is a reschedule
+  p_note                    TEXT    DEFAULT NULL
+)
+RETURNS SETOF milestones AS $$
+DECLARE
+  v_cur        milestones;
+  v_result     milestones;
+  v_allowed    BOOLEAN := FALSE;
+  v_is_resched BOOLEAN := (p_new_end_date IS NOT NULL);
+  v_new_cycle  INTEGER;
+  v_eff_start  DATE;
+BEGIN
+  -- 1. Lock the row. Everything below is serialized per milestone.
+  SELECT * INTO v_cur
+    FROM milestones
+   WHERE id = p_milestone_id
+     FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone % not found', p_milestone_id
+      USING ERRCODE = 'PT404';
+  END IF;
+
+  -- 2. Legality: the transition table, verbatim.
+  --    completed and cancelled are terminal: nothing transitions out of them.
+  v_allowed := CASE
+    WHEN v_cur.status = 'scheduled'
+         AND p_target_status IN ('in_progress','delayed','unresponsive','cancelled')             THEN TRUE
+    WHEN v_cur.status = 'in_progress'
+         AND p_target_status IN ('in_progress','delayed','unresponsive','completed','cancelled') THEN TRUE
+    WHEN v_cur.status = 'delayed'
+         AND p_target_status IN ('in_progress','completed','cancelled')                          THEN TRUE
+    WHEN v_cur.status = 'unresponsive'
+         AND p_target_status IN ('in_progress','delayed','completed','cancelled')                THEN TRUE
+    ELSE FALSE
+  END;
+
+  IF NOT v_allowed THEN
+    RAISE EXCEPTION 'Illegal milestone transition: % -> % (milestone %)',
+      v_cur.status, p_target_status, p_milestone_id
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  -- Reschedule guards: only an active/paused milestone can be replanned, and
+  -- the new end must not precede the working start.
+  IF v_is_resched THEN
+    IF v_cur.status NOT IN ('in_progress','delayed','unresponsive') THEN
+      RAISE EXCEPTION 'Cannot reschedule a milestone in status %', v_cur.status
+        USING ERRCODE = 'PT409';
+    END IF;
+    IF p_new_end_date < v_cur.start_date THEN
+      RAISE EXCEPTION 'New end date (%) precedes start date (%)',
+        p_new_end_date, v_cur.start_date
+        USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+
+  -- Completion guard: cannot finish before you started.
+  v_eff_start := COALESCE(p_actual_start_date, v_cur.actual_start_date);
+  IF p_actual_end_date IS NOT NULL
+     AND v_eff_start IS NOT NULL
+     AND p_actual_end_date < v_eff_start THEN
+    RAISE EXCEPTION 'actual_end_date (%) precedes actual_start_date (%)',
+      p_actual_end_date, v_eff_start
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  -- 3. Apply. A reschedule bumps the cycle, instantly invalidating every
+  --    outstanding check-in token for this milestone.
+  v_new_cycle := v_cur.cycle_number + (CASE WHEN v_is_resched THEN 1 ELSE 0 END);
+
+  -- Identify this transaction as the authoritative date writer, so
+  -- trg_milestones_guard_dates permits the end_date move. Transaction-local:
+  -- it does not leak to any other statement or session.
+  PERFORM set_config('bluonx.milestone_transition', 'on', TRUE);
+
+  UPDATE milestones
+     SET status            = p_target_status,
+         cycle_number      = v_new_cycle,
+         end_date          = COALESCE(p_new_end_date,      end_date),
+         actual_start_date = COALESCE(p_actual_start_date, actual_start_date),
+         actual_end_date   = COALESCE(p_actual_end_date,   actual_end_date)
+   WHERE id = p_milestone_id
+   RETURNING * INTO v_result;
+  -- (trg_milestones_updated_at bumps updated_at automatically)
+  -- NOTE: baseline_end_date is deliberately untouched. A reschedule moves the
+  -- working plan; the original commitment stands, and that gap IS the drift.
+
+  PERFORM set_config('bluonx.milestone_transition', 'off', TRUE);
+
+  -- 4. One immutable ledger row. actor_type is implied by trigger_type, and the
+  --    actual dates are write-once (so the milestone row stays authoritative).
+  INSERT INTO milestone_events (
+    milestone_id, from_status, to_status, trigger_type,
+    actor_user_id, actor_vendor_contact_id,
+    milestone_response_id, milestone_alert_id,
+    cycle_number, working_end_date, note
+  ) VALUES (
+    p_milestone_id, v_cur.status, p_target_status, p_trigger_type,
+    p_actor_user_id, p_actor_vendor_contact_id,
+    p_milestone_response_id, p_milestone_alert_id,
+    v_new_cycle, v_result.end_date, p_note
+  );
+
+  RETURN NEXT v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL   ON FUNCTION transition_milestone(UUID, TEXT, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
+
+
 
 -- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
--- Total tables:    29
--- Total indexes:   56 custom (52 regular + 4 partial unique) + auto PK/UNIQUE
--- Total triggers:  29 (28 active + 1 disabled onboarding sync)
--- Total functions: 16 (15 active + 1 disabled onboarding sync)
---                  (SECTION 7 RPCs: fn_create_award,
---                   fn_create_bid_package_with_invitations)
+-- Total tables:    30
+-- Total indexes:   57 custom (53 regular + 4 partial unique) + auto PK/UNIQUE
+-- Total triggers:  31 (30 active + 1 disabled onboarding sync)
+-- Total functions: 20 (15 active + 1 disabled onboarding sync)
 -- ============================================================================

@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Row Level Security (RLS) Migration
 -- ============================================================================
--- Version:  1.0
--- Date:     February 24, 2026
+-- Version:  3.0
+-- Date:     July 12, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Depends:  bluonx_complete_schema_v2_2.sql (must be applied first)
+-- Depends:  bluonx_complete_schema.sql (must be applied first)
 -- ============================================================================
 --
 -- SECURITY ARCHITECTURE:
@@ -152,6 +152,7 @@ ALTER TABLE docusign_envelopes      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_responses     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_alerts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE milestone_events ENABLE ROW LEVEL SECURITY;
 
 -- Group 7: Communication & Audit
 ALTER TABLE email_log               ENABLE ROW LEVEL SECURITY;
@@ -540,6 +541,11 @@ CREATE POLICY milestone_alerts_select_authenticated
     (SELECT private.is_active_user())
   );
 
+-- ── milestone_events ───────────────────────────────────────────────────────
+CREATE POLICY milestone_events_select_authenticated
+  ON milestone_events FOR SELECT
+  TO authenticated
+  USING ( (SELECT private.is_active_user()) );
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -650,6 +656,7 @@ REVOKE ALL ON TABLE email_log               FROM anon;
 REVOKE ALL ON TABLE vendor_flags            FROM anon;
 REVOKE ALL ON TABLE notifications           FROM anon;
 REVOKE ALL ON TABLE bid_revision_requests   FROM anon;
+REVOKE ALL ON TABLE milestone_events        FROM anon;
 
 -- Also revoke anon access to our private helper functions
 REVOKE ALL ON SCHEMA private FROM anon;
@@ -692,7 +699,7 @@ GRANT EXECUTE ON FUNCTION private.is_admin()         TO authenticated;
 -- END OF RLS MIGRATION
 -- ============================================================================
 -- Summary:
---   Tables with RLS enabled:     28 (all)
+--   Tables with RLS enabled:     30 (all)
 --   SELECT policies:             28 (one per table)
 --   WRITE policies:               8 (admin-only: users, trades
 --                                     + authenticated: vendor_documents
