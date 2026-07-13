@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
 
+    # Scheduling anchor. The single business timezone for "today" decisions
+    # (milestone actual dates now; the 10.3 daily check-in job later). Kept here
+    # so the whole system shares one clock. See app/core/time.py::business_today.
+    BUSINESS_TIMEZONE: str = "America/Chicago"
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 

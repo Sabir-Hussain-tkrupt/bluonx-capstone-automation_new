@@ -4,6 +4,7 @@ import { useBidContext } from '../../hooks/useBidContext';
 import { computeGrandTotal, computeLineTotal } from '../../hooks/useBidFormState';
 import type { BidFormState, StepIndex } from '../../types/portal';
 import { formatCurrency } from '../../utils/currency';
+import { signatureMatches } from '../../utils/attestation';
 import { ConfirmSubmitDialog } from '../ConfirmSubmitDialog';
 
 export interface Step4ReviewProps {
@@ -36,10 +37,10 @@ export function Step4Review({
     ? state.pricing.total_amount ?? 0
     : computeGrandTotal(state.pricing.line_items);
 
-  // SoW attestation is mandatory: a non-empty, all-CAPS company name.
-  // The server validator is authoritative; this is the client gate.
+  // SoW attestation is a signature: the typed name must match the vendor's
+  // company name (client gate; the server validator remains authoritative).
   const attestation = (state.companyInfo.sow_attested_name ?? '').trim();
-  const attestationValid = attestation.length > 0 && attestation === attestation.toUpperCase();
+  const attestationValid = signatureMatches(attestation, vendor.company_name);
 
   const canSubmit = grandTotal > 0 && attestationValid && !disabled;
 
@@ -227,9 +228,9 @@ export function Step4Review({
           Go back to the Pricing step and enter valid amounts before submitting.
         </Alert>
       ) : !attestationValid ? (
-        <Alert variant="warning" title="Scope of Work attestation required">
-          Go back to step 1 and type your company name in capital letters to attest to the
-          Scope of Work before submitting.
+        <Alert variant="warning" title="Scope of Work signature required">
+          Go back to step 1 and sign by typing your company name exactly as it appears on
+          file ({vendor.company_name}) to attest to the Scope of Work before submitting.
         </Alert>
       ) : null}
 

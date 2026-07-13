@@ -45,25 +45,31 @@ function renderReview(sow_attested_name: string) {
   );
 }
 
-describe('Step4Review — SoW attestation gate', () => {
-  it('disables submit when attestation is empty', () => {
+// The mocked vendor company name is "Summit".
+describe('Step4Review — SoW signature gate', () => {
+  it('disables submit when the signature is empty', () => {
     renderReview('');
     expect(screen.getByRole('button', { name: 'Submit Bid' })).toBeDisabled();
   });
 
-  it('disables submit when attestation is not all-caps', () => {
-    renderReview('Summit Grading');
+  it('disables submit when the signature does not match the company name', () => {
+    renderReview('SUMMIT GRADING');
     expect(screen.getByRole('button', { name: 'Submit Bid' })).toBeDisabled();
   });
 
-  it('enables submit when a valid CAPS attestation is present', () => {
-    renderReview('SUMMIT GRADING');
+  it('enables submit when the signature matches (case-insensitive)', () => {
+    renderReview('summit');
     expect(screen.getByRole('button', { name: 'Submit Bid' })).toBeEnabled();
   });
 
-  it('renders the attestation as a read-back line', () => {
-    renderReview('SUMMIT GRADING');
+  it('tolerates surrounding / repeated whitespace', () => {
+    renderReview('  SUMMIT  ');
+    expect(screen.getByRole('button', { name: 'Submit Bid' })).toBeEnabled();
+  });
+
+  it('renders the signature as a read-back line', () => {
+    renderReview('SUMMIT');
     expect(screen.getByText('Scope of Work attestation')).toBeInTheDocument();
-    expect(screen.getByText('SUMMIT GRADING')).toBeInTheDocument();
+    expect(screen.getByText('SUMMIT')).toBeInTheDocument();
   });
 });

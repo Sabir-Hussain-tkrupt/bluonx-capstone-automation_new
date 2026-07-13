@@ -14,6 +14,8 @@ import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
 import { TaskForm } from '@/features/tasks/components/TaskForm';
 import { useBidPackagesForTask } from '@/features/bids/hooks/useBidPackagesForTask';
 import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
+import { useTaskActiveContract } from '@/features/milestones/hooks/useTaskActiveContract';
+import { MilestonesCard } from '@/features/milestones/components/MilestonesCard';
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -60,6 +62,7 @@ export function TaskDetailPage() {
   const isArchived = !!project?.archived_at;
 
   const { data: bidPackages = [], isLoading: bidPackagesLoading } = useBidPackagesForTask(taskId!);
+  const { data: activeContract } = useTaskActiveContract(taskId!);
 
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -207,6 +210,9 @@ export function TaskDetailPage() {
           </div>
         </Card>
       )}
+
+      {/* Milestones Section — only once the task has an active contract */}
+      {activeContract && <MilestonesCard taskId={taskId!} projectId={projectId!} />}
 
       {/* Edit Task Modal */}
       <TaskForm

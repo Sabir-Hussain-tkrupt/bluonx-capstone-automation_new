@@ -8,7 +8,9 @@ never on the request body — so tampered drafts can't slip past.
 
 Rules enforced (per Task 5.4 spec):
   1. vendor_notes length ≤ 2000
-  1c. sow_attested_name present and all-CAPS (unconditional SoW attestation)
+  1c. sow_attested_name present and (given the company name) matches it — the
+      vendor "signs" by typing their company name. Normalized: trim + collapse
+      whitespace, case-insensitive. Mirrors the frontend gate; authoritative here.
   2. total_amount > 0
   3. Structured template: len(line_items) == len(template_items)
   4. Per line, required pricing fields are present and ≥ 0 (or > 0 for qty)
@@ -36,18 +38,33 @@ def _as_decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _normalize_signature(value: str | None) -> str:
+    """trim → collapse internal whitespace → uppercase.
+
+    Must stay byte-for-byte equivalent to the frontend `normalizeSignature`
+    (features/vendor-portal/utils/attestation.ts) so the two gates never
+    disagree on what counts as a valid signature.
+    """
+    return " ".join((value or "").split()).upper()
+
+
 def validate_for_submit(
     submission: dict,
     line_items: list[dict],
     template_items: list[dict],
     is_lump_sum_template: bool,
     package_has_desired_date: bool = False,
+    vendor_company_name: str | None = None,
 ) -> list[FieldError]:
     """Return an empty list if the submission is valid, else field-level errors.
 
     `package_has_desired_date` toggles the timeline rule (Task 8.1.5):
     when the package has a desired start date, the submission MUST carry
     a proposed_start_date; otherwise the field is informational.
+
+    `vendor_company_name` is the name on file; when provided, the SoW
+    signature must match it (normalized). The router always passes it, so the
+    match is authoritative in production.
     """
     errors: list[FieldError] = []
 
@@ -72,22 +89,24 @@ def validate_for_submit(
                 )
             )
 
-    # 1c. Scope of Work attestation — UNCONDITIONALLY required at submit.
-    # Every package carries a SoW, so the vendor must type their company name
-    # in CAPS to attest. No "if package has SoW" branch.
+    # 1c. Scope of Work signature — UNCONDITIONALLY required at submit. Every
+    # package carries a SoW, so the vendor signs by typing their company name.
+    # When we know the name on file, the signature must match it (normalized).
     attest = (submission.get("sow_attested_name") or "").strip()
     if not attest:
         errors.append(
             FieldError(
                 field="sow_attested_name",
-                message="You must type your company name to attest to the Scope of Work",
+                message="You must sign by typing your company name to attest to the Scope of Work",
             )
         )
-    elif attest != attest.upper():
+    elif vendor_company_name and _normalize_signature(attest) != _normalize_signature(
+        vendor_company_name
+    ):
         errors.append(
             FieldError(
                 field="sow_attested_name",
-                message="Please type your company name in capital letters",
+                message="Your signature must match your company name",
             )
         )
 

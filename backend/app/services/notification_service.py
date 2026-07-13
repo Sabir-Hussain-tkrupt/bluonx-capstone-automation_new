@@ -28,6 +28,10 @@ NOTIFICATION_TYPES: frozenset[str] = frozenset({
     "insurance_expired",
     "post_deadline_non_responders",
     "scheduler_alert",
+    # Phase 10.4: milestone tracking
+    "milestone_delayed",
+    "milestone_unresponsive",
+    "milestone_completed",
 })
 
 
@@ -120,6 +124,7 @@ def build_notification_deep_link(notification: dict, db) -> str | None:
     Switches on reference_type:
       - 'vendors'      → /vendors/{vendor_id}
       - 'bid_packages' → /projects/{project_id}/tasks/{task_id}/bid-packages/{id}
+      - 'milestones'   → /projects/{project_id}/tasks/{task_id}/milestones/{id}
       - anything else  → None
     """
     ref_type = notification.get("reference_type")
@@ -129,6 +134,29 @@ def build_notification_deep_link(notification: dict, db) -> str | None:
 
     if ref_type == "vendors":
         return f"/vendors/{ref_id}"
+
+    if ref_type == "milestones":
+        try:
+            resp = (
+                db.table("milestones")
+                .select("id, task_id, tasks(project_id)")
+                .eq("id", str(ref_id))
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            logger.exception("Failed to resolve milestone deep link for %s", ref_id)
+            return None
+        rows = resp.data or []
+        if not rows:
+            return None
+        milestone = rows[0]
+        task = milestone.get("tasks") or {}
+        project_id = task.get("project_id")
+        task_id = milestone.get("task_id")
+        if not project_id or not task_id:
+            return None
+        return f"/projects/{project_id}/tasks/{task_id}/milestones/{ref_id}"
 
     if ref_type == "bid_packages":
         try:

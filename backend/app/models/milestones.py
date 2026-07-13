@@ -9,35 +9,49 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
+from pydantic import Field
+
 from app.models.common import BluOnXBase
 
 
 # ── milestones ───────────────────────────────────────────────────────────
 
+# Migrated 6-status set (see database/bluonx_complete_schema.sql milestones CHECK).
 MILESTONE_STATUSES = Literal[
-    "scheduled", "started", "on_track", "delayed", "completed",
+    "scheduled", "in_progress", "delayed", "unresponsive", "completed", "cancelled",
 ]
 
 
 class MilestoneCreate(BluOnXBase):
-    task_id: UUID  # denormalized, validated by DB trigger
-    contract_id: UUID
-    name: str
+    task_id: UUID  # contract_id is resolved server-side from the task's active contract
+    name: str = Field(min_length=1, max_length=255)
     start_date: date
     end_date: date
-    sort_order: int = 0
     notes: str | None = None
 
 
 class MilestoneUpdate(BluOnXBase):
-    name: str | None = None
+    # status is NOT settable here — status changes only via the action endpoints.
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     start_date: date | None = None
     end_date: date | None = None
-    actual_start_date: date | None = None
-    actual_end_date: date | None = None
-    status: MILESTONE_STATUSES | None = None
-    sort_order: int | None = None
     notes: str | None = None
+    sort_order: int | None = None
+
+
+# ── milestone action bodies ──────────────────────────────────────────────
+
+
+class MilestoneMarkStarted(BluOnXBase):
+    actual_start_date: date | None = None
+
+
+class MilestoneMarkCompleted(BluOnXBase):
+    actual_end_date: date | None = None
+
+
+class MilestoneReschedule(BluOnXBase):
+    end_date: date
 
 
 class MilestoneResponse(BluOnXBase):

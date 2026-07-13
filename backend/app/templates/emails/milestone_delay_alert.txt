@@ -1,0 +1,36 @@
+BluOnX Development LLC
+================================================================
+
+Dear {{ recipient_full_name }},
+
+The vendor reported a delay on {{ milestone_name }} for
+{{ project_name }} - {{ task_name }}.
+
+** Automated check-ins for this milestone are PAUSED until you act.
+   Reschedule the end date to restart them, or mark the milestone
+   complete. **
+
+MILESTONE
+----------------------------------------------------------------
+Project:         {{ project_name }}
+Scope:           {{ task_name }}
+Milestone:       {{ milestone_name }}
+{% if end_date_formatted %}Current Finish:  {{ end_date_formatted }}
+{% endif %}
+
+VENDOR CONTACT
+----------------------------------------------------------------
+Company:  {{ vendor_company_name }}
+Contact:  {{ vendor_contact_name }}
+Email:    {{ vendor_contact_email }}
+{% if vendor_contact_phone %}Phone:    {{ vendor_contact_phone }}
+{% endif %}
+
+OPEN MILESTONE
+----------------------------------------------------------------
+{{ milestone_url }}
+
+--
+BluOnX Development LLC
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

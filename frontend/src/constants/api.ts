@@ -77,6 +77,10 @@ export const API_ENDPOINTS = {
   // Milestones
   MILESTONES: '/milestones',
   MILESTONE: (id: string) => `/milestones/${id}`,
+  MILESTONE_MARK_STARTED: (id: string) => `/milestones/${id}/mark-started`,
+  MILESTONE_MARK_COMPLETED: (id: string) => `/milestones/${id}/mark-completed`,
+  MILESTONE_RESCHEDULE: (id: string) => `/milestones/${id}/reschedule`,
+  MILESTONE_CANCEL: (id: string) => `/milestones/${id}/cancel`,
 
   // Notifications
   NOTIFICATIONS: '/notifications',
