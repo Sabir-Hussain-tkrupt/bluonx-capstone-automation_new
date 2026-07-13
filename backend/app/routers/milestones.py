@@ -102,7 +102,10 @@ async def mark_milestone_started(
     """Manual start override → in_progress."""
     try:
         return milestone_service.mark_started(
-            str(milestone_id), actual_start_date=body.actual_start_date, db=db
+            str(milestone_id),
+            actor_user_id=user["user_id"],
+            actual_start_date=body.actual_start_date,
+            db=db,
         )
     except MilestoneError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -118,7 +121,10 @@ async def mark_milestone_completed(
     """Manual completion override → completed."""
     try:
         return milestone_service.mark_completed(
-            str(milestone_id), actual_end_date=body.actual_end_date, db=db
+            str(milestone_id),
+            actor_user_id=user["user_id"],
+            actual_end_date=body.actual_end_date,
+            db=db,
         )
     except MilestoneError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -133,6 +139,27 @@ async def reschedule_milestone(
 ):
     """Push out the planned end date and return the milestone to in_progress."""
     try:
-        return milestone_service.reschedule(str(milestone_id), end_date=body.end_date, db=db)
+        return milestone_service.reschedule(
+            str(milestone_id),
+            actor_user_id=user["user_id"],
+            end_date=body.end_date,
+            db=db,
+        )
+    except MilestoneError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/milestones/{milestone_id}/cancel", response_model=MilestoneResponse)
+async def cancel_milestone(
+    milestone_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Cancel a milestone → cancelled. The correct way to retire a milestone that
+    has activity (delete is blocked once history exists)."""
+    try:
+        return milestone_service.cancel_milestone(
+            str(milestone_id), actor_user_id=user["user_id"], db=db
+        )
     except MilestoneError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

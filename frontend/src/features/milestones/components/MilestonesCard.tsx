@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useMilestonesForTask } from '@/features/milestones/hooks/useMilestonesForTask';
 import { useCreateMilestone } from '@/features/milestones/hooks/useCreateMilestone';
 import { formatMilestoneDate } from '@/features/milestones/utils/formatDate';
 import { MilestoneFormModal, type MilestoneFormValues } from './MilestoneFormModal';
+import { MilestoneStatusBadge } from './MilestoneStatusBadge';
 
 interface MilestonesCardProps {
   taskId: string;
@@ -80,7 +80,7 @@ export function MilestonesCard({ taskId, projectId }: MilestonesCardProps) {
                       {formatMilestoneDate(m.start_date)} &ndash; {formatMilestoneDate(m.end_date)}
                     </p>
                   </div>
-                  <StatusBadge status={m.status} size="sm" />
+                  <MilestoneStatusBadge status={m.status} size="sm" />
                 </button>
               </li>
             ))}

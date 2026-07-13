@@ -163,6 +163,7 @@ export const queryKeys = {
         : queryKeys.milestones.lists(),
     details: () => [...queryKeys.milestones.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.milestones.details(), id] as const,
+    events: (id: string) => [...queryKeys.milestones.detail(id), 'events'] as const,
   },
 
   nearbyVendors: {

@@ -31,6 +31,9 @@ interface MilestoneFormModalProps {
   milestone?: Milestone;
   onSubmit: (data: MilestoneFormValues) => void;
   isLoading?: boolean;
+  /** When true, the start/end date inputs are disabled — a live milestone's dates
+   *  can only move via Reschedule (matches the API's date-lock rule). */
+  datesLocked?: boolean;
 }
 
 export function MilestoneFormModal({
@@ -39,6 +42,7 @@ export function MilestoneFormModal({
   milestone,
   onSubmit,
   isLoading = false,
+  datesLocked = false,
 }: MilestoneFormModalProps) {
   const isEdit = !!milestone;
 
@@ -105,12 +109,27 @@ export function MilestoneFormModal({
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Start Date" required error={errors.start_date?.message}>
-            <TextInput type="date" {...register('start_date')} error={errors.start_date?.message} />
+            <TextInput
+              type="date"
+              {...register('start_date')}
+              error={errors.start_date?.message}
+              disabled={datesLocked}
+            />
           </FormField>
           <FormField label="End Date" required error={errors.end_date?.message}>
-            <TextInput type="date" {...register('end_date')} error={errors.end_date?.message} />
+            <TextInput
+              type="date"
+              {...register('end_date')}
+              error={errors.end_date?.message}
+              disabled={datesLocked}
+            />
           </FormField>
         </div>
+        {datesLocked && (
+          <p className="-mt-2 text-xs text-secondary-500">
+            Dates are locked once the milestone is live. Use Reschedule to move the end date.
+          </p>
+        )}
 
         <FormField label="Notes" error={errors.notes?.message}>
           <textarea

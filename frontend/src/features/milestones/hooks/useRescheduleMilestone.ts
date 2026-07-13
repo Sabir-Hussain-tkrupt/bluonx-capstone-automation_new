@@ -15,6 +15,7 @@ export function useRescheduleMilestone() {
     onSuccess: (milestone) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.milestones.lists() });
       queryClient.invalidateQueries({ queryKey: queryKeys.milestones.detail(milestone.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.milestones.events(milestone.id) });
     },
   });
 }

@@ -18,14 +18,39 @@ export interface Milestone {
   name: string;
   start_date: string;
   end_date: string;
+  /** The originally committed finish. A reschedule moves end_date but never this;
+   *  the gap between end_date and baseline_end_date IS the drift. */
+  baseline_end_date: string;
   actual_start_date: string | null;
   actual_end_date: string | null;
   status: MilestoneStatus;
+  /** Generation counter, +1 on every reschedule (staleness-kills check-in tokens). */
+  cycle_number: number;
   sort_order: number;
   notes: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+/** One immutable row from the append-only milestone_events ledger. actor kind is
+ *  implied by trigger_type (there is no actor_type column). Actual dates are NOT
+ *  on the event — the milestone row stays authoritative for them; the note carries
+ *  a human-readable snapshot instead. */
+export interface MilestoneEvent {
+  id: string;
+  milestone_id: string;
+  from_status: MilestoneStatus | null;
+  to_status: MilestoneStatus;
+  trigger_type: 'creation' | 'vendor_response' | 'pm_action' | 'system_no_response';
+  cycle_number: number | null;
+  working_end_date: string | null;
+  note: string | null;
+  created_at: string;
+  /** Joined actor (PM/admin) for pm_action / creation events. */
+  actor: { full_name: string } | null;
+  /** Joined actor (vendor contact) for vendor_response events. */
+  actor_vendor: { full_name: string } | null;
 }
 
 export interface MilestoneResponseRecord {
@@ -85,6 +110,23 @@ export async function fetchMilestone(id: string): Promise<MilestoneWithResponses
     throw apiError;
   }
   return data as unknown as MilestoneWithResponses;
+}
+
+// The unified PM activity timeline. Reads the append-only ledger directly under
+// RLS (milestone_events grants SELECT to any active authenticated user), newest
+// first. Two actor FKs point at the same-named tables, so each is disambiguated
+// by its FK column (alias:fk_column form).
+export async function fetchMilestoneEvents(milestoneId: string): Promise<MilestoneEvent[]> {
+  const { data, error } = await supabase
+    .from('milestone_events')
+    .select(
+      '*, actor:actor_user_id(full_name), actor_vendor:actor_vendor_contact_id(full_name)',
+    )
+    .eq('milestone_id', milestoneId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw toApiError(error);
+  return (data ?? []) as unknown as MilestoneEvent[];
 }
 
 // NOTE: lenient contract gate — a task is "contracted" once any non-terminated

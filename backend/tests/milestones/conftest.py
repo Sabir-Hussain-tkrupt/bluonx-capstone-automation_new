@@ -42,9 +42,11 @@ def milestone_row(**overrides) -> dict:
         "name": "Foundation Pour",
         "start_date": "2026-08-01",
         "end_date": "2026-08-15",
+        "baseline_end_date": "2026-08-15",
         "actual_start_date": None,
         "actual_end_date": None,
         "status": "scheduled",
+        "cycle_number": 1,
         "sort_order": 0,
         "notes": None,
         "created_by": str(PM_USER_ID),
@@ -122,6 +124,29 @@ class _Query:
         )
 
 
+class _RpcQuery:
+    """Chainable recorder for db.rpc(name, params).execute()."""
+
+    def __init__(self, name: str, params: dict, db: "FakeDB"):
+        self._name = name
+        self._params = params or {}
+        self._db = db
+
+    def execute(self):
+        return self._db._dispatch_rpc(self._name, self._params)
+
+
+# The RPC transition table, mirrored from transition_milestone() so the mocked
+# endpoint tests reproduce the DB's legality decisions. The real table (cycle
+# bump, ledger row, baseline handling) is asserted in the integration suite.
+_RPC_TRANSITIONS: dict[str, tuple[set[str], str]] = {
+    "pm_mark_started": ({"scheduled"}, "in_progress"),
+    "pm_mark_completed": ({"scheduled", "in_progress", "delayed", "unresponsive"}, "completed"),
+    "pm_reschedule": ({"in_progress", "delayed", "unresponsive"}, "in_progress"),
+    "pm_cancel": ({"scheduled", "in_progress", "delayed", "unresponsive"}, "cancelled"),
+}
+
+
 class FakeDB:
     def __init__(
         self,
@@ -132,6 +157,9 @@ class FakeDB:
         milestone_missing: bool = False,
         delete_fk_violation: bool = False,
         insert_error: APIError | None = None,
+        has_alerts: bool = False,
+        has_responses: bool = False,
+        rpc_error: APIError | None = None,
     ):
         self.contract_row = contract_row
         self.existing_orders = existing_orders or []
@@ -139,17 +167,30 @@ class FakeDB:
         self.milestone_missing = milestone_missing
         self.delete_fk_violation = delete_fk_violation
         self.insert_error = insert_error
+        self.has_alerts = has_alerts
+        self.has_responses = has_responses
+        self.rpc_error = rpc_error
         self.last_insert: dict | None = None
         self.last_update: dict | None = None
+        self.last_rpc: dict | None = None
         self.deleted = False
 
     def table(self, name: str) -> _Query:
         return _Query(name, self)
 
+    def rpc(self, name: str, params: dict | None = None) -> _RpcQuery:
+        return _RpcQuery(name, params or {}, self)
+
     def _dispatch(self, table, op, select, single, payload):
         if table == "contracts":
             data = [self.contract_row] if self.contract_row else []
             return _Result(data)
+
+        if table in ("milestone_alerts", "milestone_responses"):
+            if op == "select":
+                present = self.has_alerts if table == "milestone_alerts" else self.has_responses
+                return _Result([{"id": str(uuid4())}] if present else [])
+            return _Result([])
 
         if table == "milestones":
             if op == "select":
@@ -181,6 +222,74 @@ class FakeDB:
                 return _Result([])
 
         return _Result([])
+
+    # ── RPC dispatch ─────────────────────────────────────────────────────────
+
+    def _dispatch_rpc(self, name, params):
+        if name == "fn_create_milestone":
+            return self._rpc_create(params)
+        if name == "transition_milestone":
+            return self._rpc_transition(params)
+        return _Result([])
+
+    def _rpc_create(self, params):
+        if self.insert_error is not None:
+            raise self.insert_error
+        self.last_rpc = {"name": "fn_create_milestone", "params": dict(params)}
+        row = milestone_row(
+            task_id=params["p_task_id"],
+            contract_id=params["p_contract_id"],
+            name=params["p_name"],
+            start_date=params["p_start_date"],
+            end_date=params["p_end_date"],
+            baseline_end_date=params["p_end_date"],
+            notes=params["p_notes"],
+            sort_order=params["p_sort_order"],
+            status="scheduled",
+            cycle_number=1,
+            created_by=params["p_created_by"],
+        )
+        return _Result([row])
+
+    def _rpc_transition(self, params):
+        if self.rpc_error is not None:
+            raise self.rpc_error
+        if self.milestone_missing:
+            raise APIError({"code": "PT404", "message": "Milestone not found"})
+
+        cur = self.current_milestone or milestone_row()
+        action = params["p_action"]
+        allowed, target = _RPC_TRANSITIONS[action]
+        if cur["status"] not in allowed:
+            raise APIError(
+                {
+                    "code": "PT409",
+                    "message": f'Action "{action}" not allowed in status "{cur["status"]}"',
+                }
+            )
+
+        new_end = params.get("p_new_end_date")
+        if action == "pm_reschedule":
+            if new_end is None:
+                raise APIError({"code": "PT422", "message": "p_new_end_date is required"})
+            if new_end < cur["start_date"]:
+                raise APIError({"code": "PT422", "message": "new end precedes start"})
+
+        eff_start = params.get("p_actual_start_date") or cur.get("actual_start_date")
+        a_end = params.get("p_actual_end_date")
+        if a_end is not None and eff_start is not None and a_end < eff_start:
+            raise APIError({"code": "PT422", "message": "actual end precedes actual start"})
+
+        self.last_rpc = {"name": "transition_milestone", "params": dict(params)}
+        row = {
+            **cur,
+            "status": target,
+            "cycle_number": cur.get("cycle_number", 1) + (1 if action == "pm_reschedule" else 0),
+            "end_date": new_end or cur["end_date"],
+            "actual_start_date": params.get("p_actual_start_date") or cur.get("actual_start_date"),
+            "actual_end_date": a_end or cur.get("actual_end_date"),
+        }
+        return _Result([row])
 
 
 # ── FastAPI TestClient wiring ───────────────────────────────────────────────

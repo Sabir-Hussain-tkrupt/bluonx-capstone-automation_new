@@ -2,24 +2,32 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
+import type { ApiError } from '@/lib/api';
 import { useMilestone } from '@/features/milestones/hooks/useMilestone';
 import { useUpdateMilestone } from '@/features/milestones/hooks/useUpdateMilestone';
 import { useDeleteMilestone } from '@/features/milestones/hooks/useDeleteMilestone';
 import { useMarkMilestoneStarted } from '@/features/milestones/hooks/useMarkMilestoneStarted';
 import { useMarkMilestoneCompleted } from '@/features/milestones/hooks/useMarkMilestoneCompleted';
 import { useRescheduleMilestone } from '@/features/milestones/hooks/useRescheduleMilestone';
+import { useCancelMilestone } from '@/features/milestones/hooks/useCancelMilestone';
 import { MilestoneFormModal, type MilestoneFormValues } from '../components/MilestoneFormModal';
+import { MilestoneActivityTimeline } from '../components/MilestoneActivityTimeline';
+import { MilestoneStatusBadge } from '../components/MilestoneStatusBadge';
 import { formatMilestoneDate } from '../utils/formatDate';
 
 const TERMINAL_STATUSES = new Set(['completed', 'cancelled']);
 const RESCHEDULABLE_STATUSES = new Set(['in_progress', 'delayed', 'unresponsive']);
+
+/** Local calendar date as YYYY-MM-DD, for prefilling date inputs. */
+function todayStr(): string {
+  return new Date().toLocaleDateString('en-CA');
+}
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -45,11 +53,15 @@ export function MilestoneDetailPage() {
   const startMutation = useMarkMilestoneStarted();
   const completeMutation = useMarkMilestoneCompleted();
   const rescheduleMutation = useRescheduleMilestone();
+  const cancelMutation = useCancelMilestone();
 
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
+  const [showComplete, setShowComplete] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const [rescheduleEnd, setRescheduleEnd] = useState('');
+  const [completeEnd, setCompleteEnd] = useState('');
 
   const backToTask = () => navigate(`/projects/${projectId}/tasks/${taskId}`);
 
@@ -98,7 +110,27 @@ export function MilestoneDetailPage() {
         toast({ variant: 'success', message: 'Milestone deleted.' });
         backToTask();
       },
-      onError: onError('Failed to delete milestone.'),
+      onError: (err) => {
+        const e = err as ApiError;
+        // A milestone with recorded activity can't be deleted — the backend
+        // returns 409 with a "cancel it instead" message. Point the PM at Cancel.
+        const message =
+          e?.status === 409
+            ? e.message || 'This milestone has recorded activity. Cancel it instead of deleting.'
+            : e?.message || 'Failed to delete milestone.';
+        setShowDelete(false);
+        toast({ variant: 'danger', message });
+      },
+    });
+  };
+
+  const handleCancel = () => {
+    cancelMutation.mutate(milestone.id, {
+      onSuccess: () => {
+        setShowCancel(false);
+        toast({ variant: 'success', message: 'Milestone cancelled.' });
+      },
+      onError: onError('Failed to cancel milestone.'),
     });
   };
 
@@ -112,11 +144,21 @@ export function MilestoneDetailPage() {
     );
   };
 
+  const openComplete = () => {
+    // Prefill today, but the PM can back-date when catching the system up after
+    // the fact. The backend rejects (422) an end that predates the actual start.
+    setCompleteEnd(milestone.actual_end_date ?? todayStr());
+    setShowComplete(true);
+  };
+
   const handleComplete = () => {
     completeMutation.mutate(
-      { id: milestone.id },
+      { id: milestone.id, actualEndDate: completeEnd },
       {
-        onSuccess: () => toast({ variant: 'success', message: 'Milestone marked completed.' }),
+        onSuccess: () => {
+          setShowComplete(false);
+          toast({ variant: 'success', message: 'Milestone marked completed.' });
+        },
         onError: onError('Failed to mark completed.'),
       },
     );
@@ -139,6 +181,10 @@ export function MilestoneDetailPage() {
   const canStart = milestone.status === 'scheduled';
   const canComplete = !TERMINAL_STATUSES.has(milestone.status);
   const canReschedule = RESCHEDULABLE_STATUSES.has(milestone.status);
+  const canCancel = !TERMINAL_STATUSES.has(milestone.status);
+  const datesLocked = milestone.status !== 'scheduled';
+  const endDrifted =
+    !!milestone.baseline_end_date && milestone.end_date !== milestone.baseline_end_date;
   const responses = milestone.milestone_responses ?? [];
 
   return (
@@ -165,7 +211,7 @@ export function MilestoneDetailPage() {
               {milestone.name}
             </h1>
             <div className="mt-1">
-              <StatusBadge status={milestone.status} />
+              <MilestoneStatusBadge status={milestone.status} />
             </div>
           </div>
         </div>
@@ -186,7 +232,21 @@ export function MilestoneDetailPage() {
             <h3 className="mb-3 text-sm font-semibold text-secondary-900">Timeline</h3>
             <dl className="divide-y divide-secondary-100">
               <InfoRow label="Planned Start" value={formatMilestoneDate(milestone.start_date)} />
-              <InfoRow label="Planned End" value={formatMilestoneDate(milestone.end_date)} />
+              <InfoRow
+                label="Planned End"
+                value={
+                  endDrifted ? (
+                    <span>
+                      {formatMilestoneDate(milestone.end_date)}{' '}
+                      <span className="text-warning-600">
+                        (committed: {formatMilestoneDate(milestone.baseline_end_date)})
+                      </span>
+                    </span>
+                  ) : (
+                    formatMilestoneDate(milestone.end_date)
+                  )
+                }
+              />
               <InfoRow label="Actual Start" value={formatMilestoneDate(milestone.actual_start_date)} />
               <InfoRow label="Actual End" value={formatMilestoneDate(milestone.actual_end_date)} />
             </dl>
@@ -206,7 +266,7 @@ export function MilestoneDetailPage() {
       </div>
 
       {/* Actions */}
-      {(canStart || canComplete || canReschedule) && (
+      {(canStart || canComplete || canReschedule || canCancel) && (
         <Card>
           <div className="flex flex-wrap items-center gap-2 p-6">
             {canStart && (
@@ -215,11 +275,7 @@ export function MilestoneDetailPage() {
               </Button>
             )}
             {canComplete && (
-              <Button
-                variant="success"
-                onClick={handleComplete}
-                isLoading={completeMutation.isPending}
-              >
+              <Button variant="success" onClick={openComplete}>
                 Mark Completed
               </Button>
             )}
@@ -228,9 +284,17 @@ export function MilestoneDetailPage() {
                 Reschedule
               </Button>
             )}
+            {canCancel && (
+              <Button variant="ghost" onClick={() => setShowCancel(true)}>
+                Cancel Milestone
+              </Button>
+            )}
           </div>
         </Card>
       )}
+
+      {/* Activity timeline (the unified ledger narrative) */}
+      <MilestoneActivityTimeline milestoneId={milestone.id} />
 
       {/* Response History */}
       <Card>
@@ -266,6 +330,7 @@ export function MilestoneDetailPage() {
         milestone={milestone}
         onSubmit={handleEdit}
         isLoading={updateMutation.isPending}
+        datesLocked={datesLocked}
       />
 
       {/* Reschedule modal */}
@@ -298,6 +363,65 @@ export function MilestoneDetailPage() {
         </FormField>
         <p className="mt-2 text-xs text-secondary-500">
           Rescheduling returns the milestone to In Progress.
+        </p>
+      </Modal>
+
+      {/* Mark Completed modal */}
+      <Modal
+        isOpen={showComplete}
+        onClose={() => setShowComplete(false)}
+        title="Mark Completed"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowComplete(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              onClick={handleComplete}
+              isLoading={completeMutation.isPending}
+              disabled={!completeEnd}
+            >
+              Mark Completed
+            </Button>
+          </>
+        }
+      >
+        <FormField label="Actual End Date" required>
+          <TextInput
+            type="date"
+            value={completeEnd}
+            min={milestone.actual_start_date ?? undefined}
+            onChange={(e) => setCompleteEnd(e.target.value)}
+          />
+        </FormField>
+        <p className="mt-2 text-xs text-secondary-500">
+          Defaults to today. Set the date the work actually finished if you are recording it later.
+        </p>
+      </Modal>
+
+      {/* Cancel confirmation */}
+      <Modal
+        isOpen={showCancel}
+        onClose={() => setShowCancel(false)}
+        title="Cancel Milestone"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowCancel(false)}>
+              Keep Milestone
+            </Button>
+            <Button variant="danger" onClick={handleCancel} isLoading={cancelMutation.isPending}>
+              Cancel Milestone
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-secondary-600">
+          Cancel <strong>{milestone.name}</strong>? It stays on record (with its full activity
+          history) but is retired from the schedule. This is the right choice once a milestone has
+          activity.
         </p>
       </Modal>
 

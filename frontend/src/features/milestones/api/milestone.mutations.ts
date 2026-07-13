@@ -63,3 +63,8 @@ export async function rescheduleMilestone(id: string, endDate: string): Promise<
   });
   return data;
 }
+
+export async function cancelMilestone(id: string): Promise<Milestone> {
+  const { data } = await api.post<Milestone>(API_ENDPOINTS.MILESTONE_CANCEL(id));
+  return data;
+}

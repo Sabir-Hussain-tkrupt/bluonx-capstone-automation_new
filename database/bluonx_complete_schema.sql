@@ -1883,9 +1883,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-REVOKE ALL   ON FUNCTION transition_milestone(UUID, TEXT, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
-
+REVOKE ALL ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
 
 
 -- ============================================================================
