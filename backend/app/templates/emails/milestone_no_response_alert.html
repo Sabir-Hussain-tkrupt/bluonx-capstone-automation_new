@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}No response: {{ milestone_name }} at {{ project_name }}{% endblock %}
+
+{% block preheader %}The vendor has gone quiet on {{ milestone_name }} ({{ project_name }}). Automated check-ins are paused until you act.{% endblock %}
+
+{% block content %}
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      Dear {{ recipient_full_name }},
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:20px;">
+      The vendor has not responded to the
+      {% if check_type_label %}{{ check_type_label }}{% else %}check-in{% endif %}
+      for <strong>{{ milestone_name }}</strong> on
+      <strong>{{ project_name }} - {{ task_name }}</strong>{% if days_silent %}, and has now been silent for {{ days_silent }} day{{ "s" if days_silent != 1 }}{% endif %}.
+    </td>
+  </tr>
+</table>
+
+<!-- Stall notice -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="background-color:#fff8e1; border:1px solid #ffe082; border-left:4px solid #f9a825; border-radius:6px; padding:16px 18px; font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#5f4b00; line-height:1.6;">
+      Automated check-ins for this milestone are <strong>paused until you act</strong>. Reschedule
+      the end date to restart them, or mark the milestone complete.
+    </td>
+  </tr>
+</table>
+
+<!-- Milestone Details Card -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px; padding:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:12px; border-bottom:1px solid #e0e0e0;">
+            Milestone
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Project:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">{{ project_name }}</td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Scope:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">{{ task_name }}</td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Milestone:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">{{ milestone_name }}</td>
+              </tr>
+              {% if end_date_formatted %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Current Finish:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#c62828; font-weight:bold; padding-bottom:6px; vertical-align:top;">{{ end_date_formatted }}</td>
+              </tr>
+              {% endif %}
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Vendor Contact Card -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+  <tr>
+    <td style="background-color:#f8f9fa; border:1px solid #e0e0e0; border-radius:6px; padding:20px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:bold; color:#1a73e8; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:12px; border-bottom:1px solid #e0e0e0;">
+            Vendor Contact
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Company:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding-bottom:6px; vertical-align:top;">{{ vendor_company_name }}</td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Contact:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">{{ vendor_contact_name }}</td>
+              </tr>
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Email:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">
+                  <a href="mailto:{{ vendor_contact_email }}" style="color:#1a73e8; text-decoration:none; word-break:break-all;">{{ vendor_contact_email }}</a>
+                </td>
+              </tr>
+              {% if vendor_contact_phone %}
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; padding-bottom:6px; width:120px; vertical-align:top;">Phone:</td>
+                <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; padding-bottom:6px; vertical-align:top;">{{ vendor_contact_phone }}</td>
+              </tr>
+              {% endif %}
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:8px; margin-bottom:24px;">
+  <tr>
+    <td align="center" style="padding:12px 0;">
+      <!--[if mso]>
+      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ milestone_url }}" style="height:50px; v-text-anchor:middle; width:260px;" arcsize="8%" strokecolor="#1a73e8" fillcolor="#1a73e8">
+        <w:anchorlock/>
+        <center style="color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold;">Open milestone</center>
+      </v:roundrect>
+      <![endif]-->
+      <!--[if !mso]><!-->
+      <a href="{{ milestone_url }}" target="_blank" class="cta-button" style="display:inline-block; padding:14px 40px; background-color:#1a73e8; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; text-decoration:none; border-radius:4px; text-align:center; mso-hide:all;">Open milestone</a>
+      <!--<![endif]-->
+    </td>
+  </tr>
+</table>
+
+<!-- Fallback link -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#999999; line-height:1.5; text-align:center; padding-bottom:24px;">
+      If the button above doesn't work, copy and paste this link into your browser:<br />
+      <a href="{{ milestone_url }}" target="_blank" style="color:#1a73e8; word-break:break-all;">{{ milestone_url }}</a>
+    </td>
+  </tr>
+</table>
+{% endblock %}

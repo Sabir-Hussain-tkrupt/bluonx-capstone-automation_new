@@ -1,0 +1,35 @@
+BluOnX Development LLC
+================================================================
+
+Dear {{ recipient_full_name }},
+
+The vendor has not responded to the {% if check_type_label %}{{ check_type_label }}{% else %}check-in{% endif %} for {{ milestone_name }} on {{ project_name }} - {{ task_name }}{% if days_silent %}, and has now been silent for {{ days_silent }} day{{ "s" if days_silent != 1 }}{% endif %}.
+
+** Automated check-ins for this milestone are PAUSED until you act.
+   Reschedule the end date to restart them, or mark the milestone
+   complete. **
+
+MILESTONE
+----------------------------------------------------------------
+Project:         {{ project_name }}
+Scope:           {{ task_name }}
+Milestone:       {{ milestone_name }}
+{% if end_date_formatted %}Current Finish:  {{ end_date_formatted }}
+{% endif %}
+
+VENDOR CONTACT
+----------------------------------------------------------------
+Company:  {{ vendor_company_name }}
+Contact:  {{ vendor_contact_name }}
+Email:    {{ vendor_contact_email }}
+{% if vendor_contact_phone %}Phone:    {{ vendor_contact_phone }}
+{% endif %}
+
+OPEN MILESTONE
+----------------------------------------------------------------
+{{ milestone_url }}
+
+--
+BluOnX Development LLC
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

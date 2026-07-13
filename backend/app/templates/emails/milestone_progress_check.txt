@@ -1,0 +1,29 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+Hi {{ vendor_contact_name }},
+
+Just a quick progress check on your work for {{ project_name }} - {{ task_name }}.
+
+{% if end_date_formatted %}ARE YOU STILL ON TRACK TO FINISH {{ milestone_name }} BY {{ end_date_formatted }}?{% else %}ARE YOU STILL ON TRACK TO FINISH {{ milestone_name }} ON TIME?{% endif %}
+
+MILESTONE DETAILS
+----------------------------------------------------------------
+Project:         {{ project_name }}
+Scope:           {{ task_name }}
+Milestone:       {{ milestone_name }}
+{% if start_date_formatted %}Planned Start:   {{ start_date_formatted }}
+{% endif %}{% if end_date_formatted %}Planned Finish:  {{ end_date_formatted }}
+{% endif %}
+
+OPEN CHECK-IN
+----------------------------------------------------------------
+Tap the link below to answer. It only takes a moment, and no login
+or password is needed:
+
+{{ portal_url }}
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+This email was sent as part of the bid management process.
+Please do not reply directly to this email.

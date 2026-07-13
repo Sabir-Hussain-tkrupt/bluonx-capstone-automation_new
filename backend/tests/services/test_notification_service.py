@@ -359,4 +359,8 @@ def test_controlled_vocabulary_matches_spec():
         "insurance_expired",
         "post_deadline_non_responders",
         "scheduler_alert",
+        # Phase 10.4: milestone tracking
+        "milestone_delayed",
+        "milestone_unresponsive",
+        "milestone_completed",
     })
