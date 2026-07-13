@@ -1731,113 +1731,149 @@ GRANT EXECUTE ON FUNCTION fn_create_milestone(UUID, UUID, TEXT, DATE, DATE, TEXT
 
 CREATE OR REPLACE FUNCTION transition_milestone(
   p_milestone_id            UUID,
-  p_target_status           TEXT,
-  p_trigger_type            TEXT,             -- vendor_response | pm_action | system_no_response
-  p_actor_user_id           UUID    DEFAULT NULL,   -- set for pm_action
-  p_actor_vendor_contact_id UUID    DEFAULT NULL,   -- set for vendor_response
-  p_milestone_response_id   UUID    DEFAULT NULL,
-  p_milestone_alert_id      UUID    DEFAULT NULL,
-  p_actual_start_date       DATE    DEFAULT NULL,
-  p_actual_end_date         DATE    DEFAULT NULL,
-  p_new_end_date            DATE    DEFAULT NULL,   -- present = this is a reschedule
-  p_note                    TEXT    DEFAULT NULL
+  p_action                  TEXT,             -- the authoritative intent (see table below)
+  p_actor_user_id           UUID DEFAULT NULL,   -- required for pm_* actions
+  p_actor_vendor_contact_id UUID DEFAULT NULL,   -- required for vendor_* actions
+  p_milestone_response_id   UUID DEFAULT NULL,
+  p_milestone_alert_id      UUID DEFAULT NULL,
+  p_actual_start_date       DATE DEFAULT NULL,
+  p_actual_end_date         DATE DEFAULT NULL,
+  p_new_end_date            DATE DEFAULT NULL,   -- required for pm_reschedule
+  p_note                    TEXT DEFAULT NULL
 )
 RETURNS SETOF milestones AS $$
 DECLARE
-  v_cur        milestones;
-  v_result     milestones;
-  v_allowed    BOOLEAN := FALSE;
-  v_is_resched BOOLEAN := (p_new_end_date IS NOT NULL);
-  v_new_cycle  INTEGER;
-  v_eff_start  DATE;
+  v_cur          milestones;
+  v_result       milestones;
+  v_target       TEXT;
+  v_trigger_type TEXT;
+  v_is_resched   BOOLEAN := (p_action = 'pm_reschedule');
+  v_new_cycle    INTEGER;
+  v_eff_start    DATE;
 BEGIN
-  -- 1. Lock the row. Everything below is serialized per milestone.
-  SELECT * INTO v_cur
-    FROM milestones
-   WHERE id = p_milestone_id
-     FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Milestone % not found', p_milestone_id
-      USING ERRCODE = 'PT404';
+  -- 0. Known action?
+  IF p_action NOT IN (
+       'pm_mark_started','pm_mark_completed','pm_reschedule','pm_cancel',
+       'vendor_start_yes','vendor_start_no',
+       'vendor_progress_yes','vendor_progress_no',
+       'vendor_completion_yes','vendor_completion_no',
+       'system_no_response'
+     ) THEN
+    RAISE EXCEPTION 'Unknown milestone action: %', p_action USING ERRCODE = 'PT422';
   END IF;
 
-  -- 2. Legality: the transition table, verbatim.
-  --    completed and cancelled are terminal: nothing transitions out of them.
-  v_allowed := CASE
-    WHEN v_cur.status = 'scheduled'
-         AND p_target_status IN ('in_progress','delayed','unresponsive','cancelled')             THEN TRUE
-    WHEN v_cur.status = 'in_progress'
-         AND p_target_status IN ('in_progress','delayed','unresponsive','completed','cancelled') THEN TRUE
-    WHEN v_cur.status = 'delayed'
-         AND p_target_status IN ('in_progress','completed','cancelled')                          THEN TRUE
-    WHEN v_cur.status = 'unresponsive'
-         AND p_target_status IN ('in_progress','delayed','completed','cancelled')                THEN TRUE
-    ELSE FALSE
+  -- 1. Lock the row. Concurrent clicks / job races serialize here; first wins.
+  SELECT * INTO v_cur FROM milestones WHERE id = p_milestone_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone % not found', p_milestone_id USING ERRCODE = 'PT404';
+  END IF;
+
+  -- 2. THE TRANSITION TABLE. (current_status, action) -> target_status.
+  --    Anything not listed is impossible. completed/cancelled are terminal.
+  v_target := CASE
+    -- PM actions -------------------------------------------------------------
+    WHEN p_action = 'pm_mark_started'
+         AND v_cur.status = 'scheduled'                                         THEN 'in_progress'
+    -- scheduled included deliberately: recording already-finished work without
+    -- inventing a start date. actual_start_date simply stays NULL.
+    WHEN p_action = 'pm_mark_completed'
+         AND v_cur.status IN ('scheduled','in_progress','delayed','unresponsive') THEN 'completed'
+    WHEN p_action = 'pm_reschedule'
+         AND v_cur.status IN ('in_progress','delayed','unresponsive')            THEN 'in_progress'
+    WHEN p_action = 'pm_cancel'
+         AND v_cur.status IN ('scheduled','in_progress','delayed','unresponsive') THEN 'cancelled'
+
+    -- Vendor responses (unresponsive included = a late reply resolving silence)
+    WHEN p_action = 'vendor_start_yes'
+         AND v_cur.status IN ('scheduled','unresponsive')                        THEN 'in_progress'
+    WHEN p_action = 'vendor_start_no'
+         AND v_cur.status IN ('scheduled','unresponsive')                        THEN 'delayed'
+    WHEN p_action = 'vendor_progress_yes'
+         AND v_cur.status IN ('in_progress','unresponsive')                      THEN 'in_progress'
+    WHEN p_action = 'vendor_progress_no'
+         AND v_cur.status IN ('in_progress','unresponsive')                      THEN 'delayed'
+    WHEN p_action = 'vendor_completion_yes'
+         AND v_cur.status IN ('in_progress','unresponsive')                      THEN 'completed'
+    WHEN p_action = 'vendor_completion_no'
+         AND v_cur.status IN ('in_progress','unresponsive')                      THEN 'delayed'
+
+    -- Scheduler --------------------------------------------------------------
+    WHEN p_action = 'system_no_response'
+         AND v_cur.status IN ('scheduled','in_progress')                         THEN 'unresponsive'
+
+    ELSE NULL
   END;
 
-  IF NOT v_allowed THEN
-    RAISE EXCEPTION 'Illegal milestone transition: % -> % (milestone %)',
-      v_cur.status, p_target_status, p_milestone_id
+  IF v_target IS NULL THEN
+    RAISE EXCEPTION 'Action "%" is not allowed on a milestone in status "%" (milestone %)',
+      p_action, v_cur.status, p_milestone_id
       USING ERRCODE = 'PT409';
   END IF;
 
-  -- Reschedule guards: only an active/paused milestone can be replanned, and
-  -- the new end must not precede the working start.
+  -- 3. trigger_type and actor are implied by the action; no caller may disagree.
+  v_trigger_type := CASE
+    WHEN p_action LIKE 'pm\_%'     THEN 'pm_action'
+    WHEN p_action LIKE 'vendor\_%' THEN 'vendor_response'
+    ELSE 'system_no_response'
+  END;
+
+  IF v_trigger_type = 'pm_action' AND p_actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'p_actor_user_id is required for action %', p_action USING ERRCODE = 'PT422';
+  END IF;
+  IF v_trigger_type = 'vendor_response' AND p_actor_vendor_contact_id IS NULL THEN
+    RAISE EXCEPTION 'p_actor_vendor_contact_id is required for action %', p_action USING ERRCODE = 'PT422';
+  END IF;
+
+  -- 4. Action-specific date guards.
   IF v_is_resched THEN
-    IF v_cur.status NOT IN ('in_progress','delayed','unresponsive') THEN
-      RAISE EXCEPTION 'Cannot reschedule a milestone in status %', v_cur.status
-        USING ERRCODE = 'PT409';
+    IF p_new_end_date IS NULL THEN
+      RAISE EXCEPTION 'p_new_end_date is required for pm_reschedule' USING ERRCODE = 'PT422';
     END IF;
     IF p_new_end_date < v_cur.start_date THEN
       RAISE EXCEPTION 'New end date (%) precedes start date (%)',
-        p_new_end_date, v_cur.start_date
-        USING ERRCODE = 'PT422';
+        p_new_end_date, v_cur.start_date USING ERRCODE = 'PT422';
     END IF;
+  ELSIF p_new_end_date IS NOT NULL THEN
+    RAISE EXCEPTION 'p_new_end_date is only valid for pm_reschedule (got action %)', p_action
+      USING ERRCODE = 'PT422';
   END IF;
 
-  -- Completion guard: cannot finish before you started.
   v_eff_start := COALESCE(p_actual_start_date, v_cur.actual_start_date);
   IF p_actual_end_date IS NOT NULL
      AND v_eff_start IS NOT NULL
      AND p_actual_end_date < v_eff_start THEN
     RAISE EXCEPTION 'actual_end_date (%) precedes actual_start_date (%)',
-      p_actual_end_date, v_eff_start
-      USING ERRCODE = 'PT422';
+      p_actual_end_date, v_eff_start USING ERRCODE = 'PT422';
   END IF;
 
-  -- 3. Apply. A reschedule bumps the cycle, instantly invalidating every
-  --    outstanding check-in token for this milestone.
+  -- 5. Apply. Only a reschedule bumps the cycle, which staleness-kills every
+  --    outstanding check-in token for this milestone at a stroke.
   v_new_cycle := v_cur.cycle_number + (CASE WHEN v_is_resched THEN 1 ELSE 0 END);
 
-  -- Identify this transaction as the authoritative date writer, so
-  -- trg_milestones_guard_dates permits the end_date move. Transaction-local:
-  -- it does not leak to any other statement or session.
+  -- Identify this txn as the authoritative date writer for trg_milestones_guard_dates.
   PERFORM set_config('bluonx.milestone_transition', 'on', TRUE);
 
   UPDATE milestones
-     SET status            = p_target_status,
+     SET status            = v_target,
          cycle_number      = v_new_cycle,
          end_date          = COALESCE(p_new_end_date,      end_date),
          actual_start_date = COALESCE(p_actual_start_date, actual_start_date),
          actual_end_date   = COALESCE(p_actual_end_date,   actual_end_date)
    WHERE id = p_milestone_id
    RETURNING * INTO v_result;
-  -- (trg_milestones_updated_at bumps updated_at automatically)
-  -- NOTE: baseline_end_date is deliberately untouched. A reschedule moves the
-  -- working plan; the original commitment stands, and that gap IS the drift.
+  -- baseline_end_date is deliberately untouched: a reschedule moves the working
+  -- plan, the original commitment stands, and that gap IS the drift.
 
   PERFORM set_config('bluonx.milestone_transition', 'off', TRUE);
 
-  -- 4. One immutable ledger row. actor_type is implied by trigger_type, and the
-  --    actual dates are write-once (so the milestone row stays authoritative).
+  -- 6. One immutable ledger row.
   INSERT INTO milestone_events (
     milestone_id, from_status, to_status, trigger_type,
     actor_user_id, actor_vendor_contact_id,
     milestone_response_id, milestone_alert_id,
     cycle_number, working_end_date, note
   ) VALUES (
-    p_milestone_id, v_cur.status, p_target_status, p_trigger_type,
+    p_milestone_id, v_cur.status, v_target, v_trigger_type,
     p_actor_user_id, p_actor_vendor_contact_id,
     p_milestone_response_id, p_milestone_alert_id,
     v_new_cycle, v_result.end_date, p_note
