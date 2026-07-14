@@ -164,6 +164,12 @@ export const queryKeys = {
     details: () => [...queryKeys.milestones.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.milestones.details(), id] as const,
     events: (id: string) => [...queryKeys.milestones.detail(id), 'events'] as const,
+    overview: (filters?: Record<string, unknown>) =>
+      filters
+        ? ([...queryKeys.milestones.all, 'overview', filters] as const)
+        : ([...queryKeys.milestones.all, 'overview'] as const),
+    timeline: (projectId: string) =>
+      [...queryKeys.milestones.all, 'timeline', projectId] as const,
   },
 
   nearbyVendors: {
@@ -190,5 +196,6 @@ export const queryKeys = {
     all: ['dashboard'] as const,
     openTaskCount: () => [...queryKeys.dashboard.all, 'openTaskCount'] as const,
     pendingBidCount: () => [...queryKeys.dashboard.all, 'pendingBidCount'] as const,
+    pausedMilestones: () => [...queryKeys.dashboard.all, 'pausedMilestones'] as const,
   },
 } as const;

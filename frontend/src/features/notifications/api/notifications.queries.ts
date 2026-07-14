@@ -10,7 +10,10 @@ export interface Notification {
     | 'insurance_expiring'
     | 'insurance_expired'
     | 'post_deadline_non_responders'
-    | 'scheduler_alert';
+    | 'scheduler_alert'
+    | 'milestone_delayed'
+    | 'milestone_unresponsive'
+    | 'milestone_completed';
   reference_type: string | null;
   reference_id: string | null;
   is_read: boolean;

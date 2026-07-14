@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/Toast/useToast';
 import { useMilestonesForTask } from '@/features/milestones/hooks/useMilestonesForTask';
 import { useCreateMilestone } from '@/features/milestones/hooks/useCreateMilestone';
 import { formatMilestoneDate } from '@/features/milestones/utils/formatDate';
+import { buildMilestonePath } from '@/features/milestones/utils/buildMilestonePath';
 import { MilestoneFormModal, type MilestoneFormValues } from './MilestoneFormModal';
 import { MilestoneStatusBadge } from './MilestoneStatusBadge';
 
@@ -69,9 +70,7 @@ export function MilestonesCard({ taskId, projectId }: MilestonesCardProps) {
               <li key={m.id}>
                 <button
                   type="button"
-                  onClick={() =>
-                    navigate(`/projects/${projectId}/tasks/${taskId}/milestones/${m.id}`)
-                  }
+                  onClick={() => navigate(buildMilestonePath(projectId, taskId, m.id))}
                   className="flex w-full items-center justify-between gap-4 py-3 text-left hover:bg-secondary-50"
                 >
                   <div className="min-w-0">

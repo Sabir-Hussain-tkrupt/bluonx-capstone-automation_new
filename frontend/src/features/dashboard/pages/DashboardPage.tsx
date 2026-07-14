@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import { supabase } from '@/lib/supabase';
 import { useDashboardCounts } from '@/features/dashboard/hooks/useDashboardCounts';
+import { AttentionMilestonesCard } from '@/features/dashboard/components/AttentionMilestonesCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { Card } from '@/components/ui/Card';
 
@@ -162,6 +163,9 @@ export function DashboardPage() {
           }
         />
       </div>
+
+      {/* Milestones needing PM attention (paused check-in cycle) */}
+      <AttentionMilestonesCard />
 
       {/* Quick navigation cards */}
       <div>
