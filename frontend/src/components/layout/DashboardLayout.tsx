@@ -8,7 +8,7 @@ import { UserMenuPanel, getInitials } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { NotificationBell } from '@/features/notifications/components/NotificationBell';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
-import { usePausedMilestones } from '@/features/dashboard/hooks/usePausedMilestones';
+import { usePausedMilestonesCount } from '@/features/dashboard/hooks/usePausedMilestones';
 import type { SidebarSection } from '@/components/ui/Sidebar';
 import bluonxLogo from '@/assets/bluonx-logo.png';
 
@@ -26,8 +26,7 @@ export function DashboardLayout() {
   const location = useLocation();
   const { profile, signOut } = useAuth();
   const breadcrumbItems = useBreadcrumbs();
-  const { data: pausedMilestones } = usePausedMilestones();
-  const pausedCount = pausedMilestones?.length;
+  const { data: pausedCount } = usePausedMilestonesCount();
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);

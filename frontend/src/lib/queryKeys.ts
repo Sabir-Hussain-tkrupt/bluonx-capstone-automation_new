@@ -196,6 +196,13 @@ export const queryKeys = {
     all: ['dashboard'] as const,
     openTaskCount: () => [...queryKeys.dashboard.all, 'openTaskCount'] as const,
     pendingBidCount: () => [...queryKeys.dashboard.all, 'pendingBidCount'] as const,
-    pausedMilestones: () => [...queryKeys.dashboard.all, 'pausedMilestones'] as const,
+    pausedMilestones: (params?: Record<string, unknown>) =>
+      params
+        ? ([...queryKeys.dashboard.all, 'pausedMilestones', params] as const)
+        : ([...queryKeys.dashboard.all, 'pausedMilestones'] as const),
+    pausedMilestonesCount: (params?: Record<string, unknown>) =>
+      params
+        ? ([...queryKeys.dashboard.all, 'pausedMilestonesCount', params] as const)
+        : ([...queryKeys.dashboard.all, 'pausedMilestonesCount'] as const),
   },
 } as const;

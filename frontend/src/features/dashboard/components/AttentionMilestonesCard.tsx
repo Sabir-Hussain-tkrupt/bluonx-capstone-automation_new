@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { MilestoneStatusBadge } from '@/features/milestones/components/MilestoneStatusBadge';
 import { buildMilestonePath } from '@/features/milestones/utils/buildMilestonePath';
 import { pauseSeverity, formatStalled } from '@/features/milestones/utils/pauseSeverity';
-import { usePausedMilestones } from '@/features/dashboard/hooks/usePausedMilestones';
+import {
+  usePausedMilestones,
+  usePausedMilestonesCount,
+} from '@/features/dashboard/hooks/usePausedMilestones';
 import type { MilestoneOverviewRow } from '@/features/milestones/api/milestoneOverview.queries';
 
 const MAX_ROWS = 5;
@@ -68,17 +71,16 @@ function AttentionRow({
  */
 export function AttentionMilestonesCard() {
   const { profile } = useAuth();
-  const { data = [], isLoading } = usePausedMilestones();
   const [mineOnly, setMineOnly] = useState(false);
 
-  const rows = useMemo(() => {
-    const filtered = mineOnly
-      ? data.filter((m) => m.created_by === profile?.id)
-      : data;
-    return filtered;
-  }, [data, mineOnly, profile?.id]);
-
-  const visibleRows = rows.slice(0, MAX_ROWS);
+  // "Mine only" is a server-side filter so both the rows and the count stay
+  // correct no matter how many milestones are stalled.
+  const createdBy = mineOnly ? profile?.id : undefined;
+  const { data: rows = [], isLoading } = usePausedMilestones({
+    createdBy,
+    limit: MAX_ROWS,
+  });
+  const { data: total = 0 } = usePausedMilestonesCount(createdBy);
 
   return (
     <section
@@ -88,9 +90,9 @@ export function AttentionMilestonesCard() {
       <div className="flex items-center justify-between border-b border-secondary-100 px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-secondary-900">Needs your attention</h2>
-          {!isLoading && rows.length > 0 && (
+          {!isLoading && total > 0 && (
             <span className="rounded-full bg-danger-50 px-2 py-0.5 text-xs font-medium text-danger-700">
-              {rows.length}
+              {total}
             </span>
           )}
         </div>
@@ -120,7 +122,7 @@ export function AttentionMilestonesCard() {
       ) : (
         <>
           <ul className="divide-y divide-secondary-100">
-            {visibleRows.map((row) => (
+            {rows.map((row) => (
               <AttentionRow
                 key={row.milestone_id}
                 row={row}
@@ -128,13 +130,13 @@ export function AttentionMilestonesCard() {
               />
             ))}
           </ul>
-          {rows.length > MAX_ROWS && (
+          {total > MAX_ROWS && (
             <div className="border-t border-secondary-100 px-4 py-2 text-right">
               <Link
                 to="/milestones?status=paused"
                 className="text-xs font-medium text-primary-600 hover:text-primary-700"
               >
-                View all {rows.length}
+                View all {total}
               </Link>
             </div>
           )}

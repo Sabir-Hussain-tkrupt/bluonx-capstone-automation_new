@@ -156,18 +156,53 @@ export async function fetchProjectTimelineMilestones(
   return (data ?? []) as unknown as MilestoneOverviewRow[];
 }
 
+export interface PausedMilestonesParams {
+  /** Restrict to a single creator (the dashboard "Mine only" toggle). */
+  createdBy?: string;
+  /** Cap the number of rows fetched (the card only renders a handful). */
+  limit?: number;
+}
+
 /**
- * Fetch every paused (delayed/unresponsive) milestone across all projects,
- * worst-stalled first. Small result set (the whole point is that this should be
- * short); powers the dashboard attention card and the sidebar badge count.
+ * Fetch paused (delayed/unresponsive) milestones across all projects,
+ * worst-stalled first. The dashboard card only shows a few rows, so it passes a
+ * `limit`: the payload stays flat no matter how many milestones stall. Use
+ * `fetchPausedMilestonesCount` for the true total (badge / "View all").
  */
-export async function fetchPausedMilestones(): Promise<MilestoneOverviewRow[]> {
-  const { data, error } = await supabase
+export async function fetchPausedMilestones(
+  params: PausedMilestonesParams = {},
+): Promise<MilestoneOverviewRow[]> {
+  let query = supabase
     .from(VIEW)
     .select('*')
     .in('status', PAUSED_STATUSES as unknown as string[])
     .order('days_paused', { ascending: false, nullsFirst: false });
 
+  if (params.createdBy) query = query.eq('created_by', params.createdBy);
+  if (params.limit != null) query = query.limit(params.limit);
+
+  const { data, error } = await query;
   if (error) throw toApiError(error);
   return (data ?? []) as unknown as MilestoneOverviewRow[];
+}
+
+/**
+ * Exact count of paused milestones (optionally for one creator), fetched
+ * head-only so no rows cross the wire. Stays accurate past Supabase's default
+ * 1000-row response cap, unlike counting a fetched array. Powers the sidebar
+ * badge and the card's count / "View all N".
+ */
+export async function fetchPausedMilestonesCount(
+  params: { createdBy?: string } = {},
+): Promise<number> {
+  let query = supabase
+    .from(VIEW)
+    .select('*', { count: 'exact', head: true })
+    .in('status', PAUSED_STATUSES as unknown as string[]);
+
+  if (params.createdBy) query = query.eq('created_by', params.createdBy);
+
+  const { count, error } = await query;
+  if (error) throw toApiError(error);
+  return count ?? 0;
 }
