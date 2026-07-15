@@ -8,6 +8,7 @@ import { UserMenuPanel, getInitials } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { NotificationBell } from '@/features/notifications/components/NotificationBell';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
+import { usePausedMilestonesCount } from '@/features/dashboard/hooks/usePausedMilestones';
 import type { SidebarSection } from '@/components/ui/Sidebar';
 import bluonxLogo from '@/assets/bluonx-logo.png';
 
@@ -25,6 +26,7 @@ export function DashboardLayout() {
   const location = useLocation();
   const { profile, signOut } = useAuth();
   const breadcrumbItems = useBreadcrumbs();
+  const { data: pausedCount } = usePausedMilestonesCount();
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -84,6 +86,14 @@ export function DashboardLayout() {
             icon: <NavIcon d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />,
           },
           {
+            id: 'milestones',
+            label: 'Milestones',
+            href: ROUTES.MILESTONES,
+            // Flag-on-a-pole icon: milestone marker.
+            icon: <NavIcon d="M3 3a1 1 0 011-1h11a1 1 0 01.78 1.625L13.28 7l2.5 3.375A1 1 0 0115 12H5v5a1 1 0 11-2 0V3z" />,
+            badge: pausedCount,
+          },
+          {
             id: 'bids',
             label: 'Bids',
             href: ROUTES.BID_PACKAGES,
@@ -116,7 +126,7 @@ export function DashboardLayout() {
     }
 
     return sections;
-  }, [profile?.role]);
+  }, [profile?.role, pausedCount]);
 
   // Derive display values from auth profile
   const userName = profile?.full_name || 'User';

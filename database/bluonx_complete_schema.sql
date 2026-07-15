@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.0
--- Date:     July 12, 2026
+-- Version:  3.1
+-- Date:     July 13, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   30
 -- Engine:   PostgreSQL via Supabase
@@ -1885,6 +1885,118 @@ $$ LANGUAGE plpgsql;
 
 REVOKE ALL ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
+
+
+-- ============================================================================
+-- SECTION 8: VIEWS (read surfaces)
+-- ============================================================================
+
+-- One denormalized read surface for every cross-project milestone view:
+--   • the dashboard "Needs your attention" card (paused milestones)
+--   • the /milestones cross-project list (filter + sort + paginate)
+--   • the project Milestones timeline tab
+--
+-- WHY A VIEW: these surfaces all need milestone + task + project + vendor +
+-- creator + "how long has this been stuck", which is 5 joins plus a lateral over
+-- the event ledger. Doing that client-side would be an N+1 per row. PostgREST
+-- can select/filter/order/range a view exactly like a table, so one object
+-- serves all three surfaces and the frontend stays a plain Supabase read.
+--
+-- SECURITY: security_invoker = true means the CALLER's RLS applies (not the view
+-- owner's). Without it a view silently bypasses RLS. Requires PG15+ (Supabase is).
+
+-- ============================================================================
+
+CREATE OR REPLACE VIEW v_milestone_overview
+WITH (security_invoker = true) AS
+SELECT
+    m.id                    AS milestone_id,
+    m.name                  AS milestone_name,
+    m.status,
+    m.cycle_number,
+    m.sort_order,
+
+    -- Dates: working plan, frozen commitment, and what actually happened.
+    m.start_date,
+    m.end_date,
+    m.baseline_end_date,
+    m.actual_start_date,
+    m.actual_end_date,
+
+    -- Drift: the end date moved from what the vendor originally committed to.
+    (m.end_date IS DISTINCT FROM m.baseline_end_date)          AS end_date_moved,
+
+    -- Late by the honest measure: against the BASELINE, never the rescheduled end.
+    CASE
+      WHEN m.actual_end_date IS NOT NULL
+        THEN GREATEST(0, m.actual_end_date - m.baseline_end_date)
+    END                                                        AS days_late,
+
+    -- Live and past its committed finish, but not yet done.
+    (m.status IN ('scheduled','in_progress','delayed','unresponsive')
+       AND m.end_date < (NOW() AT TIME ZONE 'America/Chicago')::date)
+                                                               AS is_overdue,
+
+    -- HOW LONG HAS THIS BEEN STUCK ON A HUMAN.
+    -- delayed/unresponsive PAUSE the check-in cycle: the system stops chasing the
+    -- vendor and waits for a PM. A milestone paused three weeks ago that nobody
+    -- touched is a fire; one paused yesterday is fine. This is the whole point of
+    -- the attention card, so it is sorted on.
+    p.paused_since,
+    CASE
+      WHEN m.status IN ('delayed','unresponsive') AND p.paused_since IS NOT NULL
+        THEN (NOW() AT TIME ZONE 'America/Chicago')::date
+             - (p.paused_since AT TIME ZONE 'America/Chicago')::date
+    END                                                        AS days_paused,
+
+    -- Context needed to render a row AND to build the detail link, which requires
+    -- all three of project_id / task_id / milestone_id.
+    t.id                    AS task_id,
+    t.name                  AS task_name,
+    pr.id                   AS project_id,
+    pr.name                 AS project_name,
+
+    c.id                    AS contract_id,
+    v.id                    AS vendor_id,
+    v.company_name          AS vendor_company_name,
+
+    m.created_by,
+    u.full_name             AS created_by_name,
+
+    m.notes,
+    m.created_at,
+    m.updated_at
+
+FROM milestones m
+JOIN tasks     t  ON t.id  = m.task_id
+JOIN projects  pr ON pr.id = t.project_id
+JOIN contracts c  ON c.id  = m.contract_id
+JOIN vendors   v  ON v.id  = c.vendor_id
+LEFT JOIN users u ON u.id  = m.created_by
+
+-- The most recent transition INTO a paused state. LATERAL keeps this one indexed
+-- lookup per milestone instead of a scan.
+LEFT JOIN LATERAL (
+    SELECT e.created_at AS paused_since
+      FROM milestone_events e
+     WHERE e.milestone_id = m.id
+       AND e.to_status IN ('delayed','unresponsive')
+     ORDER BY e.created_at DESC
+     LIMIT 1
+) p ON TRUE
+
+WHERE t.deleted_at  IS NULL
+  AND pr.deleted_at IS NULL
+  AND v.deleted_at  IS NULL;
+
+
+COMMENT ON VIEW v_milestone_overview IS
+  'Cross-project milestone read surface: milestone + task + project + vendor + creator, plus days_paused (how long a delayed/unresponsive milestone has been stalled awaiting a PM), is_overdue, and baseline drift. Serves the dashboard attention card, the /milestones list, and the project timeline tab. security_invoker = true so caller RLS applies.';
+
+
+-- Read-only surface for signed-in staff. Vendors never touch it.
+REVOKE ALL ON v_milestone_overview FROM PUBLIC, anon;
+GRANT SELECT ON v_milestone_overview TO authenticated, service_role;
 
 
 -- ============================================================================
