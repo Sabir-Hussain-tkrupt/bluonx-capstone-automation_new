@@ -133,7 +133,7 @@ export function AttentionMilestonesCard() {
           {total > MAX_ROWS && (
             <div className="border-t border-secondary-100 px-4 py-2 text-right">
               <Link
-                to="/milestones?status=paused"
+                to="/milestones"
                 className="text-xs font-medium text-primary-600 hover:text-primary-700"
               >
                 View all {total}

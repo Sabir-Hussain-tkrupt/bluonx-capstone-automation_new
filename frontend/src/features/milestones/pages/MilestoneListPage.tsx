@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
 import { Table } from '@/components/ui/Table';
@@ -53,14 +53,11 @@ function EndDateCell({ row }: { row: MilestoneOverviewRow }) {
 
 export function MilestoneListPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
-  // Seed the status filter once from the URL: the dashboard "View all" link
-  // passes ?status=paused. We do not sync state back to the URL (local-state
-  // convention, matching VendorListPage).
-  const [statusFilter, setStatusFilter] = useState(() =>
-    searchParams.get('status') === 'paused' ? 'attention' : '',
-  );
+  // Default to "Attention needed" so a PM landing on this page sees what
+  // matters first; they can broaden the filter from there. We do not sync
+  // filter state back to the URL (local-state convention, matching VendorListPage).
+  const [statusFilter, setStatusFilter] = useState('attention');
 
   const [search, setSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState('');

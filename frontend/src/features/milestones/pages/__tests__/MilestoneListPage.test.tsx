@@ -81,11 +81,13 @@ describe('MilestoneListPage', () => {
     expect(lastFilters()).toMatchObject({ sort_by: 'days_paused', sort_dir: 'desc', page: 1 });
   });
 
-  it('preselects the Attention filter from ?status=paused', () => {
-    renderWithRouter(<MilestoneListPage />, {
-      initialEntries: ['/milestones?status=paused'],
-    });
+  it('defaults the status filter to "Attention needed" on a plain landing', () => {
+    renderWithRouter(<MilestoneListPage />, { initialEntries: ['/milestones'] });
     expect(lastFilters().status).toBe('attention');
+    expect(within(statusSelect()).getByText('Attention needed').closest('option')).toHaveProperty(
+      'selected',
+      true,
+    );
   });
 
   it('passes the selected status filter to the query and resets to page 1', async () => {
