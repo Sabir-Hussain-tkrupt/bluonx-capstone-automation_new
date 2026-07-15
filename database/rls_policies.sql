@@ -2,7 +2,7 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Row Level Security (RLS) Migration
 -- ============================================================================
--- Version:  3.0
+-- Version:  3.2
 -- Date:     July 12, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Depends:  bluonx_complete_schema.sql (must be applied first)
@@ -152,7 +152,8 @@ ALTER TABLE docusign_envelopes      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_responses     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_alerts        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE milestone_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE milestone_events          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE milestone_checkin_tokens  ENABLE ROW LEVEL SECURITY;
 
 -- Group 7: Communication & Audit
 ALTER TABLE email_log               ENABLE ROW LEVEL SECURITY;

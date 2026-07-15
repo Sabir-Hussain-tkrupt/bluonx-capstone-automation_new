@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.1
--- Date:     July 13, 2026
+-- Version:  3.2
+-- Date:     July 15, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   30
+-- Tables:   31
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -15,7 +15,7 @@
 --   3. Project & Task Management (3 tables)
 --   4. Bid Lifecycle             (11 tables)
 --   5. Award & Contract          (3 tables)
---   6. Milestone Tracking        (4 tables)
+--   6. Milestone Tracking        (5 tables)
 --   7. Communication & Audit     (3 tables)
 --
 -- CONVENTIONS:
@@ -619,13 +619,15 @@ CREATE TABLE milestone_responses (
                                       CHECK (response_type IN ('start_confirmation', 'progress_check',
                                                                 'completion_confirmation')),
   response_value        VARCHAR(10)   NOT NULL CHECK (response_value IN ('yes', 'no')),
-  response_token_hash   VARCHAR(255)  NOT NULL,
+  milestone_alert_id    UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE RESTRICT,
   vendor_contact_id     UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
-  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT uq_milestone_responses_alert UNIQUE (milestone_alert_id)
 );
 
 COMMENT ON TABLE milestone_responses IS 'Logs every vendor email-link response. Immutable audit record.';
-
+COMMENT ON COLUMN milestone_responses.milestone_alert_id IS 'Which check-in this answers. UNIQUE: one recorded response per alert (first-response-wins, enforced at the DB).';
 
 -- Milestone alerts: milestone-specific email tracking
 -- NOTE: email_log FK added via ALTER TABLE below (table ordering dependency)
@@ -639,7 +641,6 @@ CREATE TABLE milestone_alerts (
                                                             'no_response_alert', 'completion_notification')),
   recipient_type        VARCHAR(20)   NOT NULL CHECK (recipient_type IN ('vendor', 'pm')),
   cycle_number          INTEGER,
-  response_token_hash   VARCHAR(255),
   created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
@@ -684,6 +685,36 @@ COMMENT ON TABLE  milestone_events IS 'Append-only audit ledger. One immutable r
 COMMENT ON COLUMN milestone_events.trigger_type IS 'Also determines the actor kind, so no separate actor_type column: creation/pm_action = user, vendor_response = vendor contact, system_no_response = scheduler.';
 COMMENT ON COLUMN milestone_events.milestone_alert_id IS 'WHICH check-in this event relates to. Required even when milestone_response_id is NULL (a system_no_response event has no response row).';
 COMMENT ON COLUMN milestone_events.working_end_date IS 'The plan at event time. The only date snapshotted: reschedule is end-only, and actual dates are write-once, so the milestone row stays authoritative for those.';
+
+-- 
+-- milestone_checkin_tokens
+-- 
+-- Same SHAPE as a bid magic link (hash, expiry, used/revoked audit, ip), but
+-- native to the milestone world: its discriminator IS its reason to exist, so
+-- milestone_alert_id is a plain NOT NULL FK — no nullable-FK gymnastics.
+
+CREATE TABLE milestone_checkin_tokens (
+  id                 UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  milestone_alert_id UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE CASCADE,
+  milestone_id       UUID          NOT NULL REFERENCES milestones(id) ON DELETE CASCADE,
+  vendor_contact_id  UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
+  cycle_number       INTEGER       NOT NULL,   -- the milestone cycle this token was minted under
+  token_hash         VARCHAR(255)  NOT NULL UNIQUE,
+  expires_at         TIMESTAMPTZ   NOT NULL,   -- 7-day hard expiry, independent of cycle staleness
+  used_at            TIMESTAMPTZ,
+  is_used            BOOLEAN       NOT NULL DEFAULT FALSE,
+  ip_address         INET,
+  revoked_at         TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  -- One token per alert: an alert IS a single check-in send, so it has exactly
+  -- one live link. (A resend under a new cycle is a new alert row.)
+  CONSTRAINT uq_milestone_checkin_tokens_alert UNIQUE (milestone_alert_id)
+);
+COMMENT ON TABLE milestone_checkin_tokens IS 'Vendor magic-link tokens for milestone check-ins. One token per milestone_alert (one check). Validity = not used AND not revoked AND before expires_at AND cycle_number = milestones.cycle_number. Answering spends it; a reschedule (cycle bump) strands it.';
+COMMENT ON COLUMN milestone_checkin_tokens.cycle_number IS 'The milestone cycle at mint time. A token is stale the moment milestones.cycle_number moves past it — this is the declarative staleness that needs no cleanup pass.';
+
+
 
 -- ========================================
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -860,6 +891,8 @@ CREATE INDEX idx_milestone_responses_milestone_id   ON milestone_responses (mile
 CREATE INDEX idx_milestone_alerts_milestone_id      ON milestone_alerts (milestone_id);
 CREATE INDEX idx_milestone_alerts_email_log_id      ON milestone_alerts (email_log_id);
 CREATE INDEX idx_milestone_events_milestone ON milestone_events (milestone_id, created_at DESC);
+CREATE INDEX idx_milestone_checkin_tokens_hash     ON milestone_checkin_tokens (token_hash);
+CREATE INDEX idx_milestone_checkin_tokens_milestone ON milestone_checkin_tokens (milestone_id);
 
 -- ---- Group 7: Communication & Audit ----
 CREATE INDEX idx_email_log_type_status              ON email_log (email_type, status);
