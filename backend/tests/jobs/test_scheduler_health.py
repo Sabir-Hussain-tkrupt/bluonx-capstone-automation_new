@@ -11,13 +11,15 @@ from app.jobs.scheduler import (
 
 ENDPOINT = "/api/v1/admin/scheduler-health"
 
-# The five jobs the scheduler foundation must surface: the original hourly
-# revision_expiry plus the four Phase 7 stubs registered in Task 7.1.
+# The jobs the scheduler foundation must surface: the original hourly
+# revision_expiry, the four Phase 7 jobs, and the Phase 10.2
+# milestone_no_response escalation job.
 EXPECTED_JOB_IDS = {
     "revision_expiry",
     "daily_bid_reminders",
     "daily_insurance_expiration",
     "post_deadline_escalation",
+    "milestone_no_response",
     "scheduler_self_check",
 }
 
@@ -95,6 +97,7 @@ async def test_start_scheduler_registers_jobs():
             "daily_bid_reminders",
             "daily_insurance_expiration",
             "post_deadline_escalation",
+            "milestone_no_response",
             "scheduler_self_check",
         }
     finally:

@@ -16,9 +16,10 @@ import { ROUTES } from '@/constants/routes';
 import { useVendorPortal } from './VendorPortalContext';
 
 export function VendorPortalGuard() {
-  const { jwt, bidContext } = useVendorPortal();
+  const { jwt, bidContext, milestoneContext } = useVendorPortal();
 
-  if (!jwt || !bidContext) {
+  // A live session is a JWT plus exactly one kind of context (bid or milestone).
+  if (!jwt || (!bidContext && !milestoneContext)) {
     return <Navigate to={ROUTES.PORTAL_EXPIRED} replace />;
   }
 

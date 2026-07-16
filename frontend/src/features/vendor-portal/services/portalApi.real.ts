@@ -17,6 +17,8 @@ import axios, { type AxiosError } from 'axios';
 import type {
   BidDraft,
   FormAttachment,
+  MilestoneRespondResult,
+  MilestoneValidateResponse,
   PortalFieldError,
   RevisionPrefillResponse,
   SubmissionAttachmentMeta,
@@ -307,6 +309,36 @@ async function declineRevisionRequest(
   }
 }
 
+// ─── Milestone check-in (Phase 10.2) ────────────────────────────────
+async function validateMilestoneToken(
+  token: string,
+): Promise<MilestoneValidateResponse> {
+  try {
+    const { data } = await realAxios.post<MilestoneValidateResponse>(
+      '/vendor-auth/validate-milestone-token',
+      { token },
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
+async function respondToMilestone(
+  milestoneAlertId: string,
+  value: 'yes' | 'no',
+): Promise<MilestoneRespondResult> {
+  try {
+    const { data } = await realAxios.post<MilestoneRespondResult>(
+      `/vendor-portal/milestones/${milestoneAlertId}/respond`,
+      { value },
+    );
+    return data;
+  } catch (err) {
+    throw mapAxiosErrorToPortalError(err);
+  }
+}
+
 // ─── Project document download (Task 5.3) ───────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   try {
@@ -333,4 +365,6 @@ export const realPortalApi: PortalApi = {
   getRevisionPrefill,
   listSubmissionAttachments,
   declineRevisionRequest,
+  validateMilestoneToken,
+  respondToMilestone,
 };

@@ -130,11 +130,12 @@ def _set_last_run(job_id: str, last_run_at: datetime | None) -> None:
 
 
 def _seed_fresh(now: datetime) -> None:
-    """Seed all four evaluated jobs with a recent last_run_at so nothing is stale."""
+    """Seed all evaluated jobs with a recent last_run_at so nothing is stale."""
     _set_last_run("revision_expiry", now - timedelta(minutes=15))
     _set_last_run("daily_bid_reminders", now - timedelta(hours=2))
     _set_last_run("daily_insurance_expiration", now - timedelta(hours=2))
     _set_last_run("post_deadline_escalation", now - timedelta(hours=2))
+    _set_last_run("milestone_no_response", now - timedelta(hours=2))
 
 
 def _run(db, notification_creator=None) -> dict:
@@ -255,7 +256,13 @@ class TestRunDailySchedulerSelfCheck:
         result = _run(db, notification_creator=mock)
 
         assert set(result["stale_jobs"]) == set(
-            ["revision_expiry", "daily_bid_reminders", "daily_insurance_expiration", "post_deadline_escalation"]
+            [
+                "revision_expiry",
+                "daily_bid_reminders",
+                "daily_insurance_expiration",
+                "post_deadline_escalation",
+                "milestone_no_response",
+            ]
         )
         msg = mock.call_args.kwargs["message"]
         assert "daily_bid_reminders: expected every 1 day, last ran never" in msg

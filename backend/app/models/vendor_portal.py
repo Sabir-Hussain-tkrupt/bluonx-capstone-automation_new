@@ -257,6 +257,68 @@ class SubmissionResponse(BluOnXBase):
     proposed_start_date: date | None = None
 
 
+# ── Milestone check-in (Phase 10.2) ──────────────────────────────────────────
+#
+# A fully separate surface from the bid flow: milestone tokens live in their own
+# table and their own validate endpoint. The vendor answers one Yes/No question
+# derived from the check kind.
+
+MilestoneCheckType = Literal["start", "progress", "completion"]
+
+
+class MilestoneContextModel(BluOnXBase):
+    """Everything the portal needs to render the one Yes/No check-in question.
+
+    `check_type` selects the question ("Did this work start?" / "Will it finish
+    by {end_date}?" / "Is this complete?"). `end_date` is the current working
+    finish, shown in the progress question.
+    """
+
+    milestone_alert_id: UUID
+    milestone_id: UUID
+    milestone_name: str
+    project_name: str
+    task_name: str
+    vendor_company_name: str
+    check_type: MilestoneCheckType
+    end_date: date
+    cycle_number: int
+
+
+class MilestoneValidateResponse(BluOnXBase):
+    """Result of POST /vendor-auth/validate-milestone-token.
+
+    Discriminated by `outcome`:
+      - 'actionable'       → `jwt` + `milestone_context` present.
+      - 'already_answered' → `recorded_value` + `recorded_at` present, no jwt.
+    Stale / superseded / terminal check-ins are surfaced as a 410 error, not
+    an outcome here.
+    """
+
+    outcome: Literal["actionable", "already_answered"]
+    jwt: str | None = None
+    milestone_context: MilestoneContextModel | None = None
+    recorded_value: Literal["yes", "no"] | None = None
+    recorded_at: datetime | None = None
+
+
+class MilestoneRespondRequest(BluOnXBase):
+    """Body for POST /vendor-portal/milestones/{milestone_alert_id}/respond.
+
+    The answer is the ONLY thing the vendor supplies; identity comes from the
+    milestone JWT, never the body.
+    """
+
+    value: Literal["yes", "no"]
+
+
+class MilestoneRespondResponse(BluOnXBase):
+    outcome: Literal["recorded", "already_answered"]
+    recorded_value: Literal["yes", "no"]
+    recorded_at: datetime
+    milestone_status: str
+
+
 # ── Validation error surface (422 on submit) ─────────────────────────────
 
 

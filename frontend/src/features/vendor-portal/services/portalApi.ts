@@ -52,4 +52,11 @@ export const declineRevisionRequest: PortalApi['declineRevisionRequest'] = (
   decline_reason,
 ) => impl.declineRevisionRequest(revisionRequestId, decline_reason);
 
+export const validateMilestoneToken: PortalApi['validateMilestoneToken'] = (token) =>
+  impl.validateMilestoneToken(token);
+export const respondToMilestone: PortalApi['respondToMilestone'] = (
+  milestoneAlertId,
+  value,
+) => impl.respondToMilestone(milestoneAlertId, value);
+
 export type { BidRevisionRequestResponse, DraftPayload } from './portalApi.types';

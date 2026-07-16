@@ -32,12 +32,17 @@ import {
   setAuthFailureHandler,
   setVendorJwt as setApiJwt,
 } from '../services/portalApi';
-import type { VendorBidContext } from '../types/portal';
+import type { VendorBidContext, VendorMilestoneContext } from '../types/portal';
 
 interface VendorPortalContextValue {
   jwt: string | null;
   bidContext: VendorBidContext | null;
+  milestoneContext: VendorMilestoneContext | null;
   setSession: (jwt: string, bidContext: VendorBidContext) => void;
+  setMilestoneSession: (
+    jwt: string,
+    milestoneContext: VendorMilestoneContext,
+  ) => void;
   clearSession: () => void;
 }
 
@@ -47,6 +52,7 @@ const VendorPortalReactContext = createContext<VendorPortalContextValue | null>(
 // Namespaced to avoid collisions with any future per-tab storage.
 const JWT_STORAGE_KEY = 'bluonx_vendor_jwt';
 const BID_CONTEXT_STORAGE_KEY = 'bluonx_vendor_bid_context';
+const MILESTONE_CONTEXT_STORAGE_KEY = 'bluonx_vendor_milestone_context';
 
 // ── Storage helpers ─────────────────────────────────────────────────
 // All sessionStorage access goes through these wrappers so a single
@@ -80,6 +86,7 @@ function safeRemoveItem(key: string): void {
 function clearStoredSession(): void {
   safeRemoveItem(JWT_STORAGE_KEY);
   safeRemoveItem(BID_CONTEXT_STORAGE_KEY);
+  safeRemoveItem(MILESTONE_CONTEXT_STORAGE_KEY);
 }
 
 // ── JWT exp check (no signature verification) ───────────────────────
@@ -125,54 +132,75 @@ function isJwtAlive(jwt: string): boolean {
 interface SessionState {
   jwt: string | null;
   bidContext: VendorBidContext | null;
+  milestoneContext: VendorMilestoneContext | null;
 }
+
+const EMPTY_SESSION: SessionState = {
+  jwt: null,
+  bidContext: null,
+  milestoneContext: null,
+};
 
 function hydrateInitialState(): SessionState {
   const storedJwt = safeGetItem(JWT_STORAGE_KEY);
-  const storedContext = safeGetItem(BID_CONTEXT_STORAGE_KEY);
+  const storedBid = safeGetItem(BID_CONTEXT_STORAGE_KEY);
+  const storedMilestone = safeGetItem(MILESTONE_CONTEXT_STORAGE_KEY);
+  // A session is exactly one KIND — bid XOR milestone.
+  const storedContext = storedBid ?? storedMilestone;
 
-  // Half-state (one key without the other) → purge and start fresh.
+  // Half-state (jwt or context missing) → purge and start fresh.
   if (!storedJwt || !storedContext) {
     if (storedJwt || storedContext) clearStoredSession();
-    return { jwt: null, bidContext: null };
+    return EMPTY_SESSION;
   }
 
   if (!isJwtAlive(storedJwt)) {
     clearStoredSession();
-    return { jwt: null, bidContext: null };
+    return EMPTY_SESSION;
   }
 
-  let parsedContext: VendorBidContext;
   try {
-    parsedContext = JSON.parse(storedContext) as VendorBidContext;
+    const parsed = JSON.parse(storedContext);
+    // Push the hydrated JWT into the Axios interceptor right away so the
+    // first API call after a refresh already carries it. The lazy
+    // initializer runs at most once per mount; setApiJwt is idempotent
+    // so StrictMode's double-mount is harmless.
+    setApiJwt(storedJwt);
+    return storedBid
+      ? { jwt: storedJwt, bidContext: parsed as VendorBidContext, milestoneContext: null }
+      : { jwt: storedJwt, bidContext: null, milestoneContext: parsed as VendorMilestoneContext };
   } catch {
     clearStoredSession();
-    return { jwt: null, bidContext: null };
+    return EMPTY_SESSION;
   }
-
-  // Push the hydrated JWT into the Axios interceptor right away so the
-  // first API call after a refresh already carries it. The lazy
-  // initializer runs at most once per mount; setApiJwt is idempotent
-  // so StrictMode's double-mount is harmless.
-  setApiJwt(storedJwt);
-
-  return { jwt: storedJwt, bidContext: parsedContext };
 }
 
 export function VendorPortalProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<SessionState>(hydrateInitialState);
-  const { jwt, bidContext } = session;
+  const { jwt, bidContext, milestoneContext } = session;
   const navigate = useNavigate();
 
   const setSession = useCallback((newJwt: string, newContext: VendorBidContext) => {
-    setSessionState({ jwt: newJwt, bidContext: newContext });
+    setSessionState({ jwt: newJwt, bidContext: newContext, milestoneContext: null });
     setApiJwt(newJwt);
     safeSetItem(JWT_STORAGE_KEY, newJwt);
+    safeRemoveItem(MILESTONE_CONTEXT_STORAGE_KEY);
     safeSetItem(BID_CONTEXT_STORAGE_KEY, JSON.stringify(newContext));
   }, []);
 
+  const setMilestoneSession = useCallback(
+    (newJwt: string, newContext: VendorMilestoneContext) => {
+      setSessionState({ jwt: newJwt, bidContext: null, milestoneContext: newContext });
+      setApiJwt(newJwt);
+      safeSetItem(JWT_STORAGE_KEY, newJwt);
+      safeRemoveItem(BID_CONTEXT_STORAGE_KEY);
+      safeSetItem(MILESTONE_CONTEXT_STORAGE_KEY, JSON.stringify(newContext));
+    },
+    [],
+  );
+
   const clearSession = useCallback(() => {
-    setSessionState({ jwt: null, bidContext: null });
+    setSessionState(EMPTY_SESSION);
     setApiJwt(null);
     clearStoredSession();
   }, []);
@@ -190,8 +218,15 @@ export function VendorPortalProvider({ children }: { children: ReactNode }) {
   }, [navigate, clearSession]);
 
   const value = useMemo<VendorPortalContextValue>(
-    () => ({ jwt, bidContext, setSession, clearSession }),
-    [jwt, bidContext, setSession, clearSession],
+    () => ({
+      jwt,
+      bidContext,
+      milestoneContext,
+      setSession,
+      setMilestoneSession,
+      clearSession,
+    }),
+    [jwt, bidContext, milestoneContext, setSession, setMilestoneSession, clearSession],
   );
 
   return (

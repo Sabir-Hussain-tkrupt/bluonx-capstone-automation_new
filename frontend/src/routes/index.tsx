@@ -44,6 +44,10 @@ import {
   BiddingClosedPage,
   InvalidTokenPage,
   MagicLinkLandingPage,
+  MilestoneLandingPage,
+  MilestoneNoLongerCurrentPage,
+  MilestoneRecordedPage,
+  MilestoneRespondPage,
   PortalLayout,
   RevisionDeclinedPage,
   RevisionInactivePage,
@@ -128,13 +132,17 @@ export function AppRoutes() {
         }
       >
         <Route path={ROUTES.PORTAL_LANDING} element={<MagicLinkLandingPage />} />
+        <Route path={ROUTES.PORTAL_MILESTONE_LANDING} element={<MilestoneLandingPage />} />
         <Route element={<VendorPortalGuard />}>
           <Route path={ROUTES.PORTAL_REVISION} element={<RevisionLandingPage />} />
           <Route path={ROUTES.PORTAL_FORM} element={<BidFormPage />} />
           <Route path={ROUTES.PORTAL_SUBMITTED} element={<SubmissionConfirmationPage />} />
+          <Route path={ROUTES.PORTAL_MILESTONE} element={<MilestoneRespondPage />} />
         </Route>
         <Route path={ROUTES.PORTAL_REVISION_INACTIVE} element={<RevisionInactivePage />} />
         <Route path={ROUTES.PORTAL_REVISION_DECLINED} element={<RevisionDeclinedPage />} />
+        <Route path={ROUTES.PORTAL_MILESTONE_RECORDED} element={<MilestoneRecordedPage />} />
+        <Route path={ROUTES.PORTAL_MILESTONE_INACTIVE} element={<MilestoneNoLongerCurrentPage />} />
         <Route path={ROUTES.PORTAL_EXPIRED} element={<TokenExpiredPage />} />
         <Route path={ROUTES.PORTAL_INVALID} element={<InvalidTokenPage />} />
         <Route path={ROUTES.PORTAL_CLOSED} element={<BiddingClosedPage />} />

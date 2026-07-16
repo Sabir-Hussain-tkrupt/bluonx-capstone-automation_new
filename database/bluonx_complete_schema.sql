@@ -2,7 +2,7 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.2
+-- Version:  3.3
 -- Date:     July 15, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   31
@@ -647,7 +647,6 @@ CREATE TABLE milestone_alerts (
 COMMENT ON TABLE  milestone_alerts             IS 'Milestone-specific email tracking. References email_log for delivery details (no duplication).';
 COMMENT ON COLUMN milestone_alerts.email_log_id IS 'FK to email_log. Delivery status lives there, milestone context lives here.';
 COMMENT ON COLUMN milestone_alerts.cycle_number IS 'Milestone cycle this check-in was sent under. The token is stale when this != milestones.cycle_number.';
-COMMENT ON COLUMN milestone_alerts.response_token_hash IS 'DEPRECATED / UNUSED. Milestone check-in tokens live in magic_link_tokens (with a milestone_alert_id discriminator), mirroring the bid-revision flow. Retained only to avoid a destructive migration.';
 
 
 -- Milestone events: append-only transition ledger (feeds the PM activity timeline)
@@ -1918,6 +1917,134 @@ $$ LANGUAGE plpgsql;
 
 REVOKE ALL ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
+
+
+-- ----------------------------------------------------------------------------
+-- fn_record_milestone_response — atomic vendor check-in recorder (Phase 10.2)
+-- ----------------------------------------------------------------------------
+-- Records a milestone_responses row, runs transition_milestone(), and spends the
+-- token in ONE transaction (supabase-py has no client transactions). The response
+-- INSERT runs first, so UNIQUE(milestone_alert_id) is the first-response-wins gate;
+-- a transition PT409 (illegal action / milestone moved terminal) propagates and
+-- rolls the response INSERT back, so there is never an orphan response without an
+-- event. Vendor identity (p_vendor_contact_id) comes from the vendor JWT only.
+
+CREATE OR REPLACE FUNCTION fn_record_milestone_response(
+  p_milestone_alert_id  UUID,
+  p_response_value      TEXT,            -- 'yes' | 'no'
+  p_vendor_contact_id   UUID,
+  p_today               DATE             -- business-timezone "today"
+)
+RETURNS TABLE (
+  outcome           TEXT,               -- 'recorded' | 'already_answered'
+  recorded_value    TEXT,               -- 'yes' | 'no'
+  recorded_at       TIMESTAMPTZ,
+  milestone_status  TEXT
+) AS $$
+DECLARE
+  v_alert        milestone_alerts;
+  v_ms           milestones;
+  v_action       TEXT;
+  v_resp_type    TEXT;
+  v_resp_id      UUID;
+  v_existing     milestone_responses;
+  v_status       TEXT;
+  v_actual_start DATE;
+  v_actual_end   DATE;
+BEGIN
+  IF p_response_value NOT IN ('yes', 'no') THEN
+    RAISE EXCEPTION 'Invalid response value: %', p_response_value USING ERRCODE = 'PT422';
+  END IF;
+
+  -- Lock the alert; concurrent clicks serialize here and at the response UNIQUE.
+  SELECT * INTO v_alert FROM milestone_alerts WHERE id = p_milestone_alert_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone alert % not found', p_milestone_alert_id USING ERRCODE = 'PT404';
+  END IF;
+
+  SELECT * INTO v_ms FROM milestones WHERE id = v_alert.milestone_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone % not found', v_alert.milestone_id USING ERRCODE = 'PT404';
+  END IF;
+
+  -- Cycle staleness: a reschedule bumped the cycle and stranded this link.
+  IF v_alert.cycle_number IS DISTINCT FROM v_ms.cycle_number THEN
+    RAISE EXCEPTION 'Check-in is stale (alert cycle % <> milestone cycle %)',
+      v_alert.cycle_number, v_ms.cycle_number USING ERRCODE = 'PT409';
+  END IF;
+
+  -- Derive action + response_type from the alert kind × value.
+  v_action := CASE v_alert.alert_type
+    WHEN 'start_check'      THEN 'vendor_start_'      || p_response_value
+    WHEN 'progress_check'   THEN 'vendor_progress_'   || p_response_value
+    WHEN 'completion_check' THEN 'vendor_completion_' || p_response_value
+    ELSE NULL
+  END;
+  IF v_action IS NULL THEN
+    RAISE EXCEPTION 'Alert type % is not a vendor check-in', v_alert.alert_type USING ERRCODE = 'PT422';
+  END IF;
+  v_resp_type := CASE v_alert.alert_type
+    WHEN 'start_check'      THEN 'start_confirmation'
+    WHEN 'progress_check'   THEN 'progress_check'
+    WHEN 'completion_check' THEN 'completion_confirmation'
+  END;
+
+  -- Actual dates set only on affirmative start / completion (never on 'no').
+  v_actual_start := CASE WHEN v_action = 'vendor_start_yes'      THEN p_today ELSE NULL END;
+  v_actual_end   := CASE WHEN v_action = 'vendor_completion_yes' THEN p_today ELSE NULL END;
+
+  -- Record the answer. UNIQUE(milestone_alert_id) = first-response-wins.
+  BEGIN
+    INSERT INTO milestone_responses (
+      milestone_id, response_type, response_value, milestone_alert_id, vendor_contact_id
+    ) VALUES (
+      v_alert.milestone_id, v_resp_type, p_response_value, p_milestone_alert_id, p_vendor_contact_id
+    )
+    RETURNING id INTO v_resp_id;
+  EXCEPTION WHEN unique_violation THEN
+    SELECT * INTO v_existing
+      FROM milestone_responses WHERE milestone_alert_id = p_milestone_alert_id;
+    SELECT status INTO v_status FROM milestones WHERE id = v_alert.milestone_id;
+    outcome          := 'already_answered';
+    recorded_value   := v_existing.response_value;
+    recorded_at      := v_existing.responded_at;
+    milestone_status := v_status;
+    RETURN NEXT;
+    RETURN;
+  END;
+
+  -- Authoritative state change (owns legality + ledger). A PT409 rolls back the
+  -- response INSERT above.
+  PERFORM transition_milestone(
+    p_milestone_id            => v_alert.milestone_id,
+    p_action                  => v_action,
+    p_actor_user_id           => NULL,
+    p_actor_vendor_contact_id => p_vendor_contact_id,
+    p_milestone_response_id   => v_resp_id,
+    p_milestone_alert_id      => p_milestone_alert_id,
+    p_actual_start_date       => v_actual_start,
+    p_actual_end_date         => v_actual_end,
+    p_new_end_date            => NULL,
+    p_note                    => 'Vendor answered ' || p_response_value || ' via check-in link'
+  );
+
+  UPDATE milestone_checkin_tokens
+     SET is_used = TRUE, used_at = NOW()
+   WHERE milestone_alert_id = p_milestone_alert_id;
+
+  SELECT status INTO v_status FROM milestones WHERE id = v_alert.milestone_id;
+  SELECT mr.responded_at INTO recorded_at
+    FROM milestone_responses mr WHERE mr.id = v_resp_id;
+  outcome          := 'recorded';
+  recorded_value   := p_response_value;
+  milestone_status := v_status;
+  RETURN NEXT;
+  RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) TO service_role;
 
 
 -- ============================================================================

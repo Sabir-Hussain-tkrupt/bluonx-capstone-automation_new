@@ -11,6 +11,8 @@ import type {
   BidDraft,
   BidDraftLineItem,
   FormAttachment,
+  MilestoneRespondResult,
+  MilestoneValidateResponse,
   RevisionPrefillResponse,
   SubmissionAttachmentMeta,
   SubmitBidResult,
@@ -71,4 +73,11 @@ export interface PortalApi {
     revisionRequestId: string,
     decline_reason?: string,
   ) => Promise<BidRevisionRequestResponse>;
+  /** Validate a milestone check-in magic link → JWT + context or recorded answer. */
+  validateMilestoneToken: (token: string) => Promise<MilestoneValidateResponse>;
+  /** Record a Yes/No answer to a milestone check-in (milestone tokens only). */
+  respondToMilestone: (
+    milestoneAlertId: string,
+    value: 'yes' | 'no',
+  ) => Promise<MilestoneRespondResult>;
 }

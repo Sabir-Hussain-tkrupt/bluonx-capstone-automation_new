@@ -49,4 +49,10 @@ export const ROUTES = {
   PORTAL_INVALID: '/bid/invalid',
   PORTAL_CLOSED: '/bid/closed',
   PORTAL_ALREADY_SUBMITTED: '/bid/already-submitted',
+
+  // ─── Milestone check-in (Phase 10.2, own /milestone/* subtree) ───
+  PORTAL_MILESTONE_LANDING: '/milestone/:token',
+  PORTAL_MILESTONE: '/milestone/respond',
+  PORTAL_MILESTONE_RECORDED: '/milestone/recorded',
+  PORTAL_MILESTONE_INACTIVE: '/milestone/unavailable',
 } as const;

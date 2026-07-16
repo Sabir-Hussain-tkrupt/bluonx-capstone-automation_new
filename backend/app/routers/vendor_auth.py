@@ -18,7 +18,12 @@ from supabase import Client
 from app.core.rate_limit import validate_token_rate_limit
 from app.core.supabase_client import get_supabase
 from app.core.vendor_auth import VendorContext, issue_vendor_jwt
-from app.models.vendor_portal import ValidateTokenRequest, ValidateTokenResponse
+from app.models.vendor_portal import (
+    MilestoneValidateResponse,
+    ValidateTokenRequest,
+    ValidateTokenResponse,
+)
+from app.services.milestone_portal_service import validate_milestone_token
 from app.services.vendor_portal_service import build_bid_context
 
 logger = logging.getLogger(__name__)
@@ -232,3 +237,28 @@ async def validate_magic_link_token(
     )
 
     return ValidateTokenResponse(jwt=jwt_token, bid_context=bid_context)
+
+
+@router.post(
+    "/vendor-auth/validate-milestone-token",
+    response_model=MilestoneValidateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def validate_milestone_magic_link_token(
+    payload: ValidateTokenRequest,
+    request: Request,
+    _rl: None = Depends(validate_token_rate_limit),
+    db: Client = Depends(get_supabase),
+) -> MilestoneValidateResponse:
+    """Exchange a raw milestone check-in token for a vendor JWT + context.
+
+    Fully separate from the bid validate path above — milestone tokens live in
+    their own table. Returns one of:
+      - actionable       → jwt + milestone_context (render the Yes/No page)
+      - already_answered → recorded value + date (no jwt; render the recorded page)
+    or raises 404 (unknown) / 410 (revoked / expired / stale / terminal), which
+    the SPA routes to the invalid / no-longer-current pages.
+    """
+    return validate_milestone_token(
+        db, raw_token=payload.token, client_ip=_client_ip(request)
+    )

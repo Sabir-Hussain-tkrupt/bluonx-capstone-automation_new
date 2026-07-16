@@ -658,6 +658,7 @@ REVOKE ALL ON TABLE vendor_flags            FROM anon;
 REVOKE ALL ON TABLE notifications           FROM anon;
 REVOKE ALL ON TABLE bid_revision_requests   FROM anon;
 REVOKE ALL ON TABLE milestone_events        FROM anon;
+REVOKE ALL ON TABLE milestone_checkin_tokens FROM anon;
 
 -- Also revoke anon access to our private helper functions
 REVOKE ALL ON SCHEMA private FROM anon;

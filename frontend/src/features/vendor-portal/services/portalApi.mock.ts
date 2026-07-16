@@ -14,6 +14,8 @@ import axios from 'axios';
 import type {
   BidDraft,
   FormAttachment,
+  MilestoneRespondResult,
+  MilestoneValidateResponse,
   RevisionPrefillResponse,
   SubmissionAttachmentMeta,
   SubmitBidResult,
@@ -371,6 +373,71 @@ async function downloadProjectDocument(documentId: string): Promise<string> {
   return `#mock-download/${documentId}`;
 }
 
+// ─── Milestone check-in (Phase 10.2) ────────────────────────────────
+// Sentinel tokens drive each outcome so the flow walks end-to-end sans backend:
+//   - `milestone-answered` → 200 already_answered
+//   - `milestone-stale`    → 410 (no longer current)
+//   - `milestone-invalid`  → 404 (unknown link)
+//   - anything else        → actionable happy path
+async function validateMilestoneToken(
+  token: string,
+): Promise<MilestoneValidateResponse> {
+  await delay(800);
+  switch (token) {
+    case 'milestone-answered':
+      return {
+        outcome: 'already_answered',
+        recorded_value: 'yes',
+        recorded_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      };
+    case 'milestone-stale':
+      throw new PortalApiError(
+        'TOKEN_EXPIRED',
+        'This check-in is no longer current.',
+        410,
+      );
+    case 'milestone-invalid':
+      throw new PortalApiError(
+        'TOKEN_INVALID',
+        'This check-in link is not recognized.',
+        404,
+      );
+    default:
+      return {
+        outcome: 'actionable',
+        jwt: `mock.vendor.jwt.${uid('mtok')}`,
+        milestone_context: {
+          milestone_alert_id: 'ms-alert-mock-001',
+          milestone_id: 'ms-mock-001',
+          milestone_name: 'Rough Grading',
+          project_name: 'Sunset Ridge — Phase 1',
+          task_name: 'Site Grading',
+          vendor_company_name: 'Apex Earthworks',
+          check_type: 'progress',
+          end_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10),
+          cycle_number: 1,
+        },
+      };
+  }
+}
+
+async function respondToMilestone(
+  milestoneAlertId: string,
+  value: 'yes' | 'no',
+): Promise<MilestoneRespondResult> {
+  await delay(300);
+  // eslint-disable-next-line no-console
+  console.log('[portalApi:mock] respondToMilestone →', milestoneAlertId, value);
+  return {
+    outcome: 'recorded',
+    recorded_value: value,
+    recorded_at: new Date().toISOString(),
+    milestone_status: value === 'yes' ? 'in_progress' : 'delayed',
+  };
+}
+
 export const mockPortalApi: PortalApi = {
   // Mock never hits the network, so JWT state is a no-op.
   setVendorJwt: () => {},
@@ -388,4 +455,6 @@ export const mockPortalApi: PortalApi = {
   getRevisionPrefill,
   listSubmissionAttachments,
   declineRevisionRequest,
+  validateMilestoneToken,
+  respondToMilestone,
 };
