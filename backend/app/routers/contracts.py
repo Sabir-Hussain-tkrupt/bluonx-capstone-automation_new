@@ -8,6 +8,10 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
 from app.models.awards import ContractCreate, ContractResponse, ContractUpdate
+from app.models.reviews import ReviewCreate, ReviewResponse
+from app.services import contract_service, review_service
+from app.services.contract_service import ContractError
+from app.services.review_service import ReviewError
 
 router = APIRouter()
 
@@ -66,3 +70,47 @@ async def delete_contract(
     """Terminate a contract."""
     # TODO: Implement in later phase
     raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@router.post("/contracts/{contract_id}/mark-complete", response_model=ContractResponse)
+async def mark_contract_complete(
+    contract_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Mark a contract's work complete → status `completed`.
+
+    Gated by the row-locked `fn_mark_contract_complete` RPC: refuses (409) while any
+    milestone is still open, or when the contract is already complete / terminated.
+    Surfaces the just-completed vendor rating flow on the frontend."""
+    try:
+        return contract_service.mark_contract_completed(str(contract_id), db=db)
+    except ContractError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post(
+    "/contracts/{contract_id}/review",
+    response_model=ReviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_contract_review(
+    contract_id: UUID,
+    review: ReviewCreate,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Record the one PM performance rating (1-5) for a completed contract.
+
+    vendor_id and reviewer are resolved server-side; only the rating and notes come
+    from the client. 409 if the contract is not completed or already reviewed."""
+    try:
+        return review_service.create_review(
+            contract_id=str(contract_id),
+            rating=review.rating,
+            notes=review.notes,
+            reviewed_by=user["user_id"],
+            db=db,
+        )
+    except ReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

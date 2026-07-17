@@ -75,6 +75,11 @@ class EmailSendResult:
     message_id: str
     status: str  # "sent", "failed"
     error: str | None = None
+    # The email_log row this send was recorded in. Stamped by EmailService, not
+    # by providers, and None when the service has no db client. Callers that
+    # link a domain row to its delivery record (e.g. the milestone check-in job
+    # stamping milestone_alerts.email_log_id) read it from here.
+    log_id: str | None = None
 
 
 # ── Provider protocol ───────────────────────────────────────────────────────
@@ -180,6 +185,9 @@ class EmailService:
                 await asyncio.sleep(_BACKOFF_DELAYS[attempt])
 
         assert result is not None  # loop always runs at least once
+
+        # The provider knows nothing about email_log; the service owns the link.
+        result.log_id = log_id
 
         # ── Update email_log ────────────────────────────────────────────
         if result.status == "sent":

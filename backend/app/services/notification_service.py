@@ -32,6 +32,9 @@ NOTIFICATION_TYPES: frozenset[str] = frozenset({
     "milestone_delayed",
     "milestone_unresponsive",
     "milestone_completed",
+    # Phase 10.2: a vendor check-in email bounced — escalation is suppressed and
+    # the PM is told to fix the address rather than being told the vendor is silent.
+    "milestone_delivery_failed",
 })
 
 

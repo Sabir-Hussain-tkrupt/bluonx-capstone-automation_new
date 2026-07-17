@@ -11,13 +11,16 @@ from app.jobs.scheduler import (
 
 ENDPOINT = "/api/v1/admin/scheduler-health"
 
-# The five jobs the scheduler foundation must surface: the original hourly
-# revision_expiry plus the four Phase 7 stubs registered in Task 7.1.
+# The jobs the scheduler foundation must surface: the original hourly
+# revision_expiry, the four Phase 7 jobs, and the two milestone jobs (the Phase
+# 10.3 daily check-in send and the Phase 10.2 no-response escalation).
 EXPECTED_JOB_IDS = {
     "revision_expiry",
     "daily_bid_reminders",
     "daily_insurance_expiration",
     "post_deadline_escalation",
+    "milestone_daily_checkin",
+    "milestone_no_response",
     "scheduler_self_check",
 }
 
@@ -59,8 +62,8 @@ def test_reports_recorded_run_state(authed_client, clear_last_run):
 
 
 def test_all_phase7_jobs_present(authed_client, clear_last_run):
-    """All five jobs (revision_expiry + four Phase 7 stubs) appear in the
-    health response with null last-run state before anything has run."""
+    """Every known job appears in the health response with null last-run state
+    before anything has run."""
     resp = authed_client.get(ENDPOINT)
     assert resp.status_code == 200
 
@@ -78,9 +81,10 @@ def test_all_phase7_jobs_present(authed_client, clear_last_run):
 async def test_start_scheduler_registers_jobs():
     """start_scheduler() runs every job's register() without raising.
 
-    All five Phase 7 jobs have real triggers now — scheduler_self_check
-    landed in Task 7.8 — so scheduler.get_jobs() returns exactly those
-    five entries after start.
+    Every known job has a real trigger, so scheduler.get_jobs() returns exactly
+    the expected set after start. Asserted against the same constant the health
+    response is checked with, so a new job cannot be registered without also
+    being surfaced.
 
     Async so AsyncIOScheduler.start() has a running event loop to bind to.
     """
@@ -90,13 +94,7 @@ async def test_start_scheduler_registers_jobs():
     start_scheduler()
     try:
         assert scheduler.running
-        assert {job.id for job in scheduler.get_jobs()} == {
-            "revision_expiry",
-            "daily_bid_reminders",
-            "daily_insurance_expiration",
-            "post_deadline_escalation",
-            "scheduler_self_check",
-        }
+        assert {job.id for job in scheduler.get_jobs()} == EXPECTED_JOB_IDS
     finally:
         # Leave the scheduler stopped — the session `client` fixture's
         # lifespan does its own cold start in its own event loop.

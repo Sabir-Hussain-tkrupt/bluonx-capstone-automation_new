@@ -35,13 +35,19 @@ from supabase import Client
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
-from app.core.vendor_auth import VendorContext, get_vendor_context
+from app.core.vendor_auth import (
+    VendorContext,
+    get_milestone_context,
+    get_vendor_context,
+)
 from app.models.bids import BidRevisionRequestResponse
 from app.models.vendor_portal import (
     AttachmentResponse,
     BidDraftModel,
     DeclineRevisionPayload,
     DraftPayload,
+    MilestoneRespondRequest,
+    MilestoneRespondResponse,
     RevisionPrefillResponse,
     SignedUrlResponse,
     SubmissionResponse,
@@ -49,6 +55,7 @@ from app.models.vendor_portal import (
     VendorBidContextModel,
 )
 from app.services.bid_revision_service import decline_revision_request
+from app.services.milestone_response_service import record_response
 from app.services.email_service import EmailService, get_email_service
 from app.services.template_renderer import template_renderer
 from app.services.vendor_portal_service import (
@@ -755,6 +762,39 @@ async def decline_revision_request_endpoint(
         db,
         revision_request_id=revision_request_id,
         decline_reason=reason,
+    )
+
+
+@router.post(
+    "/milestones/{milestone_alert_id}/respond",
+    response_model=MilestoneRespondResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def respond_to_milestone_checkin(
+    milestone_alert_id: UUID,
+    payload: MilestoneRespondRequest,
+    ctx: VendorContext = Depends(get_milestone_context),
+    db: Client = Depends(get_supabase),
+) -> MilestoneRespondResponse:
+    """Record a vendor's Yes/No answer to a milestone check-in.
+
+    Milestone-only: `get_milestone_context` rejects bid tokens. The JWT's
+    `milestone_alert_id` claim MUST equal the path id — a vendor must not be
+    able to answer another check-in. Identity (`vendor_contact_id`) comes from
+    the JWT, never the body. The authoritative write + concurrency guard live
+    in `fn_record_milestone_response`.
+    """
+    if str(ctx.milestone_alert_id) != str(milestone_alert_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This token does not match this check-in",
+        )
+
+    return record_response(
+        db,
+        milestone_alert_id=milestone_alert_id,
+        value=payload.value,
+        vendor_contact_id=ctx.vendor_contact_id,
     )
 
 

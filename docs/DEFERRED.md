@@ -4,6 +4,12 @@ Items intentionally deferred during implementation. Reference this file when mov
 
 ---
 
+## Milestone no-response escalation — holiday calendar (Phase 10.2)
+
+The 3-working-day silence window before a milestone check-in escalates to `unresponsive` skips **weekends only** (Mon–Fri), which is the client-confirmed MVP rule. Federal / observed holidays are NOT excluded, so a check-in sent before a long holiday weekend can escalate a day "early" in wall-clock terms.
+
+**Single touchpoint to change:** `backend/app/core/time.py::working_days_since(sent, today)` and the `WORKING_DAYS_SKIP_HOLIDAYS` flag beside it. To honour holidays, gate the weekday check on a configurable US holiday calendar (e.g. a `holidays` package or a small settings-driven date set) and flip the flag. The escalation job (`backend/app/jobs/milestone_no_response.py`) and its `>= 3` threshold stay as-is — they only consume the helper's count.
+
 ## Task 1.9 — AWS Infrastructure
 - **Blocked:** Awaiting AWS credentials from client.
 - ECS task definitions / Lambda configuration

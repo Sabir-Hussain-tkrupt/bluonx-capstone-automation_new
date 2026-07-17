@@ -16,6 +16,7 @@ import { useBidPackagesForTask } from '@/features/bids/hooks/useBidPackagesForTa
 import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
 import { useTaskActiveContract } from '@/features/milestones/hooks/useTaskActiveContract';
 import { MilestonesCard } from '@/features/milestones/components/MilestonesCard';
+import { ContractPanel } from '@/features/contracts/components/ContractPanel';
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -210,6 +211,9 @@ export function TaskDetailPage() {
           </div>
         </Card>
       )}
+
+      {/* Contract panel — mark-complete gate + vendor rating, once contracted */}
+      {activeContract && <ContractPanel taskId={taskId!} contract={activeContract} />}
 
       {/* Milestones Section — only once the task has an active contract */}
       {activeContract && <MilestonesCard taskId={taskId!} projectId={projectId!} />}

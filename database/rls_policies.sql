@@ -2,7 +2,7 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Row Level Security (RLS) Migration
 -- ============================================================================
--- Version:  3.0
+-- Version:  3.2
 -- Date:     July 12, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Depends:  bluonx_complete_schema.sql (must be applied first)
@@ -152,7 +152,9 @@ ALTER TABLE docusign_envelopes      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_responses     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_alerts        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE milestone_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE milestone_events          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE milestone_checkin_tokens  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendor_performance_reviews  ENABLE ROW LEVEL SECURITY;
 
 -- Group 7: Communication & Audit
 ALTER TABLE email_log               ENABLE ROW LEVEL SECURITY;
@@ -547,6 +549,12 @@ CREATE POLICY milestone_events_select_authenticated
   TO authenticated
   USING ( (SELECT private.is_active_user()) );
 
+
+CREATE POLICY vpr_select_authenticated
+  ON vendor_performance_reviews FOR SELECT TO authenticated
+  USING ( (SELECT private.is_active_user()) );
+REVOKE ALL ON vendor_performance_reviews FROM anon;
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GROUP 7: COMMUNICATION & AUDIT
 -- ════════════════════════════════════════════════════════════════════════════
@@ -657,6 +665,7 @@ REVOKE ALL ON TABLE vendor_flags            FROM anon;
 REVOKE ALL ON TABLE notifications           FROM anon;
 REVOKE ALL ON TABLE bid_revision_requests   FROM anon;
 REVOKE ALL ON TABLE milestone_events        FROM anon;
+REVOKE ALL ON TABLE milestone_checkin_tokens FROM anon;
 
 -- Also revoke anon access to our private helper functions
 REVOKE ALL ON SCHEMA private FROM anon;

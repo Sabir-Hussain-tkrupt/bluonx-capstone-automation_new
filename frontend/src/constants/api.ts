@@ -73,6 +73,11 @@ export const API_ENDPOINTS = {
   // Contracts
   CONTRACTS: '/contracts',
   CONTRACT: (id: string) => `/contracts/${id}`,
+  CONTRACT_MARK_COMPLETE: (id: string) => `/contracts/${id}/mark-complete`,
+  CONTRACT_REVIEW: (id: string) => `/contracts/${id}/review`,
+
+  // Vendor performance reviews
+  REVIEW: (id: string) => `/reviews/${id}`,
 
   // Milestones
   MILESTONES: '/milestones',

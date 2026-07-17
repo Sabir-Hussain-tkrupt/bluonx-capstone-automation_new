@@ -48,6 +48,8 @@ _ACTION_MARK_STARTED = "pm_mark_started"
 _ACTION_MARK_COMPLETED = "pm_mark_completed"
 _ACTION_RESCHEDULE = "pm_reschedule"
 _ACTION_CANCEL = "pm_cancel"
+# Scheduler action — no actor. Legal only from scheduled/in_progress.
+_ACTION_SYSTEM_NO_RESPONSE = "system_no_response"
 
 
 # ── Pure functions (no DB — unit-tested directly) ───────────────────────────
@@ -438,6 +440,42 @@ def cancel_milestone(milestone_id: str, *, actor_user_id: str, db: Client) -> di
         note="Cancelled by PM",
         db=db,
     )
+
+
+def escalate_no_response(
+    milestone_id: str, *, milestone_alert_id: str, note: str, db: Client
+) -> dict:
+    """Scheduler-driven no-response escalation → unresponsive.
+
+    Unlike the pm_* / vendor_* transitions this carries NO actor (the RPC's
+    system_no_response path requires neither an actor_user_id nor a
+    actor_vendor_contact_id) and pins the check-in alert whose silence triggered
+    it. Legal only from scheduled/in_progress — the RPC raises PT409 otherwise,
+    which the caller treats as "already moved, skip".
+    """
+    try:
+        resp = db.rpc(
+            "transition_milestone",
+            {
+                "p_milestone_id": str(milestone_id),
+                "p_action": _ACTION_SYSTEM_NO_RESPONSE,
+                "p_actor_user_id": None,
+                "p_actor_vendor_contact_id": None,
+                "p_milestone_response_id": None,
+                "p_milestone_alert_id": str(milestone_alert_id),
+                "p_actual_start_date": None,
+                "p_actual_end_date": None,
+                "p_new_end_date": None,
+                "p_note": note,
+            },
+        ).execute()
+    except APIError as exc:
+        raise _map_transition_error(exc) from exc
+
+    row = _first(resp.data)
+    if not row:
+        raise MilestoneError(500, "Milestone escalation failed.")
+    return row
 
 
 def _as_date(value: Any) -> date | None:

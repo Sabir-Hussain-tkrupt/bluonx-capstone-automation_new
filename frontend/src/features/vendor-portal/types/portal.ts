@@ -145,6 +145,47 @@ export interface ValidateTokenResponse {
   bid_context: VendorBidContext;
 }
 
+// ─── Milestone check-in (Phase 10.2) ────────────────────────────────
+// A fully separate portal surface from the bid flow. The vendor answers
+// ONE Yes/No question chosen by `check_type`.
+
+export type MilestoneCheckType = 'start' | 'progress' | 'completion';
+
+/** Mirrors backend MilestoneContextModel. Held in its own context slot. */
+export interface VendorMilestoneContext {
+  milestone_alert_id: string;
+  milestone_id: string;
+  milestone_name: string;
+  project_name: string;
+  task_name: string;
+  vendor_company_name: string;
+  check_type: MilestoneCheckType;
+  end_date: string; // ISO date
+  cycle_number: number;
+}
+
+/**
+ * Result of POST /vendor-auth/validate-milestone-token. Discriminated by
+ * `outcome`: 'actionable' carries jwt + milestone_context; 'already_answered'
+ * carries the recorded value + date (no jwt). Stale / terminal check-ins come
+ * back as a 410 PortalApiError, not an outcome here.
+ */
+export interface MilestoneValidateResponse {
+  outcome: 'actionable' | 'already_answered';
+  jwt?: string | null;
+  milestone_context?: VendorMilestoneContext | null;
+  recorded_value?: 'yes' | 'no' | null;
+  recorded_at?: string | null;
+}
+
+/** Result of POST /vendor-portal/milestones/{id}/respond. */
+export interface MilestoneRespondResult {
+  outcome: 'recorded' | 'already_answered';
+  recorded_value: 'yes' | 'no';
+  recorded_at: string;
+  milestone_status: string;
+}
+
 // ─── Error codes (mirror real HTTP responses) ───────────────────────
 
 export type PortalApiErrorCode =

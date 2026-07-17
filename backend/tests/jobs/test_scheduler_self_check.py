@@ -16,7 +16,10 @@ from uuid import uuid4
 import pytest
 
 from app.jobs import scheduler as scheduler_module
-from app.jobs.scheduler_self_check import run_daily_scheduler_self_check
+from app.jobs.scheduler_self_check import (
+    EXPECTED_INTERVALS,
+    run_daily_scheduler_self_check,
+)
 
 
 # ── Fake supabase ────────────────────────────────────────────────────────
@@ -130,11 +133,13 @@ def _set_last_run(job_id: str, last_run_at: datetime | None) -> None:
 
 
 def _seed_fresh(now: datetime) -> None:
-    """Seed all four evaluated jobs with a recent last_run_at so nothing is stale."""
-    _set_last_run("revision_expiry", now - timedelta(minutes=15))
-    _set_last_run("daily_bid_reminders", now - timedelta(hours=2))
-    _set_last_run("daily_insurance_expiration", now - timedelta(hours=2))
-    _set_last_run("post_deadline_escalation", now - timedelta(hours=2))
+    """Seed all evaluated jobs with a recent last_run_at so nothing is stale.
+
+    Derived from EXPECTED_INTERVALS rather than listed by hand, so adding a job
+    to the self-check cannot quietly turn every test in this file red.
+    """
+    for job_id, interval in EXPECTED_INTERVALS.items():
+        _set_last_run(job_id, now - interval / 4)
 
 
 def _run(db, notification_creator=None) -> dict:
@@ -246,7 +251,8 @@ class TestRunDailySchedulerSelfCheck:
 
     def test_cold_start_expired_grace_flags_never_run_jobs(self):
         now = datetime.now(timezone.utc)
-        # All four jobs absent from _last_run, but scheduler has been up for days.
+        # Every evaluated job absent from _last_run, but the scheduler has been
+        # up for days, past the cold-start grace, so all of them are stale.
         scheduler_module._started_at = now - timedelta(days=3)
 
         db = FakeDB(users=[_admin()])
@@ -254,9 +260,7 @@ class TestRunDailySchedulerSelfCheck:
 
         result = _run(db, notification_creator=mock)
 
-        assert set(result["stale_jobs"]) == set(
-            ["revision_expiry", "daily_bid_reminders", "daily_insurance_expiration", "post_deadline_escalation"]
-        )
+        assert set(result["stale_jobs"]) == set(EXPECTED_INTERVALS)
         msg = mock.call_args.kwargs["message"]
         assert "daily_bid_reminders: expected every 1 day, last ran never" in msg
 

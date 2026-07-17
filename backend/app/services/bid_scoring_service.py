@@ -34,8 +34,8 @@ WEIGHTS: dict[str, float] = {
     "timeline": 0.15,
 }
 
-# Placeholder until Phase 10 (milestone-driven on-time rate + flag history).
-# See /docs/DEFERRED.md > Past Performance Scoring.
+# No-history fallback: a vendor with zero performance reviews is unproven, not bad.
+# Real per-vendor scores come from the v_vendor_performance view (avg rating / 5 * 100).
 NEUTRAL_PERFORMANCE_SCORE = 75.0
 
 # Used when max_active_jobs is NULL — can't penalise for uncollected data.
@@ -106,16 +106,19 @@ def score_compliance(
     return (onboarding_component + insurance_component) / 2.0
 
 
-def score_performance(vendor_id: UUID) -> float:
+def score_performance(vendor_id: UUID, perf_map: dict[str, dict]) -> float:
     """
-    Past-performance score. Phase 10 placeholder.
+    Past-performance score: the vendor's flat-average rating mapped to 0-100
+    (avg / 5 * 100), read from the v_vendor_performance view.
 
-    Real impl will combine on-time milestone completion rate (from milestone
-    data landing in Phase 10) with vendor_flags history. The orchestrator,
-    weights, metadata snapshot, and endpoint don't change — only this body.
-    See /docs/DEFERRED.md > Past Performance Scoring.
+    Pure: the orchestrator does the DB read and passes `perf_map`
+    ({vendor_id_str: {"performance_score", "review_count"}}). A vendor absent
+    from the map has no reviews yet, so falls back to the neutral 75.
     """
-    return NEUTRAL_PERFORMANCE_SCORE
+    entry = perf_map.get(str(vendor_id))
+    if entry is None or entry.get("performance_score") is None:
+        return NEUTRAL_PERFORMANCE_SCORE
+    return float(entry["performance_score"])
 
 
 def score_capacity(
@@ -270,6 +273,21 @@ async def score_bid_package(
     submission_ids = [s["id"] for s in cohort]
     lowest = min(_to_decimal(s["total_amount"]) for s in cohort)
 
+    # 3b) Batched per-vendor performance read. One query over v_vendor_performance
+    # for the cohort's vendors → {vendor_id: {performance_score, review_count}}.
+    # Vendors with no reviews are absent from the view, so they fall through to the
+    # neutral 75 in score_performance. Keeps that function pure (no DB).
+    cohort_vendor_ids = list({str(s["vendor_id"]) for s in cohort})
+    perf_resp = (
+        db.table("v_vendor_performance")
+        .select("vendor_id, performance_score, review_count")
+        .in_("vendor_id", cohort_vendor_ids)
+        .execute()
+    )
+    perf_map: dict[str, dict] = {
+        str(r["vendor_id"]): r for r in (perf_resp.data or [])
+    }
+
     # 4) Look up any existing bid_scores rows for these submissions so manual
     # adjustments are preserved on recompute.
     existing_resp = (
@@ -302,18 +320,30 @@ async def score_bid_package(
         current_jobs = vendor.get("current_active_jobs") or 0
         onboarding = vendor.get("onboarding_status")
 
+        perf_entry = perf_map.get(str(sub["vendor_id"]))
         sub_scores = {
             "price": score_price(this_total, lowest),
             "compliance": score_compliance(
                 onboarding, insurance_exp, deadline_date
             ),
-            "performance": score_performance(UUID(sub["vendor_id"])),
+            "performance": score_performance(UUID(sub["vendor_id"]), perf_map),
             "capacity": score_capacity(max_jobs, current_jobs),
             "timeline": score_timeline(proposed_date, desired_date),
         }
         total_weighted = round(
             sum(WEIGHTS[k] * v for k, v in sub_scores.items()), 2
         )
+
+        # Provenance for the performance dimension: was it a real per-vendor
+        # average, or the neutral no-history fallback? Recorded so an old score
+        # row stays interpretable after the vendor accrues (or loses) reviews.
+        if perf_entry and perf_entry.get("performance_score") is not None:
+            performance_provenance: dict[str, Any] = {
+                "performance_basis": "reviews",
+                "review_count": perf_entry.get("review_count"),
+            }
+        else:
+            performance_provenance = {"performance_basis": "neutral_default"}
 
         inputs_snapshot = {
             "this_total": str(this_total),
@@ -338,6 +368,7 @@ async def score_bid_package(
             "weights": WEIGHTS,
             "inputs": inputs_snapshot,
             "sub_scores": sub_scores,
+            "performance": performance_provenance,
             "cohort_size": cohort_size,
             "computed_at": computed_at,
         }

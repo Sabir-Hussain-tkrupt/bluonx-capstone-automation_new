@@ -53,6 +53,7 @@ def _build_default_cohort_spec(
     invitations: list[dict] | None = None,
     existing_scores: list[dict] | None = None,
     upsert_returns: list[dict] | None = None,
+    perf_rows: list[dict] | None = None,
 ) -> dict:
     """Compose a make_db spec for a happy 3-vendor cohort."""
     pkg = make_package(**(package_overrides or {}))
@@ -86,6 +87,7 @@ def _build_default_cohort_spec(
         "bid_packages": {"select": pkg},
         "bid_invitations": {"select": invitations},
         "bid_submissions": {"select": submissions},
+        "v_vendor_performance": {"select": perf_rows or []},
         "bid_scores": {
             "select": existing_scores,
             "upsert": upsert_returns,
@@ -462,6 +464,80 @@ async def test_recompute_idempotent():
 
 
 # ── Cohort status / draft / superseded filtering ─────────────────────────
+
+
+# ── Performance dimension wiring (v_vendor_performance) ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_vendor_with_reviews_uses_real_performance_score():
+    """A vendor present in v_vendor_performance scores its real value, and the
+    metadata records the 'reviews' provenance + review_count."""
+    perf_rows = [
+        {
+            "vendor_id": str(VENDOR_IDS[0]),
+            "performance_score": "80.00",  # rating 4 → 80
+            "review_count": 3,
+        }
+    ]
+    spec = _build_default_cohort_spec(perf_rows=perf_rows)
+    db = make_db(spec)
+    await score_bid_package(BID_PACKAGE_ID, scored_by=PM_USER_ID, db=db)
+
+    upsert_calls = [
+        c for c in db._call_log if c[0] == "bid_scores" and c[1] == "upsert"
+    ]
+    rows = upsert_calls[0][2][0]
+    by_sub = {r["bid_submission_id"]: r for r in rows}
+
+    v0 = by_sub[str(SUBMISSION_IDS[0])]
+    assert Decimal(v0["performance_score"]) == Decimal("80.00")
+    assert v0["scoring_metadata"]["performance"] == {
+        "performance_basis": "reviews",
+        "review_count": 3,
+    }
+
+    # A vendor absent from the view falls back to neutral 75.
+    v1 = by_sub[str(SUBMISSION_IDS[1])]
+    assert Decimal(v1["performance_score"]) == Decimal(str(NEUTRAL_PERFORMANCE_SCORE))
+    assert v1["scoring_metadata"]["performance"] == {
+        "performance_basis": "neutral_default"
+    }
+
+
+@pytest.mark.asyncio
+async def test_no_reviews_all_neutral_with_provenance():
+    """With an empty view, every vendor gets 75 and 'neutral_default' provenance
+    (the pre-feature behavior, now explicitly recorded)."""
+    spec = _build_default_cohort_spec(perf_rows=[])
+    db = make_db(spec)
+    await score_bid_package(BID_PACKAGE_ID, scored_by=PM_USER_ID, db=db)
+
+    upsert_calls = [
+        c for c in db._call_log if c[0] == "bid_scores" and c[1] == "upsert"
+    ]
+    for row in upsert_calls[0][2][0]:
+        assert Decimal(row["performance_score"]) == Decimal(
+            str(NEUTRAL_PERFORMANCE_SCORE)
+        )
+        assert row["scoring_metadata"]["performance"]["performance_basis"] == (
+            "neutral_default"
+        )
+
+
+@pytest.mark.asyncio
+async def test_performance_view_queried_by_cohort_vendor_ids():
+    """The orchestrator batches one v_vendor_performance read filtered to the
+    cohort's vendor ids (no per-submission N+1)."""
+    spec = _build_default_cohort_spec()
+    db = make_db(spec)
+    await score_bid_package(BID_PACKAGE_ID, scored_by=PM_USER_ID, db=db)
+
+    perf_chain = db._chains["v_vendor_performance"]
+    in_calls = [c.args for c in perf_chain.in_.call_args_list]
+    vendor_in = next((a for a in in_calls if a and a[0] == "vendor_id"), None)
+    assert vendor_in is not None
+    assert set(vendor_in[1]) == {str(v) for v in VENDOR_IDS}
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,8 @@ EXPECTED_INTERVALS: dict[str, timedelta] = {
     "daily_bid_reminders": timedelta(days=1),
     "daily_insurance_expiration": timedelta(days=1),
     "post_deadline_escalation": timedelta(days=1),
+    "milestone_daily_checkin": timedelta(days=1),
+    "milestone_no_response": timedelta(days=1),
 }
 GRACE_WINDOW = timedelta(hours=2)
 

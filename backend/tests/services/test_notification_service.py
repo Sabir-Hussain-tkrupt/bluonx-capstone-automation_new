@@ -363,4 +363,6 @@ def test_controlled_vocabulary_matches_spec():
         "milestone_delayed",
         "milestone_unresponsive",
         "milestone_completed",
+        # Phase 10.2: bounced check-in delivery
+        "milestone_delivery_failed",
     })

@@ -11,3 +11,7 @@ export { TokenExpiredPage } from './pages/TokenExpiredPage';
 export { InvalidTokenPage } from './pages/InvalidTokenPage';
 export { BiddingClosedPage } from './pages/BiddingClosedPage';
 export { AlreadySubmittedPage } from './pages/AlreadySubmittedPage';
+export { MilestoneLandingPage } from './pages/MilestoneLandingPage';
+export { MilestoneRespondPage } from './pages/MilestoneRespondPage';
+export { MilestoneRecordedPage } from './pages/MilestoneRecordedPage';
+export { MilestoneNoLongerCurrentPage } from './pages/MilestoneNoLongerCurrentPage';

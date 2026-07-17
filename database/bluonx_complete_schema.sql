@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.1
--- Date:     July 13, 2026
+-- Version:  3.3
+-- Date:     July 15, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   30
+-- Tables:   31
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -15,7 +15,7 @@
 --   3. Project & Task Management (3 tables)
 --   4. Bid Lifecycle             (11 tables)
 --   5. Award & Contract          (3 tables)
---   6. Milestone Tracking        (4 tables)
+--   6. Milestone Tracking        (5 tables)
 --   7. Communication & Audit     (3 tables)
 --
 -- CONVENTIONS:
@@ -619,13 +619,15 @@ CREATE TABLE milestone_responses (
                                       CHECK (response_type IN ('start_confirmation', 'progress_check',
                                                                 'completion_confirmation')),
   response_value        VARCHAR(10)   NOT NULL CHECK (response_value IN ('yes', 'no')),
-  response_token_hash   VARCHAR(255)  NOT NULL,
+  milestone_alert_id    UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE RESTRICT,
   vendor_contact_id     UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
-  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT uq_milestone_responses_alert UNIQUE (milestone_alert_id)
 );
 
 COMMENT ON TABLE milestone_responses IS 'Logs every vendor email-link response. Immutable audit record.';
-
+COMMENT ON COLUMN milestone_responses.milestone_alert_id IS 'Which check-in this answers. UNIQUE: one recorded response per alert (first-response-wins, enforced at the DB).';
 
 -- Milestone alerts: milestone-specific email tracking
 -- NOTE: email_log FK added via ALTER TABLE below (table ordering dependency)
@@ -639,14 +641,12 @@ CREATE TABLE milestone_alerts (
                                                             'no_response_alert', 'completion_notification')),
   recipient_type        VARCHAR(20)   NOT NULL CHECK (recipient_type IN ('vendor', 'pm')),
   cycle_number          INTEGER,
-  response_token_hash   VARCHAR(255),
   created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE  milestone_alerts             IS 'Milestone-specific email tracking. References email_log for delivery details (no duplication).';
 COMMENT ON COLUMN milestone_alerts.email_log_id IS 'FK to email_log. Delivery status lives there, milestone context lives here.';
 COMMENT ON COLUMN milestone_alerts.cycle_number IS 'Milestone cycle this check-in was sent under. The token is stale when this != milestones.cycle_number.';
-COMMENT ON COLUMN milestone_alerts.response_token_hash IS 'DEPRECATED / UNUSED. Milestone check-in tokens live in magic_link_tokens (with a milestone_alert_id discriminator), mirroring the bid-revision flow. Retained only to avoid a destructive migration.';
 
 
 -- Milestone events: append-only transition ledger (feeds the PM activity timeline)
@@ -684,6 +684,66 @@ COMMENT ON TABLE  milestone_events IS 'Append-only audit ledger. One immutable r
 COMMENT ON COLUMN milestone_events.trigger_type IS 'Also determines the actor kind, so no separate actor_type column: creation/pm_action = user, vendor_response = vendor contact, system_no_response = scheduler.';
 COMMENT ON COLUMN milestone_events.milestone_alert_id IS 'WHICH check-in this event relates to. Required even when milestone_response_id is NULL (a system_no_response event has no response row).';
 COMMENT ON COLUMN milestone_events.working_end_date IS 'The plan at event time. The only date snapshotted: reschedule is end-only, and actual dates are write-once, so the milestone row stays authoritative for those.';
+
+-- 
+-- milestone_checkin_tokens
+-- 
+-- Same SHAPE as a bid magic link (hash, expiry, used/revoked audit, ip), but
+-- native to the milestone world: its discriminator IS its reason to exist, so
+-- milestone_alert_id is a plain NOT NULL FK — no nullable-FK gymnastics.
+
+CREATE TABLE milestone_checkin_tokens (
+  id                 UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  milestone_alert_id UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE CASCADE,
+  milestone_id       UUID          NOT NULL REFERENCES milestones(id) ON DELETE CASCADE,
+  vendor_contact_id  UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
+  cycle_number       INTEGER       NOT NULL,   -- the milestone cycle this token was minted under
+  token_hash         VARCHAR(255)  NOT NULL UNIQUE,
+  expires_at         TIMESTAMPTZ   NOT NULL,   -- 7-day hard expiry, independent of cycle staleness
+  used_at            TIMESTAMPTZ,
+  is_used            BOOLEAN       NOT NULL DEFAULT FALSE,
+  ip_address         INET,
+  revoked_at         TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  -- One token per alert: an alert IS a single check-in send, so it has exactly
+  -- one live link. (A resend under a new cycle is a new alert row.)
+  CONSTRAINT uq_milestone_checkin_tokens_alert UNIQUE (milestone_alert_id)
+);
+COMMENT ON TABLE milestone_checkin_tokens IS 'Vendor magic-link tokens for milestone check-ins. One token per milestone_alert (one check). Validity = not used AND not revoked AND before expires_at AND cycle_number = milestones.cycle_number. Answering spends it; a reschedule (cycle bump) strands it.';
+COMMENT ON COLUMN milestone_checkin_tokens.cycle_number IS 'The milestone cycle at mint time. A token is stale the moment milestones.cycle_number moves past it — this is the declarative staleness that needs no cleanup pass.';
+
+
+-- Vendor performance reviews: one PM rating (1-5) per completed contract.
+-- Human-set, never inferred. The ONLY input to the Phase 8 performance
+-- dimension (vendor flags are out of product scope). Editable for corrections.
+CREATE TABLE vendor_performance_reviews (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id  UUID        NOT NULL UNIQUE REFERENCES contracts(id) ON DELETE RESTRICT,
+  vendor_id    UUID        NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,  -- = contracts.vendor_id (trigger-enforced)
+  rating       SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  notes        TEXT,
+  reviewed_by  UUID        REFERENCES users(id) ON DELETE SET NULL,  -- reviewer is context, not a structural parent: a departed user must not block or destroy the rating
+  reviewed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when the current rating was set (advances on edit)
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when the review first existed (frozen)
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE vendor_performance_reviews IS
+  'One PM rating (1-5) per completed contract. Human-set, never inferred. Aggregated by v_vendor_performance to feed the Phase 8 performance dimension. UNIQUE(contract_id) = one review per contract.';
+
+CREATE INDEX idx_vpr_vendor_id ON vendor_performance_reviews (vendor_id);
+
+-- Triggers (their functions live in SECTION 1/6 respectively; fn_set_updated_at
+-- already exists, fn_enforce_review_vendor_consistency is BLOCK B).
+CREATE TRIGGER trg_vpr_vendor_consistency
+  BEFORE INSERT OR UPDATE OF vendor_id, contract_id ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_enforce_review_vendor_consistency();
+
+CREATE TRIGGER trg_vpr_updated_at
+  BEFORE UPDATE ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 
 -- ========================================
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -860,6 +920,8 @@ CREATE INDEX idx_milestone_responses_milestone_id   ON milestone_responses (mile
 CREATE INDEX idx_milestone_alerts_milestone_id      ON milestone_alerts (milestone_id);
 CREATE INDEX idx_milestone_alerts_email_log_id      ON milestone_alerts (email_log_id);
 CREATE INDEX idx_milestone_events_milestone ON milestone_events (milestone_id, created_at DESC);
+CREATE INDEX idx_milestone_checkin_tokens_hash     ON milestone_checkin_tokens (token_hash);
+CREATE INDEX idx_milestone_checkin_tokens_milestone ON milestone_checkin_tokens (milestone_id);
 
 -- ---- Group 7: Communication & Audit ----
 CREATE INDEX idx_email_log_type_status              ON email_log (email_type, status);
@@ -1243,6 +1305,26 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_contracts_manage_vendor_capacity
   AFTER UPDATE ON contracts
   FOR EACH ROW EXECUTE FUNCTION fn_manage_vendor_capacity_on_contract();
+
+
+-- 6.5c: Vendor performance review vendor_id consistency
+-- Keeps vendor_performance_reviews.vendor_id in step with the contract's vendor
+-- (mirrors the denormalized-FK guard pattern used on awards/milestones).
+CREATE OR REPLACE FUNCTION fn_enforce_review_vendor_consistency()
+RETURNS TRIGGER AS $$
+DECLARE v_contract_vendor UUID;
+BEGIN
+  SELECT vendor_id INTO v_contract_vendor FROM contracts WHERE id = NEW.contract_id;
+  IF v_contract_vendor IS NULL THEN
+    RAISE EXCEPTION 'Contract % not found', NEW.contract_id USING ERRCODE = 'PT404';
+  END IF;
+  IF NEW.vendor_id <> v_contract_vendor THEN
+    RAISE EXCEPTION 'vendor_id (%) does not match contract vendor (%)',
+      NEW.vendor_id, v_contract_vendor USING ERRCODE = 'PT422';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -1887,6 +1969,181 @@ REVOKE ALL ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, 
 GRANT EXECUTE ON FUNCTION transition_milestone(UUID, TEXT, UUID, UUID, UUID, UUID, DATE, DATE, DATE, TEXT) TO service_role;
 
 
+-- ----------------------------------------------------------------------------
+-- fn_record_milestone_response — atomic vendor check-in recorder (Phase 10.2)
+-- ----------------------------------------------------------------------------
+-- Records a milestone_responses row, runs transition_milestone(), and spends the
+-- token in ONE transaction (supabase-py has no client transactions). The response
+-- INSERT runs first, so UNIQUE(milestone_alert_id) is the first-response-wins gate;
+-- a transition PT409 (illegal action / milestone moved terminal) propagates and
+-- rolls the response INSERT back, so there is never an orphan response without an
+-- event. Vendor identity (p_vendor_contact_id) comes from the vendor JWT only.
+
+CREATE OR REPLACE FUNCTION fn_record_milestone_response(
+  p_milestone_alert_id  UUID,
+  p_response_value      TEXT,            -- 'yes' | 'no'
+  p_vendor_contact_id   UUID,
+  p_today               DATE             -- business-timezone "today"
+)
+RETURNS TABLE (
+  outcome           TEXT,               -- 'recorded' | 'already_answered'
+  recorded_value    TEXT,               -- 'yes' | 'no'
+  recorded_at       TIMESTAMPTZ,
+  milestone_status  TEXT
+) AS $$
+DECLARE
+  v_alert        milestone_alerts;
+  v_ms           milestones;
+  v_action       TEXT;
+  v_resp_type    TEXT;
+  v_resp_id      UUID;
+  v_existing     milestone_responses;
+  v_status       TEXT;
+  v_actual_start DATE;
+  v_actual_end   DATE;
+BEGIN
+  IF p_response_value NOT IN ('yes', 'no') THEN
+    RAISE EXCEPTION 'Invalid response value: %', p_response_value USING ERRCODE = 'PT422';
+  END IF;
+
+  -- Lock the alert; concurrent clicks serialize here and at the response UNIQUE.
+  SELECT * INTO v_alert FROM milestone_alerts WHERE id = p_milestone_alert_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone alert % not found', p_milestone_alert_id USING ERRCODE = 'PT404';
+  END IF;
+
+  SELECT * INTO v_ms FROM milestones WHERE id = v_alert.milestone_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Milestone % not found', v_alert.milestone_id USING ERRCODE = 'PT404';
+  END IF;
+
+  -- Cycle staleness: a reschedule bumped the cycle and stranded this link.
+  IF v_alert.cycle_number IS DISTINCT FROM v_ms.cycle_number THEN
+    RAISE EXCEPTION 'Check-in is stale (alert cycle % <> milestone cycle %)',
+      v_alert.cycle_number, v_ms.cycle_number USING ERRCODE = 'PT409';
+  END IF;
+
+  -- Derive action + response_type from the alert kind × value.
+  v_action := CASE v_alert.alert_type
+    WHEN 'start_check'      THEN 'vendor_start_'      || p_response_value
+    WHEN 'progress_check'   THEN 'vendor_progress_'   || p_response_value
+    WHEN 'completion_check' THEN 'vendor_completion_' || p_response_value
+    ELSE NULL
+  END;
+  IF v_action IS NULL THEN
+    RAISE EXCEPTION 'Alert type % is not a vendor check-in', v_alert.alert_type USING ERRCODE = 'PT422';
+  END IF;
+  v_resp_type := CASE v_alert.alert_type
+    WHEN 'start_check'      THEN 'start_confirmation'
+    WHEN 'progress_check'   THEN 'progress_check'
+    WHEN 'completion_check' THEN 'completion_confirmation'
+  END;
+
+  -- Actual dates set only on affirmative start / completion (never on 'no').
+  v_actual_start := CASE WHEN v_action = 'vendor_start_yes'      THEN p_today ELSE NULL END;
+  v_actual_end   := CASE WHEN v_action = 'vendor_completion_yes' THEN p_today ELSE NULL END;
+
+  -- Record the answer. UNIQUE(milestone_alert_id) = first-response-wins.
+  BEGIN
+    INSERT INTO milestone_responses (
+      milestone_id, response_type, response_value, milestone_alert_id, vendor_contact_id
+    ) VALUES (
+      v_alert.milestone_id, v_resp_type, p_response_value, p_milestone_alert_id, p_vendor_contact_id
+    )
+    RETURNING id INTO v_resp_id;
+  EXCEPTION WHEN unique_violation THEN
+    SELECT * INTO v_existing
+      FROM milestone_responses WHERE milestone_alert_id = p_milestone_alert_id;
+    SELECT status INTO v_status FROM milestones WHERE id = v_alert.milestone_id;
+    outcome          := 'already_answered';
+    recorded_value   := v_existing.response_value;
+    recorded_at      := v_existing.responded_at;
+    milestone_status := v_status;
+    RETURN NEXT;
+    RETURN;
+  END;
+
+  -- Authoritative state change (owns legality + ledger). A PT409 rolls back the
+  -- response INSERT above.
+  PERFORM transition_milestone(
+    p_milestone_id            => v_alert.milestone_id,
+    p_action                  => v_action,
+    p_actor_user_id           => NULL,
+    p_actor_vendor_contact_id => p_vendor_contact_id,
+    p_milestone_response_id   => v_resp_id,
+    p_milestone_alert_id      => p_milestone_alert_id,
+    p_actual_start_date       => v_actual_start,
+    p_actual_end_date         => v_actual_end,
+    p_new_end_date            => NULL,
+    p_note                    => 'Vendor answered ' || p_response_value || ' via check-in link'
+  );
+
+  UPDATE milestone_checkin_tokens
+     SET is_used = TRUE, used_at = NOW()
+   WHERE milestone_alert_id = p_milestone_alert_id;
+
+  SELECT status INTO v_status FROM milestones WHERE id = v_alert.milestone_id;
+  SELECT mr.responded_at INTO recorded_at
+    FROM milestone_responses mr WHERE mr.id = v_resp_id;
+  outcome          := 'recorded';
+  recorded_value   := p_response_value;
+  milestone_status := v_status;
+  RETURN NEXT;
+  RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) TO service_role;
+
+
+-- Mark a contract complete. Gated cross-row transition: only when every
+-- milestone on the contract is done. Row-locked + re-checked inside the lock to
+-- close the TOCTOU window (a milestone reopening, or a new one inserted, between
+-- check and write). Same house pattern as transition_milestone().
+CREATE OR REPLACE FUNCTION fn_mark_contract_complete(
+  p_contract_id UUID
+)
+RETURNS SETOF contracts AS $$
+DECLARE
+  v_cur     contracts;
+  v_open    INTEGER;
+  v_result  contracts;
+BEGIN
+  SELECT * INTO v_cur FROM contracts WHERE id = p_contract_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Contract % not found', p_contract_id USING ERRCODE = 'PT404';
+  END IF;
+
+  IF v_cur.status = 'completed' THEN
+    RAISE EXCEPTION 'Contract is already complete' USING ERRCODE = 'PT409';
+  END IF;
+  IF v_cur.status = 'terminated' THEN
+    RAISE EXCEPTION 'A terminated contract cannot be completed' USING ERRCODE = 'PT409';
+  END IF;
+
+  SELECT COUNT(*) INTO v_open
+    FROM milestones
+   WHERE contract_id = p_contract_id
+     AND status NOT IN ('completed','cancelled');
+
+  IF v_open > 0 THEN
+    RAISE EXCEPTION 'Contract has % milestone(s) still open; complete or cancel them first', v_open
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  UPDATE contracts SET status = 'completed'
+   WHERE id = p_contract_id
+   RETURNING * INTO v_result;
+
+  RETURN NEXT v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL   ON FUNCTION fn_mark_contract_complete(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_mark_contract_complete(UUID) TO service_role;
+
+
 -- ============================================================================
 -- SECTION 8: VIEWS (read surfaces)
 -- ============================================================================
@@ -1997,6 +2254,28 @@ COMMENT ON VIEW v_milestone_overview IS
 -- Read-only surface for signed-in staff. Vendors never touch it.
 REVOKE ALL ON v_milestone_overview FROM PUBLIC, anon;
 GRANT SELECT ON v_milestone_overview TO authenticated, service_role;
+
+
+-- Per-vendor flat average rating and 0-100 performance_score (avg/5*100, so a
+-- poorly-rated vendor floors at 20, not 0). Flat mean is deliberate: predictable
+-- and human-reproducible. Vendors with no reviews are ABSENT -> the scorer uses
+-- the neutral 75 fallback (a new vendor is not penalised for having no history).
+-- security_invoker = true: caller RLS applies (a view without it bypasses RLS).
+CREATE OR REPLACE VIEW v_vendor_performance
+WITH (security_invoker = true) AS
+SELECT
+    vendor_id,
+    COUNT(*)                                  AS review_count,
+    ROUND(AVG(rating)::numeric, 2)            AS avg_rating,
+    ROUND(AVG(rating)::numeric / 5 * 100, 2)  AS performance_score   -- 0-100
+FROM vendor_performance_reviews
+GROUP BY vendor_id;
+
+COMMENT ON VIEW v_vendor_performance IS
+  'Per-vendor flat average rating and 0-100 performance_score (avg_rating/5*100). Feeds the Phase 8 performance dimension. Vendors with no reviews are absent -> scorer uses the neutral 75 fallback. security_invoker = true.';
+
+REVOKE ALL ON v_vendor_performance FROM PUBLIC, anon;
+GRANT SELECT ON v_vendor_performance TO authenticated, service_role;
 
 
 -- ============================================================================
