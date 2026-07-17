@@ -154,6 +154,7 @@ ALTER TABLE milestone_responses     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_alerts        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_events          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestone_checkin_tokens  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendor_performance_reviews  ENABLE ROW LEVEL SECURITY;
 
 -- Group 7: Communication & Audit
 ALTER TABLE email_log               ENABLE ROW LEVEL SECURITY;
@@ -547,6 +548,12 @@ CREATE POLICY milestone_events_select_authenticated
   ON milestone_events FOR SELECT
   TO authenticated
   USING ( (SELECT private.is_active_user()) );
+
+
+CREATE POLICY vpr_select_authenticated
+  ON vendor_performance_reviews FOR SELECT TO authenticated
+  USING ( (SELECT private.is_active_user()) );
+REVOKE ALL ON vendor_performance_reviews FROM anon;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GROUP 7: COMMUNICATION & AUDIT

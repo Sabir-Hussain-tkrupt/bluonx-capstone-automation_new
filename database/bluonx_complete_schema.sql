@@ -714,6 +714,36 @@ COMMENT ON TABLE milestone_checkin_tokens IS 'Vendor magic-link tokens for miles
 COMMENT ON COLUMN milestone_checkin_tokens.cycle_number IS 'The milestone cycle at mint time. A token is stale the moment milestones.cycle_number moves past it — this is the declarative staleness that needs no cleanup pass.';
 
 
+-- Vendor performance reviews: one PM rating (1-5) per completed contract.
+-- Human-set, never inferred. The ONLY input to the Phase 8 performance
+-- dimension (vendor flags are out of product scope). Editable for corrections.
+CREATE TABLE vendor_performance_reviews (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id  UUID        NOT NULL UNIQUE REFERENCES contracts(id) ON DELETE RESTRICT,
+  vendor_id    UUID        NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,  -- = contracts.vendor_id (trigger-enforced)
+  rating       SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  notes        TEXT,
+  reviewed_by  UUID        REFERENCES users(id) ON DELETE SET NULL,  -- reviewer is context, not a structural parent: a departed user must not block or destroy the rating
+  reviewed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when the current rating was set (advances on edit)
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when the review first existed (frozen)
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE vendor_performance_reviews IS
+  'One PM rating (1-5) per completed contract. Human-set, never inferred. Aggregated by v_vendor_performance to feed the Phase 8 performance dimension. UNIQUE(contract_id) = one review per contract.';
+
+CREATE INDEX idx_vpr_vendor_id ON vendor_performance_reviews (vendor_id);
+
+-- Triggers (their functions live in SECTION 1/6 respectively; fn_set_updated_at
+-- already exists, fn_enforce_review_vendor_consistency is BLOCK B).
+CREATE TRIGGER trg_vpr_vendor_consistency
+  BEFORE INSERT OR UPDATE OF vendor_id, contract_id ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_enforce_review_vendor_consistency();
+
+CREATE TRIGGER trg_vpr_updated_at
+  BEFORE UPDATE ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 
 -- ========================================
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -1275,6 +1305,26 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_contracts_manage_vendor_capacity
   AFTER UPDATE ON contracts
   FOR EACH ROW EXECUTE FUNCTION fn_manage_vendor_capacity_on_contract();
+
+
+-- 6.5c: Vendor performance review vendor_id consistency
+-- Keeps vendor_performance_reviews.vendor_id in step with the contract's vendor
+-- (mirrors the denormalized-FK guard pattern used on awards/milestones).
+CREATE OR REPLACE FUNCTION fn_enforce_review_vendor_consistency()
+RETURNS TRIGGER AS $$
+DECLARE v_contract_vendor UUID;
+BEGIN
+  SELECT vendor_id INTO v_contract_vendor FROM contracts WHERE id = NEW.contract_id;
+  IF v_contract_vendor IS NULL THEN
+    RAISE EXCEPTION 'Contract % not found', NEW.contract_id USING ERRCODE = 'PT404';
+  END IF;
+  IF NEW.vendor_id <> v_contract_vendor THEN
+    RAISE EXCEPTION 'vendor_id (%) does not match contract vendor (%)',
+      NEW.vendor_id, v_contract_vendor USING ERRCODE = 'PT422';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -2047,6 +2097,53 @@ REVOKE ALL ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) FROM
 GRANT EXECUTE ON FUNCTION fn_record_milestone_response(UUID, TEXT, UUID, DATE) TO service_role;
 
 
+-- Mark a contract complete. Gated cross-row transition: only when every
+-- milestone on the contract is done. Row-locked + re-checked inside the lock to
+-- close the TOCTOU window (a milestone reopening, or a new one inserted, between
+-- check and write). Same house pattern as transition_milestone().
+CREATE OR REPLACE FUNCTION fn_mark_contract_complete(
+  p_contract_id UUID
+)
+RETURNS SETOF contracts AS $$
+DECLARE
+  v_cur     contracts;
+  v_open    INTEGER;
+  v_result  contracts;
+BEGIN
+  SELECT * INTO v_cur FROM contracts WHERE id = p_contract_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Contract % not found', p_contract_id USING ERRCODE = 'PT404';
+  END IF;
+
+  IF v_cur.status = 'completed' THEN
+    RAISE EXCEPTION 'Contract is already complete' USING ERRCODE = 'PT409';
+  END IF;
+  IF v_cur.status = 'terminated' THEN
+    RAISE EXCEPTION 'A terminated contract cannot be completed' USING ERRCODE = 'PT409';
+  END IF;
+
+  SELECT COUNT(*) INTO v_open
+    FROM milestones
+   WHERE contract_id = p_contract_id
+     AND status NOT IN ('completed','cancelled');
+
+  IF v_open > 0 THEN
+    RAISE EXCEPTION 'Contract has % milestone(s) still open; complete or cancel them first', v_open
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  UPDATE contracts SET status = 'completed'
+   WHERE id = p_contract_id
+   RETURNING * INTO v_result;
+
+  RETURN NEXT v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL   ON FUNCTION fn_mark_contract_complete(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_mark_contract_complete(UUID) TO service_role;
+
+
 -- ============================================================================
 -- SECTION 8: VIEWS (read surfaces)
 -- ============================================================================
@@ -2157,6 +2254,28 @@ COMMENT ON VIEW v_milestone_overview IS
 -- Read-only surface for signed-in staff. Vendors never touch it.
 REVOKE ALL ON v_milestone_overview FROM PUBLIC, anon;
 GRANT SELECT ON v_milestone_overview TO authenticated, service_role;
+
+
+-- Per-vendor flat average rating and 0-100 performance_score (avg/5*100, so a
+-- poorly-rated vendor floors at 20, not 0). Flat mean is deliberate: predictable
+-- and human-reproducible. Vendors with no reviews are ABSENT -> the scorer uses
+-- the neutral 75 fallback (a new vendor is not penalised for having no history).
+-- security_invoker = true: caller RLS applies (a view without it bypasses RLS).
+CREATE OR REPLACE VIEW v_vendor_performance
+WITH (security_invoker = true) AS
+SELECT
+    vendor_id,
+    COUNT(*)                                  AS review_count,
+    ROUND(AVG(rating)::numeric, 2)            AS avg_rating,
+    ROUND(AVG(rating)::numeric / 5 * 100, 2)  AS performance_score   -- 0-100
+FROM vendor_performance_reviews
+GROUP BY vendor_id;
+
+COMMENT ON VIEW v_vendor_performance IS
+  'Per-vendor flat average rating and 0-100 performance_score (avg_rating/5*100). Feeds the Phase 8 performance dimension. Vendors with no reviews are absent -> scorer uses the neutral 75 fallback. security_invoker = true.';
+
+REVOKE ALL ON v_vendor_performance FROM PUBLIC, anon;
+GRANT SELECT ON v_vendor_performance TO authenticated, service_role;
 
 
 -- ============================================================================
