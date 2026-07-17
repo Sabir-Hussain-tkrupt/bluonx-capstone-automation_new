@@ -15,8 +15,12 @@ from uuid import uuid4
 
 import pytest
 
+from app.jobs import milestone_daily_checkin as checkin_job
 from app.jobs import milestone_no_response as job
+from app.services.email_service import EmailService, MockEmailProvider
 from app.services.milestone_service import MilestoneError
+
+from .conftest import FakeDB
 
 # 2026-07-10 Fri (sent) → 2026-07-15 Wed (today) = 3 working days.
 TODAY = date(2026, 7, 15)
@@ -167,3 +171,149 @@ async def test_transition_conflict_is_swallowed(make_db, _patch_clock_and_side_e
     counts = await _run(db)
     assert counts["escalated"] == 0
     assert counts["skipped_already_escalated"] == 1
+
+
+# ── Bounce rule, end to end with the check-in job (Phase 10.3) ─────────────
+#
+# The tests above hand-build the email_log embed, so they pass even when nothing
+# populates milestone_alerts.email_log_id, which was exactly the live defect: the
+# bounce rule was written, tested, and inert. This test earns the rule instead. It
+# runs the real EmailService and the real send helper so the log id genuinely flows
+# provider → email_log → EmailSendResult.log_id → milestone_alerts.email_log_id, and
+# resolves the embed off that FK the way PostgREST does. Break the linkage anywhere
+# and the embed goes empty, the bounce reads as silence, and this test fails.
+
+SENT_DAY = date(2026, 7, 10)  # the Friday the check-in went out (3 working days back)
+
+
+class _EmbedDB(FakeDB):
+    """FakeDB that resolves the two embeds the no-response job's query reads.
+
+    email_log resolves ONLY via milestone_alerts.email_log_id, exactly as the real
+    FK embed does: an unstamped alert yields no delivery status.
+    """
+
+    def _resolve(self, table, op, filters, payload, single, limit):
+        result = super()._resolve(table, op, filters, payload, single, limit)
+        if table != "milestone_alerts" or op != "select":
+            return result
+        if not isinstance(result.data, list):
+            return result
+
+        embedded = []
+        for row in result.data:
+            row = dict(row)
+            row["milestones"] = next(
+                (
+                    m
+                    for m in self.tables.get("milestones", [])
+                    if m["id"] == row.get("milestone_id")
+                ),
+                {},
+            )
+            log = next(
+                (
+                    e
+                    for e in self.tables.get("email_log", [])
+                    if e["id"] == row.get("email_log_id")
+                ),
+                None,
+            )
+            row["email_log"] = {"status": log["status"]} if log else None
+            embedded.append(row)
+        return type(result)(embedded)
+
+
+def _e2e_db() -> _EmbedDB:
+    """One milestone with everything the check-in send path reads."""
+    return _EmbedDB(
+        {
+            "v_milestone_overview": [
+                {
+                    "milestone_id": "m1",
+                    "status": "in_progress",
+                    "cycle_number": 1,
+                    "start_date": SENT_DAY.isoformat(),
+                    "end_date": "2026-08-30",
+                }
+            ],
+            "milestones": [
+                {
+                    "id": "m1",
+                    "status": "in_progress",
+                    "cycle_number": 1,
+                    "created_by": "pm-1",
+                    "name": "Rough Grading Complete",
+                    "start_date": SENT_DAY.isoformat(),
+                    "end_date": "2026-08-30",
+                    "task_id": "t1",
+                    "tasks": {
+                        "id": "t1",
+                        "name": "Rough Grading",
+                        "project_id": "p1",
+                        "projects": {"name": "North Yard"},
+                    },
+                    "contracts": {
+                        "vendor_id": "v1",
+                        "vendors": {"company_name": "Summit Earthworks LLC"},
+                    },
+                }
+            ],
+            "vendor_contacts": [
+                {
+                    "id": "vc1",
+                    "vendor_id": "v1",
+                    "is_primary": True,
+                    "full_name": "Marcus Delgado",
+                    "email": "marcus@summit.example",
+                }
+            ],
+            "milestone_alerts": [],
+            "email_log": [],
+        }
+    )
+
+
+async def test_bounced_checkin_is_not_escalated_end_to_end(
+    monkeypatch, _patch_clock_and_side_effects
+):
+    db = _e2e_db()
+
+    # ── 1. The check-in job sends today's start check, for real. ──────────
+    monkeypatch.setattr(checkin_job, "business_today", lambda: SENT_DAY)
+
+    def _mint(fake_db, *, milestone_id, alert_type, cycle_number):
+        fake_db.table("milestone_alerts").insert(
+            {
+                "milestone_id": milestone_id,
+                "alert_type": alert_type,
+                "recipient_type": "vendor",
+                "cycle_number": cycle_number,
+                "created_at": f"{SENT_DAY.isoformat()}T12:00:00+00:00",
+            }
+        ).execute()
+        return ("raw-token", "https://portal.test/milestone/raw-token")
+
+    monkeypatch.setattr(checkin_job, "mint_checkin_token", _mint)
+
+    email_service = EmailService(provider=MockEmailProvider(), db_client=db)
+    sent = await checkin_job.run_milestone_daily_checkin(db, email_service)
+    assert sent["start_sent"] == 1
+
+    # The linkage Part A exists for: a real email_log row, stamped on the alert.
+    alert = db.tables["milestone_alerts"][0]
+    log_row = db.tables["email_log"][0]
+    assert alert["email_log_id"] == log_row["id"]
+
+    # ── 2. SES reports a bounce (as the SNS webhook would). ───────────────
+    log_row["status"] = "bounced"
+
+    # ── 3. Three working days later, the vendor has "not answered". ───────
+    counts = await job.run_milestone_no_response_escalation(
+        db, email_service=AsyncMock(), notification_creator=MagicMock()
+    )
+
+    # The vendor never got the email, so this is a delivery problem, not silence.
+    assert counts["escalated"] == 0
+    assert counts["bounce_notified"] == 1
+    _patch_clock_and_side_effects["escalate"].assert_not_called()

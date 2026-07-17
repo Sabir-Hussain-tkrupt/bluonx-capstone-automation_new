@@ -130,6 +130,46 @@ class TestEmailLogCreation:
         assert row["reference_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
+# ── log_id on the result ────────────────────────────────────────────────────
+
+
+class TestEmailLogIdReturned:
+    """send_email returns the email_log row id it wrote.
+
+    Callers that need to link a domain row to its delivery record (the milestone
+    check-in job stamps milestone_alerts.email_log_id, which is what re-activates
+    the no-response job's bounce rule) have no other way to learn it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_result_carries_log_id(self, email_service, send_kwargs):
+        result = await email_service.send_email(**send_kwargs)
+        assert result.log_id == "11111111-2222-3333-4444-555555555555"
+
+    @pytest.mark.asyncio
+    async def test_failed_send_still_carries_log_id(
+        self, email_service, mock_provider, send_kwargs
+    ):
+        """A failed send logs a row too, and that row must still be linkable.
+
+        'failed' is an undelivered status to the no-response job, so linking it is
+        what lets a send failure read as a delivery problem, not vendor silence.
+        """
+        mock_provider.send.return_value = EmailSendResult(
+            message_id="", status="failed", error="InvalidParameterValue"
+        )
+        result = await email_service.send_email(**send_kwargs)
+        assert result.status == "failed"
+        assert result.log_id == "11111111-2222-3333-4444-555555555555"
+
+    @pytest.mark.asyncio
+    async def test_log_id_is_none_without_db_client(self, mock_provider, send_kwargs):
+        """No db client means no email_log row, so no id to hand back."""
+        service = EmailService(provider=mock_provider, db_client=None)
+        result = await service.send_email(**send_kwargs)
+        assert result.log_id is None
+
+
 # ── Status logging ──────────────────────────────────────────────────────────
 
 

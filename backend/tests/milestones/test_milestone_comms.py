@@ -5,7 +5,7 @@ Covers:
   * scanner-safety: vendor emails carry ONE portal link and zero answer-bearing links
   * subjects built correctly per check / alert type
   * PM emails carry the vendor contact block + the "paused until you act" stall copy
-  * send helpers never raise, return False with no deliverable email, and pass the
+  * send helpers never raise, bail out with no deliverable email, and pass the
     correct email_type / recipient_type / reference_type / reference_id
   * build_notification_deep_link resolves the milestone route
   * create_notification gates the milestone vocabulary; notify_* wrappers dispatch correctly
@@ -203,12 +203,12 @@ async def test_check_email_sends_with_correct_metadata(check_type, expected_subj
     db = _DB({"milestones": _milestone_row(), "vendor_contacts": _contact_rows()})
     svc = _email_service()
 
-    ok = await send_milestone_check_email(
+    result = await send_milestone_check_email(
         milestone_id="m1", check_type=check_type, portal_url=_PORTAL_URL,
         db=db, email_service=svc,
     )
 
-    assert ok is True
+    assert result is not None and result.status == "sent"
     kwargs = svc.send_email.await_args.kwargs
     assert kwargs["subject"] == expected_subject
     assert kwargs["email_type"] == "milestone_alert"
@@ -219,16 +219,17 @@ async def test_check_email_sends_with_correct_metadata(check_type, expected_subj
 
 
 @pytest.mark.asyncio
-async def test_check_email_returns_false_when_no_contact_email():
+async def test_check_email_returns_none_when_no_contact_email():
     db = _DB({"milestones": _milestone_row(), "vendor_contacts": _contact_rows(email="")})
     svc = _email_service()
 
-    ok = await send_milestone_check_email(
+    result = await send_milestone_check_email(
         milestone_id="m1", check_type="start", portal_url=_PORTAL_URL,
         db=db, email_service=svc,
     )
 
-    assert ok is False
+    # Never sent, so there is no email_log row and nothing to hand back.
+    assert result is None
     svc.send_email.assert_not_awaited()
 
 
@@ -237,12 +238,36 @@ async def test_check_email_never_raises_on_unreadable_milestone():
     db = _DB({"milestones": SimpleNamespace(data={}), "vendor_contacts": _contact_rows()})
     svc = _email_service()
 
-    ok = await send_milestone_check_email(
+    result = await send_milestone_check_email(
         milestone_id="m1", check_type="start", portal_url=_PORTAL_URL,
         db=db, email_service=svc,
     )
-    # Empty milestone → no vendor_id → no deliverable email → False, not an exception.
-    assert ok is False
+    # Empty milestone → no vendor_id → no deliverable email → None, not an exception.
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_check_email_returns_failed_result_for_linking():
+    """A failed send still hands back its result so the caller can link the log row.
+
+    'failed' is an undelivered status to the no-response job, so the check-in job
+    stamping this log id is what makes a send failure read as a delivery problem
+    rather than vendor silence.
+    """
+    db = _DB({"milestones": _milestone_row(), "vendor_contacts": _contact_rows()})
+    svc = _email_service()
+    svc.send_email.return_value = EmailSendResult(
+        message_id="", status="failed", error="boom", log_id="log-9"
+    )
+
+    result = await send_milestone_check_email(
+        milestone_id="m1", check_type="start", portal_url=_PORTAL_URL,
+        db=db, email_service=svc,
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.log_id == "log-9"
 
 
 # ── Send helper: PM alert ─────────────────────────────────────────────────

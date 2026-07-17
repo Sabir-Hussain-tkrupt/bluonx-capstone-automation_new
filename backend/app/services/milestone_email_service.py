@@ -19,10 +19,17 @@ coroutines:
 
 Both mirror `bid_revision_service.send_revision_request_email`: one joined
 read → build context → render html + txt → build subject in Python →
-`await email_service.send_email(...)` → return True iff the provider reported
-'sent'. Neither ever raises; a failed send must not break a milestone
-transition or crash a scheduler job; it is logged and surfaced as False (the
+`await email_service.send_email(...)`. Neither ever raises; a failed send must
+not break a milestone transition or crash a scheduler job; it is logged (the
 email_log row EmailService writes is the retry surface).
+
+They differ in what they hand back. send_milestone_pm_alert_email returns True
+iff the provider reported 'sent'. send_milestone_check_email returns the
+EmailSendResult itself (None if it never reached the send), because ONLY vendor
+check-ins need their email_log row linked back to the milestone_alerts row: that
+FK is how the no-response job tells a bounce apart from vendor silence, and
+`result.log_id` is the only way the caller learns the row id. PM alerts have no
+such consumer, so they stay on the simpler bool.
 
 URL contracts (built by the CALLER for the portal link, here for the
 milestone link, since PORTAL_BASE_URL serves both SPAs; there is no separate
@@ -45,11 +52,14 @@ correctly re-enables them.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from app.core.config import settings
 from app.services.bid_package_service import _format_date_only
+
+if TYPE_CHECKING:
+    from app.services.email_service import EmailSendResult
 
 logger = logging.getLogger(__name__)
 
@@ -154,20 +164,30 @@ async def send_milestone_check_email(
     portal_url: str,
     db,
     email_service: Any,
-) -> bool:
+) -> "EmailSendResult | None":
     """Render and send a vendor milestone check-in email. Best-effort.
 
-    Carries a single magic link (`portal_url`) to the portal. Returns True iff
-    the provider reported 'sent'. Never raises.
+    Carries a single magic link (`portal_url`) to the portal. Never raises.
+
+    Returns the EmailSendResult of the attempt, or None when we never got as far
+    as sending (unknown check_type, unreadable context, no deliverable address,
+    render failure, or the send itself raised). Check `.status == "sent"` for
+    success; a truthy result alone does NOT mean delivered.
+
+    The result is returned rather than a bool because the caller needs
+    `result.log_id` to stamp milestone_alerts.email_log_id, which is what lets the
+    no-response job tell a bounce apart from vendor silence. A FAILED send returns
+    its result for the same reason: 'failed' is an undelivered status there, so
+    linking that log row is what makes the failure read as a delivery problem.
     """
     if check_type not in _CHECK_TEMPLATES:
         logger.error("Unknown milestone check_type: %r", check_type)
-        return False
+        return None
     stem, build_subject = _CHECK_TEMPLATES[check_type]
 
     ctx = _fetch_milestone_email_context(db, milestone_id)
     if ctx is None:
-        return False
+        return None
 
     contact = _fetch_primary_contact(db, ctx["vendor_id"])
     to_email = (contact.get("email") or "").strip()
@@ -178,7 +198,7 @@ async def send_milestone_check_email(
             milestone_id,
             check_type,
         )
-        return False
+        return None
 
     render_ctx = {
         "vendor_contact_name": contact.get("full_name") or "",
@@ -202,11 +222,11 @@ async def send_milestone_check_email(
             check_type,
             milestone_id,
         )
-        return False
+        return None
 
     subject = build_subject(ctx["milestone_name"], ctx["project_name"])
     try:
-        result = await email_service.send_email(
+        return await email_service.send_email(
             to_email=to_email,
             subject=subject,
             html_body=html_body,
@@ -222,9 +242,7 @@ async def send_milestone_check_email(
             check_type,
             milestone_id,
         )
-        return False
-
-    return getattr(result, "status", None) == "sent"
+        return None
 
 
 async def send_milestone_pm_alert_email(

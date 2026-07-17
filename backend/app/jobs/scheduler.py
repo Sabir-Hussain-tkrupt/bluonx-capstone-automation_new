@@ -39,6 +39,7 @@ KNOWN_JOB_IDS = (
     "daily_bid_reminders",
     "daily_insurance_expiration",
     "post_deadline_escalation",
+    "milestone_daily_checkin",
     "milestone_no_response",
     "scheduler_self_check",
 )
@@ -129,6 +130,7 @@ def start_scheduler() -> None:
     from app.jobs import (
         bid_reminders,
         insurance_expiration,
+        milestone_daily_checkin,
         milestone_no_response,
         post_deadline_escalation,
         revision_expiry,
@@ -139,6 +141,7 @@ def start_scheduler() -> None:
     bid_reminders.register(scheduler)
     insurance_expiration.register(scheduler)
     post_deadline_escalation.register(scheduler)
+    milestone_daily_checkin.register(scheduler)
     milestone_no_response.register(scheduler)
     scheduler_self_check.register(scheduler)
 
