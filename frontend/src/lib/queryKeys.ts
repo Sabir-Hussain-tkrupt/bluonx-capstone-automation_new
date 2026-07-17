@@ -154,6 +154,13 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.contracts.details(), id] as const,
   },
 
+  reviews: {
+    all: ['reviews'] as const,
+    /** The single review for a contract (or none), read direct via Supabase. */
+    forContract: (contractId: string) =>
+      [...queryKeys.reviews.all, 'contract', contractId] as const,
+  },
+
   milestones: {
     all: ['milestones'] as const,
     lists: () => [...queryKeys.milestones.all, 'list'] as const,

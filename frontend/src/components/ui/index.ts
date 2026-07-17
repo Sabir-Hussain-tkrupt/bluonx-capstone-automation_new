@@ -38,6 +38,8 @@ export { Table } from './Table';
 export type { TableProps, Column, TablePagination } from './Table';
 export { StatusBadge } from './StatusBadge';
 export type { StatusBadgeProps } from './StatusBadge';
+export { StarRating } from './StarRating';
+export type { StarRatingProps } from './StarRating';
 export { EmptyState } from './EmptyState';
 export type { EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonTable } from './Skeleton';

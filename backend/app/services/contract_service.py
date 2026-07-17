@@ -44,6 +44,14 @@ def _is_unique_violation(err: APIError) -> bool:
     return code == "23505" or "duplicate key" in msg or "unique" in msg
 
 
+def _has_pt_code(err: APIError, pt: str) -> bool:
+    """True when an RPC raised SQLSTATE `pt` (e.g. 'PT409'). Mirrors
+    milestone_service._has_pt_code: supabase-py surfaces the raised SQLSTATE on
+    APIError.code, and we scan the stringified error as a backstop."""
+    code = str(getattr(err, "code", "") or "")
+    return code == pt or pt in str(err)
+
+
 def generate_contract_number(award_id: str) -> str:
     """Auto contract number. `CON-{YYYY}-{first 8 of the award id}` — unique
     (award_id is unique per active task), race-free, and needs no sequence table.
@@ -164,3 +172,32 @@ def mark_contract_terminated(contract_id: str, *, db: Client) -> dict:
         .execute()
     )
     return _first(resp.data) or {}
+
+
+def mark_contract_completed(contract_id: str, *, db: Client) -> dict:
+    """PM marks the work done → contract `completed`, via the row-locked
+    `fn_mark_contract_complete` RPC. The gate ("every milestone completed/cancelled,
+    none open") is re-checked inside the lock, so the check and the write can never
+    race. The RPC is the sole authority — this layer only maps SQLSTATEs:
+    PT404 → 404, PT409 → 409 (a milestone is still open, or the contract is already
+    complete / terminated). No raw DB error surfaces."""
+    try:
+        resp = db.rpc(
+            "fn_mark_contract_complete", {"p_contract_id": str(contract_id)}
+        ).execute()
+    except APIError as exc:
+        if _has_pt_code(exc, "PT404"):
+            raise ContractError(404, "Contract not found.") from exc
+        if _has_pt_code(exc, "PT409"):
+            raise ContractError(
+                409,
+                "Cannot complete: a milestone is still open, or the contract is "
+                "already complete or terminated.",
+            ) from exc
+        logger.error("Unexpected contract-complete RPC failure: %s", exc)
+        raise ContractError(502, "Contract completion failed.") from exc
+
+    row = _first(resp.data)
+    if not row:
+        raise ContractError(500, "Contract completion failed.")
+    return row
