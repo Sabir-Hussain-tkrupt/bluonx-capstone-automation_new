@@ -46,10 +46,10 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
         .select("id, name, budget, archived_at")
         .eq("id", str(project_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=404, detail="Project not found")
     return resp.data
 
@@ -71,10 +71,10 @@ def _get_task_or_404(db: Client, project_id: UUID, task_id: UUID) -> dict:
         .eq("id", str(task_id))
         .eq("project_id", str(project_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=404, detail="Task not found")
     return resp.data
 
@@ -85,10 +85,10 @@ def _validate_trade_for_phase(db: Client, trade_id: UUID, phase: str) -> dict:
         db.table("trades")
         .select("id, name, phase, is_active")
         .eq("id", str(trade_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=422, detail="Trade not found")
 
     trade = resp.data
@@ -178,36 +178,43 @@ async def list_tasks(
     """List tasks for a project, sorted by sort_order."""
     _get_project_or_404(db, project_id)
 
-    query = (
-        db.table("tasks")
-        .select("*, trades(name)", count="exact")
-        .eq("project_id", str(project_id))
-        .is_("deleted_at", "null")
-    )
-
-    if search:
-        query = query.ilike("name", f"%{search}%")
-
-    if task_status:
-        query = query.eq("status", task_status)
+    def _filtered(select_expr: str):
+        q = (
+            db.table("tasks")
+            .select(select_expr, count="exact")
+            .eq("project_id", str(project_id))
+            .is_("deleted_at", "null")
+        )
+        if search:
+            q = q.ilike("name", f"%{search}%")
+        if task_status:
+            q = q.eq("status", task_status)
+        return q
 
     allowed_sort = {"name", "sort_order", "status", "budget_estimate", "phase", "bid_type", "created_at"}
     if sort_by not in allowed_sort:
         sort_by = "sort_order"
-
     ascending = sort_dir.lower() != "desc"
-    query = query.order(sort_by, desc=not ascending)
 
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
 
-    resp = query.execute()
+    # Count first, then fetch the page only when it falls within range, so a
+    # page past the last row returns an empty page instead of a 416/500.
+    total = _filtered("id").limit(1).execute().count or 0
 
-    items = [_enrich_task(row) for row in (resp.data or [])]
+    items: list = []
+    if offset < total:
+        resp = (
+            _filtered("*, trades(name)")
+            .order(sort_by, desc=not ascending)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        items = [_enrich_task(row) for row in (resp.data or [])]
 
     return TaskListResponse(
         items=items,
-        total=resp.count or 0,
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -274,7 +281,7 @@ async def create_task(
         logger.error("Supabase insert failed for tasks: %s", exc)
         raise HTTPException(
             status_code=422,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not resp.data:
@@ -343,7 +350,7 @@ async def update_task(
         logger.error("Supabase update failed for tasks/%s: %s", task_id, exc)
         raise HTTPException(
             status_code=422,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not resp.data:

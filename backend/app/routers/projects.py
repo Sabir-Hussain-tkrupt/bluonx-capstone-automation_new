@@ -1,5 +1,6 @@
 """Project endpoints — /api/v1/projects"""
 
+from datetime import date
 from uuid import UUID
 
 import logging
@@ -30,17 +31,30 @@ router = APIRouter()
 # ── Helper: verify project exists and is not soft-deleted ────────────────
 
 
+def _as_date(v) -> date | None:
+    """Coerce a stored ISO date string (or an existing date) to a date."""
+    if v is None or isinstance(v, date):
+        return v
+    return date.fromisoformat(v)
+
+
 def _get_project_or_404(db: Client, project_id: UUID) -> dict:
-    """Fetch a project by ID, raise 404 if not found or soft-deleted."""
+    """Fetch a project by ID, raise 404 if not found or soft-deleted.
+
+    Uses maybe_single(), not single(): PostgREST's single() raises an
+    APIError (PGRST116) on zero rows, which would surface as a 500. With
+    maybe_single() a missing row returns data=None (and the response object
+    itself may be None), which we translate into a clean 404.
+    """
     response = (
         db.table("projects")
         .select("*")
         .eq("id", str(project_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
@@ -55,6 +69,7 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
 async def list_projects(
     search: str | None = Query(default=None, description="Search by project name"),
     project_status: str | None = Query(default=None, alias="status", description="Filter by status"),
+    include_archived: bool = Query(default=False, description="Include archived projects (hidden by default)"),
     sort_by: str = Query(default="name", description="Column to sort by"),
     sort_dir: str = Query(default="asc", description="Sort direction: asc or desc"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -62,35 +77,54 @@ async def list_projects(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """List all active projects with search, filter, sort, and pagination."""
+    """List active projects with search, filter, sort, and pagination.
 
-    query = db.table("projects").select("*", count="exact").is_("deleted_at", "null")
+    Archived projects are hidden by default (pass include_archived=true to show
+    them); soft-deleted projects are never returned.
+    """
 
-    if search:
-        query = query.ilike("name", f"%{search}%")
+    def _filtered(select_expr: str):
+        q = (
+            db.table("projects")
+            .select(select_expr, count="exact")
+            .is_("deleted_at", "null")
+        )
+        if not include_archived:
+            q = q.is_("archived_at", "null")
+        if search:
+            q = q.ilike("name", f"%{search}%")
+        if project_status:
+            q = q.eq("status", project_status)
+        return q
 
-    if project_status:
-        query = query.eq("status", project_status)
-
-    # Sorting
+    # Sorting (allow-list; unknown columns fall back to a safe default)
     allowed_sort_columns = {
         "name", "city", "status", "budget", "start_date", "created_at",
     }
     if sort_by not in allowed_sort_columns:
         sort_by = "name"
-
     ascending = sort_dir.lower() != "desc"
-    query = query.order(sort_by, desc=not ascending)
 
-    # Pagination
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
 
-    response = query.execute()
+    # Count first, then fetch the page only when it falls within range. A page
+    # past the last row would otherwise make PostgREST return 416 (surfacing as
+    # a 500); this returns an empty page with the correct total instead.
+    total = _filtered("id").limit(1).execute().count or 0
+
+    items: list = []
+    if offset < total:
+        response = (
+            _filtered("*")
+            .order(sort_by, desc=not ascending)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        items = response.data or []
 
     return ProjectListResponse(
-        items=response.data or [],
-        total=response.count or 0,
+        items=items,
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -145,7 +179,7 @@ async def create_project(
         logger.error("Supabase insert failed for projects: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
@@ -173,6 +207,17 @@ async def update_project(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
+        )
+
+    # Cross-field date check. The model validator catches both dates supplied
+    # in one PATCH; here we also cover a partial update (only one supplied) by
+    # merging against the stored row.
+    eff_start = _as_date(update_data.get("start_date", existing.get("start_date")))
+    eff_end = _as_date(update_data.get("estimated_end_date", existing.get("estimated_end_date")))
+    if eff_start and eff_end and eff_end < eff_start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="estimated_end_date must be on or after start_date",
         )
 
     # Re-geocode if any address field changed
@@ -211,7 +256,7 @@ async def update_project(
         logger.error("Supabase update failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
@@ -229,8 +274,9 @@ async def delete_project(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Soft-delete a project (sets deleted_at)."""
+    """Soft-delete a project (sets deleted_at). Blocked if in-flight tasks exist."""
     _get_project_or_404(db, project_id)
+    _assert_project_deletable(db, project_id)
 
     response = (
         db.table("projects")
@@ -250,6 +296,34 @@ async def delete_project(
 
 
 _BLOCKING_TASK_STATUSES = ("bidding", "evaluating", "awarded", "in_progress")
+
+
+def _assert_project_deletable(db: Client, project_id: UUID) -> None:
+    """Raise 409 if the project has in-flight tasks.
+
+    Soft-deleting a project is an UPDATE (sets deleted_at), so the tasks'
+    ON DELETE RESTRICT FK never fires — a naive delete would hide the project
+    while leaving live tasks pointing at it. Only in-flight tasks block;
+    draft/completed/cancelled tasks are preserved and don't stand in the way
+    (same set the archive guard uses).
+    """
+    blocking = (
+        db.table("tasks")
+        .select("id, name, status")
+        .eq("project_id", str(project_id))
+        .in_("status", list(_BLOCKING_TASK_STATUSES))
+        .is_("deleted_at", "null")
+        .execute()
+    )
+    if blocking.data:
+        names = ", ".join(f"\"{t['name']}\" ({t['status']})" for t in blocking.data)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete: the following tasks are still in progress: "
+                f"{names}. Complete or cancel them first, or archive the project instead."
+            ),
+        )
 
 
 def _ensure_project_not_archived(project: dict, resource: str = "project") -> None:
@@ -314,7 +388,7 @@ async def archive_project(
         logger.error("Supabase archive failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
@@ -352,7 +426,7 @@ async def unarchive_project(
         logger.error("Supabase unarchive failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
@@ -494,10 +568,10 @@ async def get_project_document_url(
         .select("file_path")
         .eq("id", str(document_id))
         .eq("project_id", str(project_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not doc_resp.data:
+    if not doc_resp or not doc_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
@@ -527,10 +601,10 @@ async def delete_project_document(
         .select("file_path")
         .eq("id", str(document_id))
         .eq("project_id", str(project_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not doc_resp.data:
+    if not doc_resp or not doc_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",

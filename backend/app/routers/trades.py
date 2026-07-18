@@ -46,11 +46,11 @@ async def get_trade(
         db.table("trades")
         .select("*")
         .eq("id", str(trade_id))
-        .single()
+        .maybe_single()
         .execute()
     )
 
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Trade not found",
