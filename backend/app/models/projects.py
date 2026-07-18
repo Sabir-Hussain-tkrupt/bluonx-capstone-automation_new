@@ -10,9 +10,33 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from app.models.common import BluOnXBase
+
+
+# ── shared field/cross-field validators ──────────────────────────────────
+
+
+def _require_nonblank_name(v: str | None) -> str | None:
+    """Trim surrounding whitespace and reject blank/whitespace-only names.
+
+    Runs after the min_length/max_length constraints, so a value like "  "
+    passes the raw length check but is caught here once stripped. The trimmed
+    value is what gets stored.
+    """
+    if v is None:
+        return v
+    v = v.strip()
+    if len(v) < 2:
+        raise ValueError("name must contain at least 2 non-whitespace characters")
+    return v
+
+
+def _require_end_after_start(start: date | None, end: date | None) -> None:
+    """Raise if estimated_end_date precedes start_date (both must be set)."""
+    if start and end and end < start:
+        raise ValueError("estimated_end_date must be on or after start_date")
 
 
 # ── projects ─────────────────────────────────────────────────────────────
@@ -32,6 +56,13 @@ class ProjectCreate(BluOnXBase):
     start_date: date | None = None
     estimated_end_date: date | None = None
 
+    _strip_name = field_validator("name")(_require_nonblank_name)
+
+    @model_validator(mode="after")
+    def _validate_dates(self):
+        _require_end_after_start(self.start_date, self.estimated_end_date)
+        return self
+
 
 class ProjectUpdate(BluOnXBase):
     name: str | None = Field(default=None, min_length=2, max_length=255)
@@ -46,6 +77,16 @@ class ProjectUpdate(BluOnXBase):
     status: Literal["planning", "active", "on_hold", "completed", "cancelled"] | None = None
     start_date: date | None = None
     estimated_end_date: date | None = None
+
+    _strip_name = field_validator("name")(_require_nonblank_name)
+
+    @model_validator(mode="after")
+    def _validate_dates(self):
+        # Catches the case where both dates are supplied in one PATCH. The
+        # partial case (only one supplied, the other already stored) is checked
+        # in the router against the existing row.
+        _require_end_after_start(self.start_date, self.estimated_end_date)
+        return self
 
 
 class ProjectResponse(BluOnXBase):

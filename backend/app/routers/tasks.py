@@ -46,10 +46,10 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
         .select("id, name, budget, archived_at")
         .eq("id", str(project_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=404, detail="Project not found")
     return resp.data
 
@@ -71,10 +71,10 @@ def _get_task_or_404(db: Client, project_id: UUID, task_id: UUID) -> dict:
         .eq("id", str(task_id))
         .eq("project_id", str(project_id))
         .is_("deleted_at", "null")
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=404, detail="Task not found")
     return resp.data
 
@@ -85,10 +85,10 @@ def _validate_trade_for_phase(db: Client, trade_id: UUID, phase: str) -> dict:
         db.table("trades")
         .select("id, name, phase, is_active")
         .eq("id", str(trade_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(status_code=422, detail="Trade not found")
 
     trade = resp.data
@@ -274,7 +274,7 @@ async def create_task(
         logger.error("Supabase insert failed for tasks: %s", exc)
         raise HTTPException(
             status_code=422,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not resp.data:
@@ -343,7 +343,7 @@ async def update_task(
         logger.error("Supabase update failed for tasks/%s: %s", task_id, exc)
         raise HTTPException(
             status_code=422,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not resp.data:
