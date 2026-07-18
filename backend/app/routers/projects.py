@@ -83,36 +83,48 @@ async def list_projects(
     them); soft-deleted projects are never returned.
     """
 
-    query = db.table("projects").select("*", count="exact").is_("deleted_at", "null")
+    def _filtered(select_expr: str):
+        q = (
+            db.table("projects")
+            .select(select_expr, count="exact")
+            .is_("deleted_at", "null")
+        )
+        if not include_archived:
+            q = q.is_("archived_at", "null")
+        if search:
+            q = q.ilike("name", f"%{search}%")
+        if project_status:
+            q = q.eq("status", project_status)
+        return q
 
-    if not include_archived:
-        query = query.is_("archived_at", "null")
-
-    if search:
-        query = query.ilike("name", f"%{search}%")
-
-    if project_status:
-        query = query.eq("status", project_status)
-
-    # Sorting
+    # Sorting (allow-list; unknown columns fall back to a safe default)
     allowed_sort_columns = {
         "name", "city", "status", "budget", "start_date", "created_at",
     }
     if sort_by not in allowed_sort_columns:
         sort_by = "name"
-
     ascending = sort_dir.lower() != "desc"
-    query = query.order(sort_by, desc=not ascending)
 
-    # Pagination
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
 
-    response = query.execute()
+    # Count first, then fetch the page only when it falls within range. A page
+    # past the last row would otherwise make PostgREST return 416 (surfacing as
+    # a 500); this returns an empty page with the correct total instead.
+    total = _filtered("id").limit(1).execute().count or 0
+
+    items: list = []
+    if offset < total:
+        response = (
+            _filtered("*")
+            .order(sort_by, desc=not ascending)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        items = response.data or []
 
     return ProjectListResponse(
-        items=response.data or [],
-        total=response.count or 0,
+        items=items,
+        total=total,
         page=page,
         page_size=page_size,
     )

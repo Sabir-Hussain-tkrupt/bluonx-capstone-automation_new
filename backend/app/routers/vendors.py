@@ -159,20 +159,18 @@ async def list_vendors(
         if not vendor_ids_for_trade:
             return VendorListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Build the main query
-    query = db.table("vendors").select("*", count="exact").is_("deleted_at", "null")
-
-    if search:
-        query = query.ilike("company_name", f"%{search}%")
-
-    if vendor_status:
-        query = query.eq("status", vendor_status)
-
-    if onboarding_status:
-        query = query.eq("onboarding_status", onboarding_status)
-
-    if vendor_ids_for_trade is not None:
-        query = query.in_("id", vendor_ids_for_trade)
+    # Build the (filtered) query — reused for the count and the page fetch
+    def _filtered(select_expr: str):
+        q = db.table("vendors").select(select_expr, count="exact").is_("deleted_at", "null")
+        if search:
+            q = q.ilike("company_name", f"%{search}%")
+        if vendor_status:
+            q = q.eq("status", vendor_status)
+        if onboarding_status:
+            q = q.eq("onboarding_status", onboarding_status)
+        if vendor_ids_for_trade is not None:
+            q = q.in_("id", vendor_ids_for_trade)
+        return q
 
     # Sorting
     allowed_sort_columns = {
@@ -181,19 +179,27 @@ async def list_vendors(
     }
     if sort_by not in allowed_sort_columns:
         sort_by = "company_name"
-
     ascending = sort_dir.lower() != "desc"
-    query = query.order(sort_by, desc=not ascending)
 
-    # Pagination
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
 
-    response = query.execute()
+    # Count first, then fetch the page only when it falls within range, so a
+    # page past the last row returns an empty page instead of a 416/500.
+    total = _filtered("id").limit(1).execute().count or 0
+
+    items: list = []
+    if offset < total:
+        response = (
+            _filtered("*")
+            .order(sort_by, desc=not ascending)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        items = response.data or []
 
     return VendorListResponse(
-        items=response.data or [],
-        total=response.count or 0,
+        items=items,
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -392,7 +398,7 @@ async def _create_vendor_with_contacts(
         logger.error("Supabase insert failed for vendors: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
@@ -515,7 +521,7 @@ async def update_vendor(
         logger.error("Supabase update failed for vendors/%s: %s", vendor_id, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
     if not response.data:
