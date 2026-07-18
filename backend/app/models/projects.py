@@ -158,6 +158,8 @@ class TaskCreate(BluOnXBase):
     bid_type: Literal["competitive", "direct_assign", "internal"]
     budget_estimate: Decimal | None = Field(default=None, ge=0)
 
+    _strip_name = field_validator("name")(_require_nonblank_name)
+
 
 class TaskUpdate(BluOnXBase):
     name: str | None = Field(default=None, min_length=2, max_length=255)
@@ -166,8 +168,10 @@ class TaskUpdate(BluOnXBase):
     phase: Literal["due_diligence", "development"] | None = None
     bid_type: Literal["competitive", "direct_assign", "internal"] | None = None
     budget_estimate: Decimal | None = Field(default=None, ge=0)
-    sort_order: int | None = None
+    sort_order: int | None = Field(default=None, ge=0)
     status: TASK_STATUSES | None = None
+
+    _strip_name = field_validator("name")(_require_nonblank_name)
 
 
 class TaskResponse(BluOnXBase):
@@ -197,4 +201,4 @@ class TaskListResponse(BluOnXBase):
 
 class TaskReorderItem(BluOnXBase):
     task_id: UUID
-    sort_order: int
+    sort_order: int = Field(..., ge=0)

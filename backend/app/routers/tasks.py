@@ -79,6 +79,31 @@ def _get_task_or_404(db: Client, project_id: UUID, task_id: UUID) -> dict:
     return resp.data
 
 
+def _assert_unique_task_name(
+    db: Client, project_id: UUID, name: str, exclude_task_id: UUID | None = None
+) -> None:
+    """Reject an exact duplicate task name within the same project.
+
+    Compares the (already-trimmed) name against other non-deleted tasks in the
+    project. Soft-deleted tasks don't count, so a retired name is reusable.
+    """
+    q = (
+        db.table("tasks")
+        .select("id", count="exact")
+        .eq("project_id", str(project_id))
+        .eq("name", name)
+        .is_("deleted_at", "null")
+    )
+    if exclude_task_id is not None:
+        q = q.neq("id", str(exclude_task_id))
+    resp = q.execute()
+    if resp.count and resp.count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A task named '{name}' already exists in this project.",
+        )
+
+
 def _validate_trade_for_phase(db: Client, trade_id: UUID, phase: str) -> dict:
     """Check trade exists, is active, and phase-compatible."""
     resp = (
@@ -117,8 +142,9 @@ def _check_deletion_blockers(db: Client, task_id: UUID) -> None:
     )
     if bp.count and bp.count > 0:
         raise HTTPException(
-            status_code=422,
-            detail="Cannot delete task: active bid packages exist",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete task: it has active bid packages. "
+                   "Cancel the task instead to preserve its history.",
         )
 
     # Active awards
@@ -131,8 +157,9 @@ def _check_deletion_blockers(db: Client, task_id: UUID) -> None:
     )
     if aw.count and aw.count > 0:
         raise HTTPException(
-            status_code=422,
-            detail="Cannot delete task: active awards exist",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete task: it has active awards. "
+                   "Cancel the task instead to preserve its history.",
         )
 
     # Active contracts
@@ -145,8 +172,9 @@ def _check_deletion_blockers(db: Client, task_id: UUID) -> None:
     )
     if ct.count and ct.count > 0:
         raise HTTPException(
-            status_code=422,
-            detail="Cannot delete task: active contracts exist",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete task: it has active contracts. "
+                   "Cancel the task instead to preserve its history.",
         )
 
 
@@ -251,6 +279,7 @@ async def create_task(
     project = _get_project_or_404(db, project_id)
     _ensure_project_not_archived(project)
     trade = _validate_trade_for_phase(db, task.trade_id, task.phase)
+    _assert_unique_task_name(db, project_id, task.name)
 
     # Calculate next sort_order
     max_resp = (
@@ -313,6 +342,21 @@ async def update_task(
     update_data = task.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Reject an exact duplicate name within the project (renames only).
+    if "name" in update_data:
+        _assert_unique_task_name(db, project_id, update_data["name"], exclude_task_id=task_id)
+
+    # bid_type is locked once the task leaves draft.
+    if (
+        "bid_type" in update_data
+        and existing["status"] != "draft"
+        and update_data["bid_type"] != existing["bid_type"]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="bid_type cannot be changed after the task leaves draft.",
+        )
 
     # Validate status transition
     if "status" in update_data:
