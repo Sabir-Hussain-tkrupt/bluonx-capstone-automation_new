@@ -1,3 +1,4 @@
+import { Menu } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export interface TopHeaderProps {
@@ -36,9 +37,7 @@ export function TopHeader({
             className="rounded-lg p-1.5 text-secondary-400 hover:bg-secondary-50 hover:text-secondary-600 lg:hidden"
             aria-label="Open navigation menu"
           >
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
+            <Menu className="h-6 w-6" aria-hidden="true" />
           </button>
         )}
         <div>

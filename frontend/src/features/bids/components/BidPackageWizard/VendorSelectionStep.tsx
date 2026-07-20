@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -293,20 +294,13 @@ export function VendorSelectionStep({
                 Show {disqualified.length} disqualified vendor
                 {disqualified.length !== 1 ? 's' : ''}
               </h3>
-              <svg
+              <ChevronDown
                 className={cn(
                   'h-4 w-4 text-secondary-400 transition-transform',
                   showDisqualified && 'rotate-180',
                 )}
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                  clipRule="evenodd"
-                />
-              </svg>
+                aria-hidden="true"
+              />
             </button>
 
             {showDisqualified && (
@@ -492,13 +486,7 @@ function VendorRow({
               className="inline-flex cursor-help items-center gap-1 text-warning-600"
               title={vendor.flag_reasons.map((r) => r.replace(/_/g, ' ')).join(', ')}
             >
-              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
               <span className="text-xs">{vendor.unresolved_flag_count}</span>
             </span>
           ) : (

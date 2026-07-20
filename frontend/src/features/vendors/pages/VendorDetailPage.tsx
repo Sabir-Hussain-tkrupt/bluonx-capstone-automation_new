@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
@@ -22,6 +23,7 @@ import { ContactForm } from '@/features/vendors/components/ContactForm';
 import { TradeMultiSelect } from '@/features/vendors/components/TradeMultiSelect';
 import { VendorDocumentUpload } from '@/features/vendors/components/VendorDocumentUpload';
 import { DocumentList } from '@/components/ui/DocumentList';
+import { Field } from '@/components/ui/Field';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import type { StatusVariant } from '@/components/ui/types';
 
@@ -34,15 +36,6 @@ const onboardingVariantMap: Record<string, StatusVariant> = {
 const flagReasonLabels: Record<string, string> = {
   missed_deadline: 'Missed Deadline', poor_quality: 'Poor Quality', unresponsive: 'Unresponsive', other: 'Other',
 };
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 py-2 text-sm">
-      <dt className="shrink-0 text-secondary-500">{label}</dt>
-      <dd className="text-right text-secondary-900">{value || '\u2014'}</dd>
-    </div>
-  );
-}
 
 export function VendorDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -145,13 +138,7 @@ export function VendorDetailPage() {
             onClick={() => navigate('/vendors')}
             className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{vendor.company_name}</h1>
@@ -184,25 +171,25 @@ export function VendorDetailPage() {
               <div>
                 <h3 className="mb-3 text-sm font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <InfoRow label="Address" value={vendor.address} />
-                  <InfoRow label="City" value={vendor.city} />
-                  <InfoRow label="State" value={vendor.state} />
-                  <InfoRow label="ZIP Code" value={vendor.zip_code} />
+                  <Field label="Address" value={vendor.address} />
+                  <Field label="City" value={vendor.city} />
+                  <Field label="State" value={vendor.state} />
+                  <Field label="ZIP Code" value={vendor.zip_code} />
                 </dl>
               </div>
               <div>
                 <h3 className="mb-3 text-sm font-semibold text-secondary-900">Insurance & Capacity</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <InfoRow label="Insurance Expiration" value={vendor.insurance_expiration_date} />
-                  <InfoRow
+                  <Field label="Insurance Expiration" value={vendor.insurance_expiration_date} />
+                  <Field
                     label="Insurance Coverage"
                     value={vendor.insurance_coverage_amount ? `$${Number(vendor.insurance_coverage_amount).toLocaleString()}` : null}
                   />
-                  <InfoRow
+                  <Field
                     label="Bonding Capacity"
                     value={vendor.bonding_capacity ? `$${Number(vendor.bonding_capacity).toLocaleString()}` : null}
                   />
-                  <InfoRow
+                  <Field
                     label="Active Jobs"
                     value={
                       vendor.max_active_jobs
@@ -336,9 +323,7 @@ export function VendorDetailPage() {
                       }}
                       className="text-secondary-400 hover:text-danger-600"
                     >
-                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                      </svg>
+                      <X className="h-4 w-4" aria-hidden="true" />
                     </button>
                   </div>
                 ))}

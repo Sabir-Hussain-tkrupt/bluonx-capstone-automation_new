@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
+import {
+  FileText,
+  Flag,
+  Folder,
+  LayoutDashboard,
+  LayoutTemplate,
+  Settings,
+  Users,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ROUTES } from '@/constants/routes';
 import { Sidebar } from '@/components/ui/Sidebar';
@@ -13,14 +22,6 @@ import type { SidebarSection } from '@/components/ui/Sidebar';
 import bluonxLogo from '@/assets/bluonx-logo.png';
 
 const SIDEBAR_COLLAPSED_KEY = 'bluonx:sidebar:collapsed';
-
-function NavIcon({ d }: { d: string }) {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-      <path fillRule="evenodd" d={d} clipRule="evenodd" />
-    </svg>
-  );
-}
 
 export function DashboardLayout() {
   const location = useLocation();
@@ -66,7 +67,7 @@ export function DashboardLayout() {
             id: 'dashboard',
             label: 'Dashboard',
             href: ROUTES.DASHBOARD,
-            icon: <NavIcon d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />,
+            icon: <LayoutDashboard className="h-5 w-5" aria-hidden="true" />,
           },
         ],
       },
@@ -77,34 +78,32 @@ export function DashboardLayout() {
             id: 'vendors',
             label: 'Vendors',
             href: ROUTES.VENDORS,
-            icon: <NavIcon d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />,
+            icon: <Users className="h-5 w-5" aria-hidden="true" />,
           },
           {
             id: 'projects',
             label: 'Projects',
             href: ROUTES.PROJECTS,
-            icon: <NavIcon d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />,
+            icon: <Folder className="h-5 w-5" aria-hidden="true" />,
           },
           {
             id: 'milestones',
             label: 'Milestones',
             href: ROUTES.MILESTONES,
-            // Flag-on-a-pole icon: milestone marker.
-            icon: <NavIcon d="M3 3a1 1 0 011-1h11a1 1 0 01.78 1.625L13.28 7l2.5 3.375A1 1 0 0115 12H5v5a1 1 0 11-2 0V3z" />,
+            icon: <Flag className="h-5 w-5" aria-hidden="true" />,
             badge: pausedCount,
           },
           {
             id: 'bids',
             label: 'Bids',
             href: ROUTES.BID_PACKAGES,
-            // Document-stack icon: front sheet with a back sheet peeking out.
-            icon: <NavIcon d="M5 4a2 2 0 012-2h6a2 2 0 012 2v1H5V4zm-2 4a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm3 2a1 1 0 100 2h6a1 1 0 100-2H6zm0 4a1 1 0 100 2h4a1 1 0 100-2H6z" />,
+            icon: <FileText className="h-5 w-5" aria-hidden="true" />,
           },
           {
             id: 'bid-templates',
             label: 'Bid Templates',
             href: ROUTES.BID_TEMPLATES,
-            icon: <NavIcon d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />,
+            icon: <LayoutTemplate className="h-5 w-5" aria-hidden="true" />,
           },
         ],
       },
@@ -119,7 +118,7 @@ export function DashboardLayout() {
             id: 'settings',
             label: 'Settings',
             href: ROUTES.SETTINGS,
-            icon: <NavIcon d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" />,
+            icon: <Settings className="h-5 w-5" aria-hidden="true" />,
             },
           ],
         });

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
+import { Pencil } from 'lucide-react';
 import { Alert, Button, Card, Modal } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { cn } from '@/utils/cn';
@@ -72,15 +73,7 @@ export function RevisionLandingPage() {
           aria-hidden="true"
           className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-warning-100 text-warning-700"
         >
-          <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
-            <path
-              d="M4 20h4l10.5-10.5a2.121 2.121 0 00-3-3L5 17v3z"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <Pencil className="h-7 w-7" aria-hidden="true" />
         </div>
         <h1 className="mt-4 text-2xl font-bold text-secondary-900 sm:text-3xl">
           Revision Requested

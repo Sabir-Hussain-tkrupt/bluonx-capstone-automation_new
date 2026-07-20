@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { ROUTES } from '@/constants/routes';
 import { useVendorPortal } from '../context/VendorPortalContext';
 import { validateMilestoneToken } from '../services/portalApi';
@@ -69,19 +70,7 @@ export function MilestoneLandingPage() {
         aria-live="polite"
         className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-primary-100"
       >
-        <svg
-          className="h-8 w-8 animate-spin text-primary-600"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
-          <path
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            className="opacity-75"
-          />
-        </svg>
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" aria-hidden="true" />
       </div>
       <h1 className="mt-6 text-xl font-semibold text-secondary-900">
         Opening your check-in

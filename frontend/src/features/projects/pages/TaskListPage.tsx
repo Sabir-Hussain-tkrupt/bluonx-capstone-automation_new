@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -34,13 +35,7 @@ export function TaskListPage() {
           onClick={() => navigate(`/projects/${id}`)}
           className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
         >
-          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-              clipRule="evenodd"
-            />
-          </svg>
+          <ArrowLeft className="h-5 w-5" aria-hidden="true" />
         </button>
         <h1 className="text-xl font-semibold text-secondary-900 sm:text-2xl">
           Tasks: {project.name}

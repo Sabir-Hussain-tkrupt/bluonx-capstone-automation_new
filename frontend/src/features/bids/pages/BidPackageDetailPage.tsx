@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, ChevronDown, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -170,13 +171,7 @@ export function BidPackageDetailPage() {
             onClick={() => navigate(`/projects/${projectId}/tasks/${taskId}`)}
             className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
@@ -336,13 +331,7 @@ export function BidPackageDetailPage() {
             <ul className="space-y-1">
               {bp.documents.map((doc) => (
                 <li key={doc.id} className="flex items-center gap-2 text-sm text-secondary-700">
-                  <svg
-                    className="h-4 w-4 shrink-0 text-secondary-400"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0116 6.622V16.5a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 16.5v-13z" />
-                  </svg>
+                  <FileText className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />
                   {doc.file_name ?? 'Unnamed document'}
                 </li>
               ))}
@@ -360,20 +349,13 @@ export function BidPackageDetailPage() {
             className="flex w-full items-center justify-between text-left"
           >
             <h3 className="text-sm font-semibold text-secondary-900">Email Log</h3>
-            <svg
+            <ChevronDown
               className={cn(
                 'h-4 w-4 text-secondary-400 transition-transform',
                 showEmailLog && 'rotate-180',
               )}
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                clipRule="evenodd"
-              />
-            </svg>
+              aria-hidden="true"
+            />
           </button>
           {showEmailLog && (
             <div className="mt-4">

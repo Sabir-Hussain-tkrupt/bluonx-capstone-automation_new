@@ -1,3 +1,4 @@
+import { Clock } from 'lucide-react';
 import { PortalErrorPage } from './PortalErrorPage';
 
 /**
@@ -13,17 +14,7 @@ export function TokenExpiredPage() {
       variant="warning"
       title="This link has expired"
       message="For your security, secure links expire after a period of time. Please re-open the most recent link from your email, or contact the BluOnX project manager who sent it if you still need access."
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
-          <path
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      }
+      icon={<Clock className="h-8 w-8" aria-hidden="true" />}
     />
   );
 }

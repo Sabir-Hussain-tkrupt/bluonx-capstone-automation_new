@@ -1,3 +1,4 @@
+import { CheckCircle2 } from 'lucide-react';
 import { PortalErrorPage } from './PortalErrorPage';
 
 export function AlreadySubmittedPage() {
@@ -12,17 +13,7 @@ export function AlreadySubmittedPage() {
           directly.
         </>
       }
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
-          <path
-            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      }
+      icon={<CheckCircle2 className="h-8 w-8" aria-hidden="true" />}
     />
   );
 }

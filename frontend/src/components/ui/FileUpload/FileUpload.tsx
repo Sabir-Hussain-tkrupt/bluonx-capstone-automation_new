@@ -1,4 +1,5 @@
 import { useCallback, useId, useRef, useState } from 'react';
+import { FileText, UploadCloud, X } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export interface FileUploadProps {
@@ -124,20 +125,7 @@ export function FileUpload({
         )}
       >
         {/* Upload icon */}
-        <svg
-          className="mb-3 h-10 w-10 text-secondary-400"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.338-2.32 3.75 3.75 0 013.572 5.595H6.75z"
-          />
-        </svg>
+        <UploadCloud className="mb-3 h-10 w-10 text-secondary-400" aria-hidden="true" />
         <p className="text-sm font-medium text-secondary-700">
           {uploading ? 'Uploading...' : label}
         </p>
@@ -179,14 +167,7 @@ export function FileUpload({
         <ul className="mt-2 space-y-1">
           {selectedFiles.map((file, i) => (
             <li key={i} className="flex items-center gap-2 text-sm text-secondary-600">
-              <svg
-                className="h-4 w-4 shrink-0 text-secondary-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0116 6.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 012 16.5v-13z" />
-              </svg>
+              <FileText className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />
               <span className="truncate">{file.name}</span>
               <span className="shrink-0 text-xs text-secondary-400">
                 ({(file.size / 1024).toFixed(0)} KB)
@@ -198,9 +179,7 @@ export function FileUpload({
                   className="ml-auto shrink-0 rounded p-0.5 text-secondary-400 hover:bg-secondary-100 hover:text-danger-500"
                   aria-label={`Remove ${file.name}`}
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                  </svg>
+                  <X className="h-4 w-4" aria-hidden="true" />
                 </button>
               )}
             </li>

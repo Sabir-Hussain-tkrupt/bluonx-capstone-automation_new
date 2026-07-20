@@ -1,5 +1,6 @@
 import { cloneElement, isValidElement, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronUp } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export interface SidebarItem {
@@ -123,18 +124,10 @@ export function Sidebar({
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         className="absolute top-12 -right-[11px] z-50 flex h-[22px] w-[22px] items-center justify-center rounded-full border border-secondary-200 bg-white text-secondary-500 shadow-sm transition-colors hover:bg-secondary-800 hover:text-white"
       >
-        <svg
+        <ChevronLeft
           className={cn('h-3 w-3 transition-transform duration-200', collapsed && 'rotate-180')}
-          viewBox="0 0 20 20"
-          fill="currentColor"
           aria-hidden="true"
-        >
-          <path
-            fillRule="evenodd"
-            d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z"
-            clipRule="evenodd"
-          />
-        </svg>
+        />
       </button>
 
       {/* Navigation sections */}
@@ -219,18 +212,10 @@ export function Sidebar({
                     <span className="truncate text-xs font-medium text-white">{user.name}</span>
                     <span className="truncate text-[11px] text-secondary-400">{user.role}</span>
                   </span>
-                  <svg
+                  <ChevronUp
                     className="h-4 w-4 shrink-0 text-secondary-400"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
                     aria-hidden="true"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832 6.29 12.77a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  />
                 </button>
               )}
               {renderUserMenuPanel()}

@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import { Alert, Card } from '@/components/ui';
 import { useBidContext } from '../hooks/useBidContext';
 import { formatCurrency } from '../utils/currency';
@@ -43,15 +44,7 @@ export function SubmissionConfirmationPage() {
           aria-hidden="true"
           className="flex h-16 w-16 items-center justify-center rounded-full bg-success-100 text-success-600"
         >
-          <svg viewBox="0 0 24 24" fill="none" className="h-9 w-9">
-            <path
-              d="M5 13l4 4L19 7"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <Check className="h-9 w-9" aria-hidden="true" />
         </div>
         <h1 className="mt-4 text-2xl font-bold text-secondary-900 sm:text-3xl">
           {isRevision ? 'Revised Bid Submitted' : 'Bid submitted successfully'}

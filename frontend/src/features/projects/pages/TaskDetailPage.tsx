@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
+import { Field } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -17,15 +19,6 @@ import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
 import { useTaskActiveContract } from '@/features/milestones/hooks/useTaskActiveContract';
 import { MilestonesCard } from '@/features/milestones/components/MilestonesCard';
 import { ContractPanel } from '@/features/contracts/components/ContractPanel';
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 py-2 text-sm">
-      <dt className="shrink-0 text-secondary-500">{label}</dt>
-      <dd className="text-right text-secondary-900">{value || '\u2014'}</dd>
-    </div>
-  );
-}
 
 function formatCurrency(value: number | null): string {
   if (value == null) return '\u2014';
@@ -122,13 +115,7 @@ export function TaskDetailPage() {
             onClick={() => navigate(`/projects/${projectId}`)}
             className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{task.name}</h1>
@@ -158,12 +145,12 @@ export function TaskDetailPage() {
           <div className="p-6">
             <h3 className="mb-3 text-sm font-semibold text-secondary-900">Task Details</h3>
             <dl className="divide-y divide-secondary-100">
-              <InfoRow label="Trade" value={task.trade_name} />
-              <InfoRow label="Phase" value={formatPhase(task.phase)} />
-              <InfoRow label="Bid Type" value={formatBidType(task.bid_type)} />
-              <InfoRow label="Status" value={<StatusBadge status={task.status} size="sm" />} />
-              <InfoRow label="Budget Estimate" value={formatCurrency(task.budget_estimate)} />
-              <InfoRow label="Sort Order" value={task.sort_order} />
+              <Field label="Trade" value={task.trade_name} />
+              <Field label="Phase" value={formatPhase(task.phase)} />
+              <Field label="Bid Type" value={formatBidType(task.bid_type)} />
+              <Field label="Status" value={<StatusBadge status={task.status} size="sm" />} />
+              <Field label="Budget Estimate" value={formatCurrency(task.budget_estimate)} />
+              <Field label="Sort Order" value={task.sort_order} />
             </dl>
           </div>
         </Card>
@@ -172,8 +159,8 @@ export function TaskDetailPage() {
           <div className="p-6">
             <h3 className="mb-3 text-sm font-semibold text-secondary-900">Timestamps</h3>
             <dl className="divide-y divide-secondary-100">
-              <InfoRow label="Created" value={formatDate(task.created_at)} />
-              <InfoRow label="Updated" value={formatDate(task.updated_at)} />
+              <Field label="Created" value={formatDate(task.created_at)} />
+              <Field label="Updated" value={formatDate(task.updated_at)} />
             </dl>
 
             {task.description && (

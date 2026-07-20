@@ -4,6 +4,8 @@ export type { ComponentSize, ComponentVariant, StatusVariant } from './types';
 // Input components
 export { Button } from './Button';
 export type { ButtonProps } from './Button';
+export { IconButton } from './IconButton';
+export type { IconButtonProps } from './IconButton';
 export { TextInput } from './TextInput';
 export type { TextInputProps } from './TextInput';
 export { Select } from './Select';
@@ -32,10 +34,14 @@ export { Tabs } from './Tabs';
 export type { TabsProps, Tab } from './Tabs';
 export { Accordion } from './Accordion';
 export type { AccordionProps, AccordionItem } from './Accordion';
+export { DropdownMenu, DropdownMenuItem } from './DropdownMenu';
+export type { DropdownMenuProps, DropdownMenuItemProps } from './DropdownMenu';
 
 // Data display components
 export { Table } from './Table';
 export type { TableProps, Column, TablePagination } from './Table';
+export { Field } from './Field';
+export type { FieldProps } from './Field';
 export { StatusBadge } from './StatusBadge';
 export type { StatusBadgeProps } from './StatusBadge';
 export { StarRating } from './StarRating';

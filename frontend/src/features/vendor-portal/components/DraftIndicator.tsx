@@ -1,3 +1,4 @@
+import { Check, Loader2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export type DraftStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -57,31 +58,13 @@ export function DraftIndicator({
       )}
     >
       {status === 'saving' && (
-        <svg
-          className="h-3 w-3 animate-spin"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
-          <path
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            className="opacity-75"
-          />
-        </svg>
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
       )}
       {tone === 'amber' && (
         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-warning-500" />
       )}
       {tone === 'green' && (
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3" aria-hidden="true">
-          <path
-            fillRule="evenodd"
-            d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.58l7.29-7.29a1 1 0 011.41 0z"
-            clipRule="evenodd"
-          />
-        </svg>
+        <Check className="h-3 w-3" aria-hidden="true" />
       )}
       <span>{label}</span>
     </div>

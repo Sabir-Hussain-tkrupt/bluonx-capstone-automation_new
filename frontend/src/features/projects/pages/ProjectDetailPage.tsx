@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
@@ -9,6 +10,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { DocumentList } from '@/components/ui/DocumentList';
+import { Field } from '@/components/ui/Field';
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { MilestoneTimeline } from '@/features/milestones/components/MilestoneTimeline';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -33,15 +35,6 @@ const statusVariantMap: Record<string, StatusVariant> = {
   completed: 'neutral',
   cancelled: 'danger',
 };
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 py-2 text-sm">
-      <dt className="shrink-0 text-secondary-500">{label}</dt>
-      <dd className="text-right text-secondary-900">{value || '\u2014'}</dd>
-    </div>
-  );
-}
 
 function formatDate(value: string | null): string {
   if (!value) return '\u2014';
@@ -144,13 +137,7 @@ export function ProjectDetailPage() {
             onClick={() => navigate('/projects')}
             className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{project.name}</h1>
@@ -205,18 +192,18 @@ export function ProjectDetailPage() {
               <div>
                 <h3 className="mb-3 text-sm font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <InfoRow label="Address" value={project.address} />
-                  <InfoRow label="City" value={project.city} />
-                  <InfoRow label="State" value={project.state} />
-                  <InfoRow label="ZIP Code" value={project.zip_code} />
+                  <Field label="Address" value={project.address} />
+                  <Field label="City" value={project.city} />
+                  <Field label="State" value={project.state} />
+                  <Field label="ZIP Code" value={project.zip_code} />
                 </dl>
               </div>
               <div>
                 <h3 className="mb-3 text-sm font-semibold text-secondary-900">Budget & Schedule</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <InfoRow label="Budget" value={formatCurrency(project.budget)} />
-                  <InfoRow label="Start Date" value={formatDate(project.start_date)} />
-                  <InfoRow label="Est. End Date" value={formatDate(project.estimated_end_date)} />
+                  <Field label="Budget" value={formatCurrency(project.budget)} />
+                  <Field label="Start Date" value={formatDate(project.start_date)} />
+                  <Field label="Est. End Date" value={formatDate(project.estimated_end_date)} />
                 </dl>
               </div>
               {project.description && (
