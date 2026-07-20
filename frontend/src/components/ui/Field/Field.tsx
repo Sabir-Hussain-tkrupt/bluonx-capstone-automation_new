@@ -14,7 +14,7 @@ export interface FieldProps {
 export function Field({ label, value, className }: FieldProps) {
   return (
     <div className={cn('flex justify-between gap-4 py-2 text-sm', className)}>
-      <dt className="shrink-0 text-secondary-500">{label}</dt>
+      <dt className="shrink-0 text-secondary-600">{label}</dt>
       <dd className="text-right text-secondary-900">{value || '—'}</dd>
     </div>
   );

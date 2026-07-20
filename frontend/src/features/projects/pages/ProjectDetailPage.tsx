@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { Archive, ArrowLeft, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
+import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -124,7 +126,7 @@ export function ProjectDetailPage() {
     { id: 'overview', label: 'Overview' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'milestones', label: 'Milestones' },
-    { id: 'documents', label: `Documents (${projectDocuments.length})` },
+    { id: 'documents', label: 'Documents', count: projectDocuments.length },
   ];
 
   return (
@@ -132,13 +134,14 @@ export function ProjectDetailPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<ArrowLeft className="h-4 w-4" />}
+            aria-label="Back"
             onClick={() => navigate('/projects')}
-            className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-          >
-            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
-          </button>
+            className="shrink-0"
+          />
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{project.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -147,16 +150,23 @@ export function ProjectDetailPage() {
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {!isArchived && (
             <>
-              <Button variant="outline" onClick={() => setShowEditForm(true)}>Edit</Button>
+              <Button
+                variant="primary"
+                leftIcon={<Pencil className="h-4 w-4" />}
+                onClick={() => setShowEditForm(true)}
+              >
+                Edit
+              </Button>
               <span
                 title={!canArchive ? 'Active projects cannot be archived' : undefined}
                 className="inline-flex"
               >
                 <Button
                   variant="outline"
+                  leftIcon={<Archive className="h-4 w-4" />}
                   disabled={!canArchive}
                   onClick={() => setShowArchiveConfirm(true)}
                 >
@@ -174,7 +184,24 @@ export function ProjectDetailPage() {
               Unarchive
             </Button>
           )}
-          <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Delete</Button>
+          <DropdownMenu
+            trigger={
+              <IconButton
+                variant="outline"
+                size="md"
+                icon={<MoreHorizontal className="h-4 w-4" />}
+                aria-label="More actions"
+              />
+            }
+          >
+            <DropdownMenuItem
+              icon={<Trash2 className="h-4 w-4" />}
+              destructive
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -190,7 +217,7 @@ export function ProjectDetailPage() {
           <Card>
             <div className="grid grid-cols-1 gap-6 p-6 md:grid-cols-2">
               <div>
-                <h3 className="mb-3 text-sm font-semibold text-secondary-900">Location</h3>
+                <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
                   <Field label="Address" value={project.address} />
                   <Field label="City" value={project.city} />
@@ -199,7 +226,7 @@ export function ProjectDetailPage() {
                 </dl>
               </div>
               <div>
-                <h3 className="mb-3 text-sm font-semibold text-secondary-900">Budget & Schedule</h3>
+                <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Budget & Schedule</h3>
                 <dl className="divide-y divide-secondary-100">
                   <Field label="Budget" value={formatCurrency(project.budget)} />
                   <Field label="Start Date" value={formatDate(project.start_date)} />
@@ -208,7 +235,7 @@ export function ProjectDetailPage() {
               </div>
               {project.description && (
                 <div className="md:col-span-2">
-                  <h3 className="mb-2 text-sm font-semibold text-secondary-900">Description</h3>
+                  <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Description</h3>
                   <p className="text-sm text-secondary-700 whitespace-pre-wrap">{project.description}</p>
                 </div>
               )}
