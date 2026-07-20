@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { UserMenuPanel } from './UserMenuPanel';
+import { ChevronDown, LogOut } from 'lucide-react';
+import { DropdownMenu, DropdownMenuItem } from '../DropdownMenu';
 import { getInitials } from './getInitials';
 
 export interface UserMenuItem {
@@ -25,77 +25,52 @@ export function UserMenu({
   menuItems = [],
   onSignOut,
 }: UserMenuProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handleEscape(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setIsOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen]);
+  const trigger = (
+    <button
+      type="button"
+      className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-secondary-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+    >
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={userName}
+          className="h-8 w-8 rounded-full object-cover"
+        />
+      ) : (
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+          {getInitials(userName)}
+        </span>
+      )}
+      <span className="hidden text-left md:block">
+        <span className="block text-sm font-medium text-secondary-900">{userName}</span>
+        <span className="block text-xs text-secondary-500">{userRole}</span>
+      </span>
+      <ChevronDown className="hidden h-4 w-4 text-secondary-400 md:block" aria-hidden="true" />
+    </button>
+  );
 
   return (
-    <div className="relative" ref={menuRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setIsOpen((o) => !o)}
-        aria-haspopup="true"
-        aria-expanded={isOpen}
-        className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-secondary-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
-      >
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt={userName}
-            className="h-8 w-8 rounded-full object-cover"
-          />
-        ) : (
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
-            {getInitials(userName)}
-          </span>
-        )}
-        <span className="hidden text-left md:block">
-          <span className="block text-sm font-medium text-secondary-900">{userName}</span>
-          <span className="block text-xs text-secondary-500">{userRole}</span>
-        </span>
-        <svg className="hidden h-4 w-4 text-secondary-400 md:block" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-        </svg>
-      </button>
+    <DropdownMenu trigger={trigger} align="right" side="bottom" className="w-56">
+      <div className="border-b border-secondary-100 px-4 py-3">
+        <p className="text-sm font-medium text-secondary-900">{userName}</p>
+        <p className="text-xs text-secondary-500">{userEmail}</p>
+      </div>
 
-      {isOpen && (
-        <UserMenuPanel
-          userName={userName}
-          userEmail={userEmail}
-          menuItems={menuItems}
-          onSignOut={onSignOut}
-          anchor="bottom-right"
-          onClose={() => setIsOpen(false)}
-        />
-      )}
-    </div>
+      {menuItems.map((item) => (
+        <DropdownMenuItem key={item.label} icon={item.icon} onClick={item.onClick}>
+          {item.label}
+        </DropdownMenuItem>
+      ))}
+
+      {menuItems.length > 0 && <div className="my-1 border-t border-secondary-100" />}
+
+      <DropdownMenuItem
+        destructive
+        icon={<LogOut className="h-4 w-4" aria-hidden="true" />}
+        onClick={onSignOut}
+      >
+        Sign out
+      </DropdownMenuItem>
+    </DropdownMenu>
   );
 }

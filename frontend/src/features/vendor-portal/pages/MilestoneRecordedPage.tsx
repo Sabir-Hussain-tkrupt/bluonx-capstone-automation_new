@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import { PortalErrorPage } from './PortalErrorPage';
 
 interface RecordedState {
@@ -41,17 +42,7 @@ export function MilestoneRecordedPage() {
       title="Response recorded"
       message={message}
       helpText="No further action is needed. You may close this window."
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
-          <path
-            d="M20 6L9 17l-5-5"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      }
+      icon={<Check className="h-8 w-8" aria-hidden="true" />}
     />
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Clock } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export interface BidDeadlineCountdownProps {
@@ -66,18 +67,7 @@ export function BidDeadlineCountdown({
         className,
       )}
     >
-      <svg
-        viewBox="0 0 20 20"
-        fill="currentColor"
-        className="h-5 w-5 shrink-0"
-        aria-hidden="true"
-      >
-        <path
-          fillRule="evenodd"
-          d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .2.08.39.22.53l3 3a.75.75 0 001.06-1.06L10.75 9.69V5z"
-          clipRule="evenodd"
-        />
-      </svg>
+      <Clock className="h-5 w-5 shrink-0" aria-hidden="true" />
       <div className="flex-1 text-sm">
         <p className="font-semibold">
           {remaining.expired ? `${label} has passed` : label}

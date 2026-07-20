@@ -1,3 +1,4 @@
+import { FileText } from 'lucide-react';
 import { Button, Card, FormField, TextInput, useToast } from '@/components/ui';
 import { useBidContext } from '../../hooks/useBidContext';
 import { downloadProjectDocument } from '../../services/portalApi';
@@ -197,13 +198,7 @@ export function Step1CompanyInfo({
                   aria-hidden="true"
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-600"
                 >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                    <path
-                      fillRule="evenodd"
-                      d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm8 0v2h2l-2-2z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  <FileText className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-secondary-900">

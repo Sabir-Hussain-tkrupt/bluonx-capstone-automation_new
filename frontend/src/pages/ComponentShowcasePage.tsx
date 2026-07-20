@@ -20,9 +20,22 @@ import {
   SkeletonTable,
   Breadcrumbs,
   UserMenu,
+  Field,
+  IconButton,
+  DropdownMenu,
+  DropdownMenuItem,
   useToast,
 } from '@/components/ui';
 import type { Column } from '@/components/ui';
+import {
+  LogOut,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+} from 'lucide-react';
 
 // ── Sample data ────────────────────────────────────────────
 
@@ -149,11 +162,7 @@ export function ComponentShowcasePage() {
           <TextInput placeholder="Large" size="lg" />
           <TextInput
             placeholder="With left addon"
-            leftAddon={
-              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
-              </svg>
-            }
+            leftAddon={<Search className="h-4 w-4" aria-hidden="true" />}
           />
           <TextInput placeholder="Disabled" disabled />
         </div>
@@ -460,6 +469,72 @@ export function ComponentShowcasePage() {
             userRole="Project Manager"
             onSignOut={() => console.log('Sign out clicked')}
           />
+        </div>
+      </Section>
+
+      {/* ── Field ─────────────────────────────────────── */}
+      <Section title="Field">
+        <Card>
+          <div className="p-6">
+            <dl className="divide-y divide-secondary-100">
+              <Field label="Company" value="ABC Plumbing" />
+              <Field label="Trade" value="Plumbing" />
+              <Field label="Status" value={<StatusBadge status="approved" size="sm" />} />
+              <Field label="Notes" value={null} />
+            </dl>
+          </div>
+        </Card>
+      </Section>
+
+      {/* ── IconButton ────────────────────────────────── */}
+      <Section title="IconButton">
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex items-center gap-2">
+            <IconButton icon={<Pencil className="h-4 w-4" />} aria-label="Edit" />
+            <IconButton icon={<Trash2 className="h-4 w-4" />} aria-label="Delete" />
+            <IconButton icon={<Settings className="h-4 w-4" />} aria-label="Settings" disabled />
+          </div>
+          <div className="flex items-center gap-2">
+            <IconButton icon={<Plus className="h-3.5 w-3.5" />} aria-label="Add" size="sm" variant="outline" />
+            <IconButton icon={<Pencil className="h-4 w-4" />} aria-label="Edit" size="md" variant="outline" />
+            <IconButton icon={<Trash2 className="h-[18px] w-[18px]" />} aria-label="Delete" size="lg" variant="outline" />
+          </div>
+        </div>
+      </Section>
+
+      {/* ── DropdownMenu ──────────────────────────────── */}
+      <Section title="DropdownMenu">
+        <div className="flex items-center gap-8">
+          <DropdownMenu
+            trigger={
+              <IconButton icon={<MoreHorizontal className="h-4 w-4" />} aria-label="More actions" />
+            }
+          >
+            <DropdownMenuItem icon={<Pencil className="h-4 w-4" />} onClick={() => console.log('Edit')}>
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<Settings className="h-4 w-4" />} onClick={() => console.log('Settings')}>
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              destructive
+              icon={<Trash2 className="h-4 w-4" />}
+              onClick={() => console.log('Delete')}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenu>
+
+          <DropdownMenu
+            align="left"
+            trigger={<Button variant="outline" rightIcon={<LogOut className="h-4 w-4" />}>Account</Button>}
+          >
+            <DropdownMenuItem onClick={() => console.log('Profile')}>Profile</DropdownMenuItem>
+            <DropdownMenuItem disabled>Billing (soon)</DropdownMenuItem>
+            <DropdownMenuItem destructive onClick={() => console.log('Sign out')}>
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenu>
         </div>
       </Section>
 

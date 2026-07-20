@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { StepIndex } from '../types/portal';
 
@@ -58,13 +59,7 @@ export function ProgressStepper({
             <div className="flex flex-col items-center">
               <span className={circleClasses} aria-hidden={current ? undefined : true}>
                 {done && !current ? (
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.58l7.29-7.29a1 1 0 011.41 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  <Check className="h-4 w-4" aria-hidden="true" />
                 ) : (
                   step.index
                 )}

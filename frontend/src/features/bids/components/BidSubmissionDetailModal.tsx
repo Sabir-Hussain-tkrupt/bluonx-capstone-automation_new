@@ -1,3 +1,4 @@
+import { FileText } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -119,14 +120,7 @@ export function BidSubmissionDetailModal({
                     className="flex items-center justify-between gap-3 px-4 py-3"
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <svg
-                        className="h-4 w-4 shrink-0 text-secondary-400"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0116 6.622V16.5a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 16.5v-13z" />
-                      </svg>
+                      <FileText className="h-4 w-4 shrink-0 text-secondary-400" aria-hidden="true" />
                       <span className="truncate text-sm text-secondary-700">{att.file_name}</span>
                       <span className="shrink-0 text-xs text-secondary-500">
                         {formatFileSize(att.file_size)}

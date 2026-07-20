@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Check, FileText, X } from 'lucide-react';
 import { Alert, Button, Card, FileUpload, FormField, useToast } from '@/components/ui';
 import {
   deleteAttachment,
@@ -172,14 +173,7 @@ export function Step3Documents({
                   key={att.id}
                   className="flex items-center gap-3 px-3 py-2 text-sm"
                 >
-                  <svg
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-5 w-5 shrink-0 text-secondary-400"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0116 6.622V16.5a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 16.5v-13z" />
-                  </svg>
+                  <FileText className="h-5 w-5 shrink-0 text-secondary-400" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-secondary-700">
                       {att.file_name}
@@ -223,18 +217,7 @@ export function Step3Documents({
                 key={att.id}
                 className="flex items-center gap-3 px-3 py-2 text-sm"
               >
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5 shrink-0 text-success-600"
-                  aria-hidden="true"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.58l7.29-7.29a1 1 0 011.41 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                <Check className="h-5 w-5 shrink-0 text-success-600" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-secondary-900">{att.name}</p>
                   <p className="text-xs text-secondary-500">{formatBytes(att.size)}</p>
@@ -246,9 +229,7 @@ export function Step3Documents({
                   disabled={disabled}
                   className="rounded-md p-1 text-secondary-400 hover:bg-secondary-100 hover:text-danger-600 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                  </svg>
+                  <X className="h-4 w-4" aria-hidden="true" />
                 </button>
               </li>
             ))}
