@@ -131,7 +131,7 @@ describe('VendorDetailPage — Communication tab', () => {
 
     renderPage();
 
-    expect(screen.getByRole('tab', { name: /Communication \(2\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Communication\s*2/ })).toBeInTheDocument();
   });
 
   it('does not fetch the email log until the Communication tab is active', () => {
