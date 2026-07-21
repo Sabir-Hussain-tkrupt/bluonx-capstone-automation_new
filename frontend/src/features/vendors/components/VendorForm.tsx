@@ -8,11 +8,14 @@ import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { Select } from '@/components/ui/Select';
 import { TradeMultiSelect } from './TradeMultiSelect';
+import { isValidEmail } from '@/utils/validation';
 import type { Vendor } from '@/features/vendors/api/vendor.queries';
 import { useState } from 'react';
 
 const vendorSchema = z.object({
-  company_name: z.string().min(2, 'Company name is required (min 2 characters)').max(255, 'Company name must be 255 characters or fewer'),
+  // trim() runs before the length checks, so a whitespace-only name fails
+  // min-length here instead of passing and being stored padded.
+  company_name: z.string().trim().min(2, 'Company name is required (min 2 characters)').max(255, 'Company name must be 255 characters or fewer'),
   address: z.string().optional(),
   city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),
   state: z.string().max(50, 'State must be 50 characters or fewer').optional().or(z.literal('')),
@@ -127,6 +130,12 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
 
   const addContact = () => {
     if (!contactName.trim() || !contactEmail.trim()) return;
+    // Catch a malformed address here rather than letting the API reject it,
+    // where a 422 is flattened into a generic message that names no field.
+    if (!isValidEmail(contactEmail)) {
+      setContactsError('Enter a valid email address for the contact.');
+      return;
+    }
     setContacts([
       ...contacts,
       {
@@ -162,6 +171,8 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
       onClose={handleClose}
       title={isEdit ? 'Edit Vendor' : 'Add Vendor'}
       size="lg"
+      // A stray click on the backdrop should not discard a part-filled vendor.
+      closeOnOverlayClick={false}
       footer={
         <>
           <Button variant="ghost" onClick={handleClose} disabled={isLoading}>

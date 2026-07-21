@@ -6,10 +6,11 @@ import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { Checkbox } from '@/components/ui/Checkbox';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
+import { emailSchema } from '@/utils/validation';
 
 const contactSchema = z.object({
   full_name: z.string().min(2, 'Name is required'),
-  email: z.string().email('Valid email is required'),
+  email: emailSchema,
   phone: z.string().optional(),
   title: z.string().optional(),
   is_primary: z.boolean().optional(),
