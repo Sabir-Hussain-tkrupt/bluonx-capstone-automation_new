@@ -8,6 +8,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.auth import get_current_active_user
+from app.core.query_filters import escape_like_pattern
 from app.core.supabase_client import get_supabase
 from app.models.bid_templates import (
     BidTemplateCreate,
@@ -307,7 +308,7 @@ async def list_bid_templates(
     query = db.table("bid_templates").select("*", count="exact")
 
     if search:
-        query = query.ilike("name", f"%{search}%")
+        query = query.ilike("name", f"%{escape_like_pattern(search)}%")
 
     if trade_id == "null":
         query = query.is_("trade_id", "null")

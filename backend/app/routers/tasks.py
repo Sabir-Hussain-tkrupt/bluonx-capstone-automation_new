@@ -8,6 +8,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.auth import get_current_active_user
+from app.core.query_filters import escape_like_pattern
 from app.core.supabase_client import get_supabase
 from app.models.projects import (
     TaskCreate,
@@ -214,7 +215,7 @@ async def list_tasks(
             .is_("deleted_at", "null")
         )
         if search:
-            q = q.ilike("name", f"%{search}%")
+            q = q.ilike("name", f"%{escape_like_pattern(search)}%")
         if task_status:
             q = q.eq("status", task_status)
         return q

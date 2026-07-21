@@ -16,6 +16,7 @@ from app.core.auth import get_current_active_user, require_admin
 from app.services.geocoding import geocode_address
 from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import EmailLogResponse
@@ -146,30 +147,24 @@ async def list_vendors(
 ):
     """List all active vendors with search, filter, sort, and pagination."""
 
-    # If filtering by trade, first get the vendor IDs that have that trade
-    vendor_ids_for_trade: list[str] | None = None
-    if trade_id:
-        trade_resp = (
-            db.table("vendor_trades")
-            .select("vendor_id")
-            .eq("trade_id", str(trade_id))
-            .execute()
-        )
-        vendor_ids_for_trade = [r["vendor_id"] for r in (trade_resp.data or [])]
-        if not vendor_ids_for_trade:
-            return VendorListResponse(items=[], total=0, page=page, page_size=page_size)
-
-    # Build the (filtered) query — reused for the count and the page fetch
+    # Build the (filtered) query — reused for the count and the page fetch.
+    #
+    # The trade filter is an embedded inner join rather than a two-step "fetch
+    # matching vendor ids, then .in_(...)" lookup. That older shape silently
+    # truncated at PostgREST's default 1000-row ceiling once a trade had enough
+    # vendors, and pushed every id into the query string.
     def _filtered(select_expr: str):
+        if trade_id:
+            select_expr = f"{select_expr}, vendor_trades!inner(trade_id)"
         q = db.table("vendors").select(select_expr, count="exact").is_("deleted_at", "null")
         if search:
-            q = q.ilike("company_name", f"%{search}%")
+            q = q.ilike("company_name", f"%{escape_like_pattern(search)}%")
         if vendor_status:
             q = q.eq("status", vendor_status)
         if onboarding_status:
             q = q.eq("onboarding_status", onboarding_status)
-        if vendor_ids_for_trade is not None:
-            q = q.in_("id", vendor_ids_for_trade)
+        if trade_id:
+            q = q.eq("vendor_trades.trade_id", str(trade_id))
         return q
 
     # Sorting

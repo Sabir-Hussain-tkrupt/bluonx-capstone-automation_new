@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 from app.core.auth import get_current_active_user
 from app.services.geocoding import geocode_address
 from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.common import SignedUrlResponse
@@ -92,7 +93,7 @@ async def list_projects(
         if not include_archived:
             q = q.is_("archived_at", "null")
         if search:
-            q = q.ilike("name", f"%{search}%")
+            q = q.ilike("name", f"%{escape_like_pattern(search)}%")
         if project_status:
             q = q.eq("status", project_status)
         return q
