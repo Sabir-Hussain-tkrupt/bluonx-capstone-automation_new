@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select';
 import type { Project } from '@/features/projects/api/project.queries';
 
 const projectSchema = z.object({
-  name: z.string().min(2, 'Project name is required (min 2 characters)').max(255, 'Project name must be 255 characters or fewer'),
+  name: z.string().trim().min(2, 'Project name is required (min 2 characters)').max(255, 'Project name must be 255 characters or fewer'),
   description: z.string().optional(),
   address: z.string().optional(),
   city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),

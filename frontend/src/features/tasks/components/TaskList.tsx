@@ -109,11 +109,14 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
   }, []);
 
   // ─── Budget summary ────────────────────────────────────────────────
+  // Coerce with Number() before summing: numeric columns can reach the client
+  // as strings, and `0 + "500"` concatenates into "0500" rather than adding.
   const totalTaskBudget = useMemo(
-    () => tasks.reduce((sum, t) => sum + (t.budget_estimate ?? 0), 0),
+    () => tasks.reduce((sum, t) => sum + (Number(t.budget_estimate) || 0), 0),
     [tasks],
   );
-  const budgetRemaining = projectBudget != null ? projectBudget - totalTaskBudget : null;
+  const projectBudgetNum = projectBudget != null ? Number(projectBudget) : null;
+  const budgetRemaining = projectBudgetNum != null ? projectBudgetNum - totalTaskBudget : null;
   const isOverBudget = budgetRemaining != null && budgetRemaining < 0;
 
   // ─── Loading / Error ───────────────────────────────────────────────

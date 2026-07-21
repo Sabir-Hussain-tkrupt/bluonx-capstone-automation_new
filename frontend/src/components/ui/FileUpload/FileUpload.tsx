@@ -20,6 +20,31 @@ export interface FileUploadProps {
   onRemoveFile?: (index: number) => void;
 }
 
+/**
+ * Whether a file satisfies an `accept` list. Handles both dot-extensions
+ * (".pdf") and MIME tokens ("image/png", "image/*"), so every existing caller
+ * keeps working. The native `accept` attribute filters only the OS picker;
+ * this also covers drag-and-drop, where a disallowed type otherwise slipped
+ * through client-side and only failed at the server.
+ */
+function isAcceptedType(file: File, accept: string): boolean {
+  const tokens = accept
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  const name = file.name.toLowerCase();
+  const type = (file.type || '').toLowerCase();
+
+  return tokens.some((token) => {
+    if (token.startsWith('.')) return name.endsWith(token);
+    if (token.endsWith('/*')) return type.startsWith(token.slice(0, -1));
+    if (token.includes('/')) return type === token;
+    return false;
+  });
+}
+
 export function FileUpload({
   accept,
   maxSizeMB = 10,
@@ -48,6 +73,17 @@ export function FileUpload({
       if (!files || files.length === 0) return;
 
       const fileArray = Array.from(files);
+
+      if (accept) {
+        const wrongType = fileArray.filter((f) => !isAcceptedType(f, accept));
+        if (wrongType.length > 0) {
+          onError?.(
+            `${wrongType.map((f) => f.name).join(', ')} ${wrongType.length === 1 ? 'is' : 'are'} not an accepted file type. Accepted: ${accept}`,
+          );
+          return;
+        }
+      }
+
       const maxBytes = maxSizeMB * 1024 * 1024;
       const oversized = fileArray.filter((f) => f.size > maxBytes);
 
@@ -61,7 +97,7 @@ export function FileUpload({
       setSelectedFiles(fileArray);
       onFilesSelected(fileArray);
     },
-    [maxSizeMB, onFilesSelected, onError],
+    [accept, maxSizeMB, onFilesSelected, onError],
   );
 
   const handleRemoveFile = useCallback(

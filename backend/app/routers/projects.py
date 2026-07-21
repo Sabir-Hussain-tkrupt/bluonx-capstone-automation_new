@@ -71,6 +71,7 @@ async def list_projects(
     search: str | None = Query(default=None, description="Search by project name"),
     project_status: str | None = Query(default=None, alias="status", description="Filter by status"),
     include_archived: bool = Query(default=False, description="Include archived projects (hidden by default)"),
+    archived_only: bool = Query(default=False, description="Return only archived projects (overrides include_archived)"),
     sort_by: str = Query(default="name", description="Column to sort by"),
     sort_dir: str = Query(default="asc", description="Sort direction: asc or desc"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -81,7 +82,8 @@ async def list_projects(
     """List active projects with search, filter, sort, and pagination.
 
     Archived projects are hidden by default (pass include_archived=true to show
-    them); soft-deleted projects are never returned.
+    them alongside active ones, or archived_only=true to show just the archived
+    ones); soft-deleted projects are never returned.
     """
 
     def _filtered(select_expr: str):
@@ -90,7 +92,9 @@ async def list_projects(
             .select(select_expr, count="exact")
             .is_("deleted_at", "null")
         )
-        if not include_archived:
+        if archived_only:
+            q = q.not_.is_("archived_at", "null")
+        elif not include_archived:
             q = q.is_("archived_at", "null")
         if search:
             q = q.ilike("name", f"%{escape_like_pattern(search)}%")
