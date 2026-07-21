@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
@@ -16,6 +17,7 @@ import { InsuranceExpiringBadge } from '@/features/vendors/components/InsuranceE
 import type { Vendor, VendorListFilters } from '@/features/vendors/api/vendor.queries';
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
+import type { ApiError } from '@/lib/api';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   active: 'success',
@@ -47,20 +49,24 @@ export function VendorListPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showCSVImport, setShowCSVImport] = useState(false);
 
-  // Debounced search
+  // Debounced search. The timer lives in a ref, not state: keeping it in state
+  // rebuilt handleSearchChange on every keystroke (defeating useCallback) and
+  // left a pending timer running after unmount.
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+  }, []);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
-    if (debounceTimer) clearTimeout(debounceTimer);
-    setDebounceTimer(
-      setTimeout(() => {
-        setDebouncedSearch(value);
-        setPage(1);
-      }, 300),
-    );
-  }, [debounceTimer]);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 300);
+  }, []);
 
   const filters: VendorListFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
@@ -73,7 +79,7 @@ export function VendorListPage() {
     page_size: pageSize,
   }), [debouncedSearch, statusFilter, onboardingFilter, tradeFilter, sortBy, sortDir, page, pageSize]);
 
-  const { data, isLoading } = useVendors(filters);
+  const { data, isLoading, isError, error, refetch, isFetching } = useVendors(filters);
   const { data: trades = [] } = useTrades();
   const createVendorMutation = useCreateVendor();
 
@@ -168,6 +174,7 @@ export function VendorListPage() {
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search by company name..."
+          aria-label="Search vendors by company name"
           size="sm"
         />
         <Select
@@ -203,6 +210,27 @@ export function VendorListPage() {
         />
       </div>
 
+      {/* Load failure. Without this a failed fetch falls through to an empty
+          list and reads as "no vendors match your filters", which is a very
+          different thing from "we could not reach the server". */}
+      {isError && (
+        <Alert variant="danger" title="Could not load vendors">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {(error as ApiError)?.message ?? 'Something went wrong. Please try again.'}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              isLoading={isFetching}
+            >
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       {/* Table */}
       <Table
         columns={columns}
@@ -222,18 +250,29 @@ export function VendorListPage() {
           onPageSizeChange: (size) => { setPageSize(size); setPage(1); },
         }}
         emptyState={
-          <EmptyState
-            title="No vendors found"
-            description={
-              debouncedSearch || statusFilter || onboardingFilter || tradeFilter
-                ? 'Try adjusting your filters.'
-                : 'Get started by adding a vendor or importing from CSV.'
-            }
-          />
+          isError ? (
+            <EmptyState
+              title="Vendors unavailable"
+              description="The list could not be loaded. Retry above to try again."
+            />
+          ) : (
+            <EmptyState
+              title="No vendors found"
+              description={
+                debouncedSearch || statusFilter || onboardingFilter || tradeFilter
+                  ? 'Try adjusting your filters.'
+                  : 'Get started by adding a vendor or importing from CSV.'
+              }
+            />
+          )
         }
       />
 
-      {/* Create Vendor Modal */}
+      {/* Create Vendor Modal.
+          Mounted only while open. Left permanently mounted, its internal state
+          (fields, contact list, in-progress contact draft) survived a close, so
+          the next "Add Vendor" opened pre-filled with the vendor just created. */}
+      {showCreateForm && (
       <VendorForm
         isOpen={showCreateForm}
         onClose={() => setShowCreateForm(false)}
@@ -250,6 +289,7 @@ export function VendorListPage() {
           });
         }}
       />
+      )}
 
       {/* CSV Import Modal */}
       {showCSVImport && (

@@ -114,6 +114,14 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
     reset();
     setSelectedTradeIds([]);
     setContacts([]);
+    // The in-progress contact draft and its error are part of the form's
+    // state too; leaving them behind resurfaces a stale row (and a stale red
+    // banner) the next time the modal opens.
+    setContactName('');
+    setContactEmail('');
+    setContactPhone('');
+    setContactTitle('');
+    setContactsError('');
     onClose();
   };
 
