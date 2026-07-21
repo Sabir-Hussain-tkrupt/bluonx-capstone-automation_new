@@ -132,6 +132,13 @@ export async function removeVendorTrade(vendorId: string, tradeId: string): Prom
 // ─── CSV Import ───────────────────────────────────────────────────────
 
 export async function importVendorsCSV(rows: VendorImportRow[]): Promise<VendorImportResponse> {
-  const { data } = await api.post<VendorImportResponse>(API_ENDPOINTS.VENDOR_IMPORT, { rows });
+  // The server imports row by row, geocoding each address, so a full 100-row
+  // batch can run well past the 30s default. Timing out here would report a
+  // failure while the server carried on creating vendors.
+  const { data } = await api.post<VendorImportResponse>(
+    API_ENDPOINTS.VENDOR_IMPORT,
+    { rows },
+    { timeout: 180_000 },
+  );
   return data;
 }

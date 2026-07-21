@@ -9,6 +9,7 @@ import { useImportVendors } from '@/features/vendors/hooks/useImportVendors';
 import { useToast } from '@/components/ui/Toast/useToast';
 import type { VendorImportRow, VendorImportResponse } from '@/features/vendors/api/vendor.mutations';
 import type { StatusVariant } from '@/components/ui/types';
+import { isValidEmail } from '@/utils/validation';
 
 interface VendorCSVImportProps {
   isOpen: boolean;
@@ -79,7 +80,22 @@ interface RowValidation {
   warnings: string[];
 }
 
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * Must match VENDOR_IMPORT_MAX_ROWS in backend/app/models/vendors.py.
+ *
+ * The server imports row by row, geocoding each address, so a larger batch
+ * outlives the request timeout: the user is told the import failed while rows
+ * keep being created behind them.
+ */
+const MAX_IMPORT_ROWS = 100;
+
+/** Papa error codes that mean a single row is malformed rather than the file. */
+const ROW_SCOPED_PARSE_CODES = new Set([
+  'TooFewFields',
+  'TooManyFields',
+  'MissingQuotes',
+  'InvalidQuotes',
+]);
 
 export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
   const { toast } = useToast();
@@ -94,11 +110,20 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
 
+  // Per-row problems found by the CSV parser itself, keyed by row index.
+  const [parseErrors, setParseErrors] = useState<Record<number, string[]>>({});
+  // A problem with the file as a whole; blocks leaving the upload step.
+  const [fileError, setFileError] = useState('');
+
   // Map step
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
 
   // Confirm step
   const [importResult, setImportResult] = useState<VendorImportResponse | null>(null);
+  // Original CSV line for each row in the submitted batch, by position. The
+  // server numbers its errors over the array it received, which excludes rows
+  // we filtered out, so those numbers have to be mapped back before display.
+  const [submittedLines, setSubmittedLines] = useState<number[]>([]);
 
   const resetState = useCallback(() => {
     setStep('upload');
@@ -107,6 +132,9 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
     setCsvRows([]);
     setColumnMapping({});
     setImportResult(null);
+    setParseErrors({});
+    setFileError('');
+    setSubmittedLines([]);
   }, []);
 
   const handleClose = () => {
@@ -118,6 +146,8 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
 
   const handleFileSelect = (file: File) => {
     setFileName(file.name);
+    setFileError('');
+    setParseErrors({});
 
     Papa.parse(file, {
       header: true,
@@ -125,6 +155,48 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
       complete: (results) => {
         const headers = results.meta.fields ?? [];
         const rows = results.data as Record<string, string>[];
+
+        // File-level problems: the parse itself is untrustworthy, so every row
+        // below it would be misaligned. Refuse rather than show a confident
+        // preview of garbage.
+        const normalizedHeaders = headers.map((h) => h.trim().toLowerCase());
+        if (headers.length === 0) {
+          setFileError('No columns could be detected. Check that the first row contains column headers.');
+          return;
+        }
+        if (normalizedHeaders.some((h) => !h)) {
+          setFileError('One or more columns have a blank header. Name every column and try again.');
+          return;
+        }
+        if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
+          setFileError('Two or more columns share the same header. Give each column a unique name.');
+          return;
+        }
+        if (results.errors.some((e) => e.code === 'UndetectableDelimiter')) {
+          setFileError('The column separator could not be detected. Save the file as a standard comma-separated CSV.');
+          return;
+        }
+        if (rows.length === 0) {
+          setFileError('This file has headers but no data rows.');
+          return;
+        }
+        if (rows.length > MAX_IMPORT_ROWS) {
+          setFileError(
+            `This file has ${rows.length} rows. Imports are limited to ${MAX_IMPORT_ROWS} rows at a time — split the file and import it in parts.`,
+          );
+          return;
+        }
+
+        // Row-level parse problems are hard errors, not warnings: a row with
+        // the wrong field count has shifted every value into the wrong column,
+        // so importing it would create real garbage.
+        const byRow: Record<number, string[]> = {};
+        results.errors.forEach((e) => {
+          if (typeof e.row === 'number' && ROW_SCOPED_PARSE_CODES.has(e.code ?? '')) {
+            byRow[e.row] = [...(byRow[e.row] ?? []), e.message || 'Malformed CSV row'];
+          }
+        });
+        setParseErrors(byRow);
 
         setCsvHeaders(headers);
         setCsvRows(rows);
@@ -190,7 +262,9 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
     const companyNames = new Set<string>();
 
     return mappedRows.map((row, index) => {
-      const errors: string[] = [];
+      // Parser-level problems come first: if the row didn't parse cleanly,
+      // nothing else about it can be trusted.
+      const errors: string[] = [...(parseErrors[index] ?? [])];
       const warnings: string[] = [];
       const r = row as unknown as Record<string, string>;
 
@@ -206,13 +280,26 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
       }
 
       // Validate email if provided
-      if (r.contact_email && !emailRegex.test(r.contact_email)) {
+      if (r.contact_email && !isValidEmail(r.contact_email)) {
         errors.push('Invalid email format');
       }
 
       return { row: r, index, errors, warnings };
     });
-  }, [mappedRows]);
+  }, [mappedRows, parseErrors]);
+
+  // Two columns pointing at the same vendor field silently overwrite each
+  // other during mapping, so the user needs to be told which one wins.
+  const duplicateTargets = useMemo(() => {
+    const seen = new Set<string>();
+    const dupes = new Set<string>();
+    Object.values(columnMapping).forEach((target) => {
+      if (!target) return;
+      if (seen.has(target)) dupes.add(target);
+      seen.add(target);
+    });
+    return dupes;
+  }, [columnMapping]);
 
   const validCount = validatedRows.filter((r) => r.errors.length === 0).length;
   const errorCount = validatedRows.filter((r) => r.errors.length > 0).length;
@@ -221,9 +308,14 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
   // ─── Confirm & Import Step ────────────────────────────────────
 
   const handleImport = async () => {
-    const validRows = validatedRows
-      .filter((r) => r.errors.length === 0)
-      .map((r) => r.row as unknown as VendorImportRow);
+    const importable = validatedRows.filter((r) => r.errors.length === 0);
+    const validRows = importable.map((r) => r.row as unknown as VendorImportRow);
+
+    // Record which CSV line each submitted row came from. The server numbers
+    // its errors 1-based over the array it receives, and that array has the
+    // invalid rows stripped out, so without this map every reported row number
+    // points at the wrong line in the user's file.
+    setSubmittedLines(importable.map((r) => r.index + 1));
 
     importMutation.mutate(validRows, {
       onSuccess: (data) => {
@@ -248,7 +340,15 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
       : 'Import Vendors — Confirm';
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title={stepTitle} size="xl">
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title={stepTitle}
+      size="xl"
+      // Losing a mapped file to a misplaced click means redoing the upload
+      // and every column mapping.
+      closeOnOverlayClick={false}
+    >
       {/* Step Indicator */}
       <div className="mb-6 flex items-center justify-between sm:justify-start sm:gap-2">
         {(['upload', 'map', 'confirm'] as Step[]).map((s, i) => (
@@ -273,6 +373,14 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
       </div>
 
       {/* ─── Step 1: Upload ──────────────────────────────────── */}
+      {step === 'upload' && fileError && (
+        <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3">
+          <p className="text-sm font-medium text-danger-800">
+            {fileName ? `Could not use ${fileName}` : 'Could not use this file'}
+          </p>
+          <p className="mt-1 text-sm text-danger-700">{fileError}</p>
+        </div>
+      )}
       {step === 'upload' && (
         <div
           role="button"
@@ -347,6 +455,16 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
                 You must map at least one column to "Company Name".
               </p>
             )}
+            {duplicateTargets.size > 0 && (
+              <p className="mt-2 text-sm text-warning-700">
+                More than one column is mapped to the same field
+                {' '}
+                ({[...duplicateTargets]
+                  .map((t) => TARGET_FIELDS.find((f) => f.value === t)?.label ?? t)
+                  .join(', ')}
+                ). Only the last mapped column will be imported.
+              </p>
+            )}
           </div>
 
           {/* Validation Summary */}
@@ -412,8 +530,10 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
 
           {/* Actions */}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            {/* This discards the file and every column mapping, so it is not
+                a "back" step. Named for what it does. */}
             <Button variant="ghost" onClick={() => { resetState(); }}>
-              Back
+              Start Over
             </Button>
             <Button
               onClick={() => setStep('confirm')}
@@ -470,7 +590,9 @@ export function VendorCSVImport({ isOpen, onClose }: VendorCSVImportProps) {
               </p>
               <ul className="space-y-1 text-sm text-danger-700">
                 {importResult.errors.map((err, i) => (
-                  <li key={i}>Row {err.row}: {err.message}</li>
+                  <li key={i}>
+                    Row {submittedLines[err.row - 1] ?? err.row}: {err.message}
+                  </li>
                 ))}
               </ul>
             </div>
