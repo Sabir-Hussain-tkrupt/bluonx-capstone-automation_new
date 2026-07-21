@@ -27,8 +27,14 @@ def test_backslash_is_escaped_first():
     assert escape_like_pattern("\\%") == "\\\\\\%"
 
 
+def test_star_is_escaped():
+    # PostgREST accepts * as an alias for % in like/ilike, so an unescaped one
+    # matches everything just as % does. Confirmed against the live API.
+    assert escape_like_pattern("a*b") == "a\\*b"
+
+
 def test_combined_wildcards():
-    assert escape_like_pattern("%_%") == "\\%\\_\\%"
+    assert escape_like_pattern("%_*%") == "\\%\\_\\*\\%"
 
 
 def test_empty_string():
