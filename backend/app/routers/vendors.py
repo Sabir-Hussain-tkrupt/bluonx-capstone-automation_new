@@ -646,6 +646,12 @@ async def update_vendor_contact(
 
     If is_primary is set to True, all other contacts for this vendor are
     automatically demoted to non-primary.
+
+    Clearing is_primary on the vendor's only primary is rejected with 409: the
+    invitation and milestone email paths look the recipient up by is_primary,
+    so a vendor with no primary silently stops being reachable. Promoting a
+    different contact is the supported way to move the flag, since that demotes
+    this one as a side effect.
     """
     _get_vendor_or_404(db, vendor_id)
 
@@ -655,6 +661,38 @@ async def update_vendor_contact(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    if update_data.get("is_primary") is False:
+        target = (
+            db.table("vendor_contacts")
+            .select("is_primary")
+            .eq("id", str(contact_id))
+            .eq("vendor_id", str(vendor_id))
+            .maybe_single()
+            .execute()
+        )
+        # Only a contact that is currently primary can leave the vendor without
+        # one; clearing the flag on any other contact is a no-op.
+        if target and target.data and target.data.get("is_primary"):
+            other_primaries = (
+                db.table("vendor_contacts")
+                .select("id", count="exact")
+                .eq("vendor_id", str(vendor_id))
+                .eq("is_primary", True)
+                .neq("id", str(contact_id))
+                .limit(1)
+                .execute()
+                .count
+            ) or 0
+            if other_primaries == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "A vendor must have a primary contact. Mark another "
+                        "contact as primary instead — that will clear this one "
+                        "automatically."
+                    ),
+                )
 
     # If promoting to primary, demote all other primaries first
     if update_data.get("is_primary") is True:
@@ -695,6 +733,10 @@ async def delete_vendor_contact(
 ):
     """Delete a vendor contact.
 
+    A vendor must keep at least one contact: creation requires one, and the
+    invitation and milestone email paths resolve a recipient through the
+    vendor's primary contact. Removing the last one is rejected with 409.
+
     If the deleted contact was primary, the first remaining contact is
     automatically promoted to primary.
     """
@@ -713,6 +755,24 @@ async def delete_vendor_contact(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contact not found",
+        )
+
+    # Refuse to leave the vendor with no contacts at all.
+    contact_count = (
+        db.table("vendor_contacts")
+        .select("id", count="exact")
+        .eq("vendor_id", str(vendor_id))
+        .limit(1)
+        .execute()
+        .count
+    ) or 0
+    if contact_count <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is the vendor's only contact. Add another contact before "
+                "removing this one."
+            ),
         )
 
     was_primary = target.data.get("is_primary", False)

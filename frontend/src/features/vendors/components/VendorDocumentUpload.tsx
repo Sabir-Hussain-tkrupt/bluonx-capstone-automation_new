@@ -85,6 +85,8 @@ export function VendorDocumentUpload({
       onClose={handleClose}
       title="Upload Document"
       size="md"
+      // A stray backdrop click shouldn't discard the chosen file and settings.
+      closeOnOverlayClick={false}
       footer={
         <>
           <Button variant="ghost" onClick={handleClose} disabled={uploadMutation.isPending}>

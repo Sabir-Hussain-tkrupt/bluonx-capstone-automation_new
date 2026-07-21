@@ -9,7 +9,8 @@ import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import { emailSchema } from '@/utils/validation';
 
 const contactSchema = z.object({
-  full_name: z.string().min(2, 'Name is required'),
+  // trim() before the length check, so whitespace can't pass as a name.
+  full_name: z.string().trim().min(2, 'Name is required'),
   email: emailSchema,
   phone: z.string().optional(),
   title: z.string().optional(),

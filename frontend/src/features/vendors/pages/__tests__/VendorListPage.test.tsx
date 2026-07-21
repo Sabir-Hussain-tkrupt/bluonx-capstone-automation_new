@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEventBase from '@testing-library/user-event';
+
+// delay: null removes the wait between keystrokes. With the default, typing a
+// company name plus a full contact took long enough to trip the 5s timeout
+// when the whole suite runs in parallel, making this file intermittently fail.
+const userEvent = userEventBase.setup({ delay: null });
 import { renderWithRouter } from '@/test/test-utils';
 import { VendorListPage } from '../VendorListPage';
 

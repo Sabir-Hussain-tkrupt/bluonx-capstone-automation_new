@@ -145,7 +145,9 @@ class VendorContactCreate(BluOnXBase):
 
 
 class VendorContactUpdate(BluOnXBase):
-    full_name: str | None = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    full_name: str | None = Field(default=None, min_length=1)
     email: EmailStr | None = None
     phone: str | None = None
     title: str | None = None
