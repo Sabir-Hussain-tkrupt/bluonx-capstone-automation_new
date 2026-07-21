@@ -13,7 +13,18 @@ export const queryClient = new QueryClient({
 
       // Retry failed queries up to 2 times with exponential backoff.
       // Supabase PostgREST can have transient 500s; 2 retries covers that.
-      retry: 2,
+      //
+      // 4xx responses are excluded: an expired session, a permission denial,
+      // a bad filter value or a missing row fails identically on retry, so
+      // retrying only delays the error the user needs to see by two backoffs.
+      // Network failures (status 0) and 5xx still retry.
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number } | null)?.status;
+        if (typeof status === 'number' && status >= 400 && status < 500) {
+          return false;
+        }
+        return failureCount < 2;
+      },
 
       // Re-fetch stale queries when user returns to the browser tab.
       // Critical for multi-user bid management — data may change while away.
