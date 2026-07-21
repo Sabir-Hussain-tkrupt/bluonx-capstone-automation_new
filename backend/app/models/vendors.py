@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import ConfigDict, EmailStr, Field, field_serializer
 
 from app.models.common import BluOnXBase
 
@@ -20,6 +20,11 @@ from app.models.common import BluOnXBase
 
 
 class VendorCreate(BluOnXBase):
+    # Strip before validating so a whitespace-only company_name fails
+    # min_length instead of passing and being stored padded. Pydantic merges
+    # this with BluOnXBase's config, so from_attributes still applies.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     company_name: str = Field(..., min_length=2, max_length=255)
     address: str | None = None
     city: str | None = Field(default=None, max_length=100)
@@ -40,6 +45,8 @@ class VendorCreate(BluOnXBase):
 
 
 class VendorUpdate(BluOnXBase):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     company_name: str | None = Field(default=None, min_length=2, max_length=255)
     address: str | None = None
     city: str | None = Field(default=None, max_length=100)
@@ -77,6 +84,23 @@ class VendorResponse(BluOnXBase):
     updated_at: datetime
     deleted_at: datetime | None = None
 
+    @field_serializer(
+        "latitude",
+        "longitude",
+        "insurance_coverage_amount",
+        "bonding_capacity",
+    )
+    def _decimal_as_number(self, value: Decimal | None) -> float | None:
+        """Emit decimals as JSON numbers, matching PostgREST.
+
+        Pydantic serializes Decimal to a string by default, but the frontend
+        reads these same columns straight from PostgREST elsewhere, where a
+        numeric comes back as a JSON number. Without this the same TypeScript
+        type would describe two different runtime shapes depending on which
+        path fetched the row.
+        """
+        return float(value) if value is not None else None
+
 
 class VendorDetailResponse(VendorResponse):
     """Extended vendor response with related entities for detail view."""
@@ -99,7 +123,12 @@ class VendorListResponse(BluOnXBase):
 
 class VendorContactCreateInline(BluOnXBase):
     """Contact creation when creating a vendor (no vendor_id needed)."""
-    full_name: str
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    # min_length guards the now-stripped value: without it a whitespace-only
+    # name would strip to "" and still validate.
+    full_name: str = Field(..., min_length=1)
     email: EmailStr
     phone: str | None = None
     title: str | None = None
@@ -231,9 +260,20 @@ class VendorImportRow(BluOnXBase):
     notes: str | None = None
 
 
+#: Maximum rows accepted in one import request.
+#:
+#: Each row costs a duplicate-name query, a Google geocode call (5s timeout),
+#: a vendor insert and a contact insert, all sequential — roughly 0.4s per row,
+#: or ~90s for a full batch when a tenth of the addresses fail to geocode.
+#: Beyond this the request outlives any reasonable client timeout and the user
+#: sees a failure while rows keep being created. Mirrored in the frontend
+#: importer so oversized files are caught before upload.
+VENDOR_IMPORT_MAX_ROWS = 100
+
+
 class VendorImportRequest(BluOnXBase):
     """Request body for bulk CSV import."""
-    rows: list[VendorImportRow]
+    rows: list[VendorImportRow] = Field(..., max_length=VENDOR_IMPORT_MAX_ROWS)
 
 
 class VendorImportError(BluOnXBase):
