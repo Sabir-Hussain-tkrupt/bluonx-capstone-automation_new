@@ -35,6 +35,17 @@ export interface BidTemplate {
    * (Task 8.1 freeze guards.) Escape hatch: duplicate the template.
    */
   is_in_use: boolean;
+  /**
+   * True iff NO bid_package references this template, cancelled ones
+   * included. `bid_packages.bid_template_id` is ON DELETE RESTRICT and
+   * packages are never hard deleted, so once a template has been used in any
+   * round this is permanently false and DELETE can never succeed again.
+   *
+   * Deliberately distinct from `is_in_use`, which counts only non-cancelled
+   * packages: a template referenced solely by a cancelled package is still
+   * editable (`is_in_use: false`) but not deletable.
+   */
+  is_deletable: boolean;
 }
 
 export interface BidTemplateDetail extends BidTemplate {

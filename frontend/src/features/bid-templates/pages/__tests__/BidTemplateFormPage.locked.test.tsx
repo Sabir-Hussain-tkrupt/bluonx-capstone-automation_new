@@ -58,6 +58,8 @@ const lockedTemplate: BidTemplateDetail = {
     },
   ],
   is_in_use: true,
+  // A live package references it, so it is neither editable nor deletable.
+  is_deletable: false,
   referencing_packages: [
     { id: 'pkg-1', task_name: 'Rough Grading', status: 'open' },
   ],
@@ -67,6 +69,7 @@ const lockedTemplate: BidTemplateDetail = {
 const editableTemplate: BidTemplateDetail = {
   ...lockedTemplate,
   is_in_use: false,
+  is_deletable: true,
   referencing_packages: [],
   referencing_packages_total: 0,
 };

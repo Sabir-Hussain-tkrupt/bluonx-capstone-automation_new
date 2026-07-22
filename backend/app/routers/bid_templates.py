@@ -127,20 +127,31 @@ def _enrich_templates_batched(db: Client, templates: list[dict]) -> list[dict]:
     except APIError as exc:
         logger.warning("Failed to batch-count template items: %s", exc)
 
-    # 3. In-use flags. Same rule as _referencing_live_packages: any
-    #    non-cancelled package locks the template.
+    # 3. Usage flags. One unfiltered query answers both questions, because
+    #    they are asked of different subsets of the same rows:
+    #      is_in_use    — any NON-CANCELLED reference (edit freeze; lifts when
+    #                     the round ends)
+    #      is_deletable — NO reference at all, cancelled included. The FK is
+    #                     ON DELETE RESTRICT and packages are never hard
+    #                     deleted, so this never becomes true again once a
+    #                     template has been used.
+    #    Filtering server-side would answer only the first.
     in_use: set[str] = set()
+    referenced: set[str] = set()
     try:
         resp = (
             db.table("bid_packages")
-            .select("bid_template_id")
+            .select("bid_template_id, status")
             .in_("bid_template_id", template_ids)
-            .neq("status", "cancelled")
             .execute()
         )
         for row in (resp.data or []):
-            if row.get("bid_template_id"):
-                in_use.add(str(row["bid_template_id"]))
+            tid = row.get("bid_template_id")
+            if not tid:
+                continue
+            referenced.add(str(tid))
+            if row.get("status") != "cancelled":
+                in_use.add(str(tid))
     except APIError as exc:
         logger.error("Failed to batch-check template usage: %s", exc)
         raise HTTPException(
@@ -156,6 +167,7 @@ def _enrich_templates_batched(db: Client, templates: list[dict]) -> list[dict]:
             "trade_name": trade_names.get(str(t["trade_id"])) if t.get("trade_id") else None,
             "item_count": item_counts.get(tid, 0),
             "is_in_use": tid in in_use,
+            "is_deletable": tid not in referenced,
         })
     return enriched
 
@@ -190,7 +202,12 @@ def _build_detail_response(db: Client, template: dict) -> dict:
         logger.warning("Failed to fetch items for template %s: %s", template["id"], exc)
         items = []
 
-    live_pkgs = _referencing_live_packages(db, template["id"])
+    # One fetch of every reference answers both flags, so this stays a single
+    # query. is_in_use is the edit freeze (live refs only, lifts when the round
+    # ends); is_deletable is the FK reality (any ref at all, cancelled included,
+    # and permanent once set because packages are never hard deleted).
+    all_pkgs = _all_referencing_packages(db, template["id"])
+    live_pkgs = [p for p in all_pkgs if p["status"] != "cancelled"]
 
     return {
         **template,
@@ -198,6 +215,7 @@ def _build_detail_response(db: Client, template: dict) -> dict:
         "item_count": len(items),
         "items": items,
         "is_in_use": len(live_pkgs) > 0,
+        "is_deletable": len(all_pkgs) == 0,
         # Cap the array; expose true total separately so the UI can render
         # "+N more" without us shipping potentially thousands of rows.
         "referencing_packages": live_pkgs[:_MAX_REFERENCING_PACKAGES],

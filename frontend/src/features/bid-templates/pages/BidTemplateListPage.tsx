@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -6,9 +6,11 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
 import { Table } from '@/components/ui/Table';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Alert } from '@/components/ui/Alert';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { errorMessage } from '@/lib/api';
 import { ROUTES } from '@/constants/routes';
 import { useBidTemplates } from '@/features/bid-templates/hooks/useBidTemplates';
 import { useDeleteBidTemplate } from '@/features/bid-templates/hooks/useDeleteBidTemplate';
@@ -23,7 +25,9 @@ export function BidTemplateListPage() {
   // Filter state
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  // Ref, not state: the timer is not rendered, and holding it in state made
+  // handleSearchChange a new function on every keystroke.
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tradeFilter, setTradeFilter] = useState('');
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -34,18 +38,22 @@ export function BidTemplateListPage() {
   const [deleteTarget, setDeleteTarget] = useState<BidTemplate | null>(null);
 
   // Debounced search
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value);
-      if (debounceTimer) clearTimeout(debounceTimer);
-      setDebounceTimer(
-        setTimeout(() => {
-          setDebouncedSearch(value);
-          setPage(1);
-        }, 300),
-      );
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 300);
+  }, []);
+
+  // Cancel a pending debounce on unmount so it cannot fire setState after the
+  // page is gone.
+  useEffect(
+    () => () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
     },
-    [debounceTimer],
+    [],
   );
 
   // Build filters
@@ -61,7 +69,8 @@ export function BidTemplateListPage() {
     [debouncedSearch, tradeFilter, sortBy, sortDir, page, pageSize],
   );
 
-  const { data, isLoading } = useBidTemplates(filters);
+  const { data, isLoading, isError, error, refetch, isFetching } =
+    useBidTemplates(filters);
   const templates = data?.items ?? [];
   const total = data?.total ?? 0;
 
@@ -104,13 +113,15 @@ export function BidTemplateListPage() {
         toast({ variant: 'success', message: 'Template deleted successfully.' });
         setDeleteTarget(null);
       },
-      onError: (error) => {
+      onError: (err) => {
         setDeleteTarget(null);
-        const apiError = error as { status?: number; message?: string };
-        // Backend's 409 now names the referencing package(s); surface it verbatim.
+        // Backend's 409 names the referencing package(s); surface it verbatim.
+        // Kept as a backstop even though the button is disabled for
+        // non-deletable templates: a package can be created between the list
+        // load and the click.
         toast({
           variant: 'danger',
-          message: apiError.message || 'Failed to delete template.',
+          message: errorMessage(err, 'Failed to delete template.'),
         });
       },
     });
@@ -184,14 +195,26 @@ export function BidTemplateListPage() {
             >
               <Pencil className="h-4 w-4" aria-hidden="true" />
             </button>
+            {/* Once any bid package references a template, the RESTRICT FK
+                blocks the delete forever (packages are never hard deleted),
+                so this is a permanent state, not a temporary lock. Offering
+                a button that can only ever 409 is worse than not offering
+                it. is_in_use is deliberately NOT the flag used here: it
+                ignores cancelled packages, which still block the delete. */}
             <button
               type="button"
+              disabled={!row.is_deletable}
               onClick={(e) => {
                 e.stopPropagation();
                 setDeleteTarget(row);
               }}
-              className="rounded p-1 text-secondary-400 hover:text-danger-600"
+              className="rounded p-1 text-secondary-400 hover:text-danger-600 disabled:cursor-not-allowed disabled:text-secondary-200 disabled:hover:text-secondary-200"
               aria-label="Delete template"
+              title={
+                row.is_deletable
+                  ? 'Delete template'
+                  : 'Used by a bid package and kept as part of the bid history'
+              }
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -237,6 +260,25 @@ export function BidTemplateListPage() {
         />
       </div>
 
+      {/* Load failure. Without this the table falls through to its empty
+          state, which claims there are no templates when we simply could not
+          find out. */}
+      {isError && (
+        <Alert variant="danger" title="Could not load bid templates">
+          <div className="space-y-3">
+            <p>{errorMessage(error, 'Something went wrong. Please try again.')}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              isLoading={isFetching}
+            >
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       {/* Table */}
       <Table
         columns={columns}
@@ -259,45 +301,40 @@ export function BidTemplateListPage() {
           },
         }}
         emptyState={
-          <EmptyState
-            title="No bid templates found"
-            description="Create a template to define how vendors submit pricing for tasks."
-          />
+          isError ? (
+            <EmptyState
+              title="Templates unavailable"
+              description="We couldn't load your bid templates. Use Retry above."
+            />
+          ) : (
+            <EmptyState
+              title="No bid templates found"
+              description="Create a template to define how vendors submit pricing for tasks."
+            />
+          )
         }
       />
 
-      {/* Delete confirmation modal */}
-      <Modal
+      {/* Shared ConfirmDialog rather than a bare Modal: it disables
+          overlay-click dismissal, so a stray click cannot sit between the user
+          and a hard delete. */}
+      <ConfirmDialog
         isOpen={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
         title="Delete Template"
-        size="sm"
-        footer={
+        message={
           <>
-            <Button
-              variant="ghost"
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleteMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleDelete}
-              isLoading={deleteMutation.isPending}
-            >
-              Delete
-            </Button>
+            Are you sure you want to delete{' '}
+            <span className="font-semibold">{deleteTarget?.name}</span>? This
+            action cannot be undone. All line items in this template will also
+            be deleted.
           </>
         }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete{' '}
-          <span className="font-semibold">{deleteTarget?.name}</span>? This
-          action cannot be undone. All line items in this template will also be
-          deleted.
-        </p>
-      </Modal>
+        confirmText="Delete"
+        confirmVariant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

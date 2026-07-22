@@ -128,7 +128,15 @@ class BidTemplateResponse(BluOnXBase):
     updated_at: datetime
     trade_name: str | None = None
     item_count: int = 0
+    #: Any non-cancelled bid_package references this template. Edit freeze:
+    #: lifts once those rounds are cancelled.
     is_in_use: bool = False
+    #: No bid_package references this template at all, cancelled included.
+    #: The FK is ON DELETE RESTRICT and packages are never hard deleted, so
+    #: this is permanent: once a template has been used in any round it can
+    #: never be deleted. Distinct from is_in_use, which a cancelled-only
+    #: reference leaves false while DELETE still fails.
+    is_deletable: bool = True
 
 
 class BidTemplateDetailResponse(BidTemplateResponse):
