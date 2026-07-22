@@ -8,15 +8,41 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from app.models.common import BluOnXBase
+
+
+def _reject_items_on_lump_sum(is_lump_sum: bool, items: list) -> None:
+    """Enforce the two-way is_lump_sum/items relationship.
+
+    Structured (is_lump_sum=False) templates need at least one line item, or
+    the vendor bid form renders nothing to price. Lump-sum templates must NOT
+    carry items: the submit validator skips the line-item breakdown entirely
+    for them (vendor_portal_submit_validator), so stored items would be dead
+    data that the preview still renders — the two views of the same template
+    would disagree.
+    """
+    if not is_lump_sum and len(items) == 0:
+        raise ValueError(
+            "At least one line item is required when is_lump_sum is false"
+        )
+    if is_lump_sum and len(items) > 0:
+        raise ValueError(
+            "A lump-sum template cannot have line items. "
+            "Set is_lump_sum to false to use a line-item breakdown."
+        )
 
 
 # ── bid_template_items ──────────────────────────────────────────────────
 
 
 class BidTemplateItemCreate(BluOnXBase):
+    # Strip before validating so whitespace-only values fail min_length
+    # instead of being stored blank. Without this, unit_of_measure="  " is
+    # truthy and defeats unit_required_for_unit_price below.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     description: str = Field(..., min_length=1, max_length=255)
     item_type: Literal["lump_sum", "unit_price"]
     unit_of_measure: str | None = Field(default=None, max_length=50)
@@ -43,32 +69,40 @@ class BidTemplateItemResponse(BluOnXBase):
 
 
 class BidTemplateCreate(BluOnXBase):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(..., min_length=1, max_length=255)
     trade_id: UUID | None = None
     is_lump_sum: bool = True
     items: list[BidTemplateItemCreate] = []
 
     @model_validator(mode="after")
-    def items_required_for_structured(self):
-        if not self.is_lump_sum and len(self.items) == 0:
-            raise ValueError(
-                "At least one line item is required when is_lump_sum is false"
-            )
+    def items_match_bid_format(self):
+        _reject_items_on_lump_sum(self.is_lump_sum, self.items)
         return self
 
 
 class BidTemplateUpdate(BluOnXBase):
+    """Full replace. Every field is required — omission is a 422, not a default.
+
+    PUT rewrites the whole template, so a missing key used to mean "reset this":
+    omitting trade_id silently cleared the trade association and omitting
+    is_lump_sum silently forced lump-sum. One dropped field in a client payload
+    could rewire a template with no error. Callers must now send all four.
+
+    To clear the trade association, send trade_id explicitly as null.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(..., min_length=1, max_length=255)
-    trade_id: UUID | None = None
-    is_lump_sum: bool = True
-    items: list[BidTemplateItemCreate] = []
+    trade_id: UUID | None = Field(...)
+    is_lump_sum: bool = Field(...)
+    items: list[BidTemplateItemCreate] = Field(...)
 
     @model_validator(mode="after")
-    def items_required_for_structured(self):
-        if not self.is_lump_sum and len(self.items) == 0:
-            raise ValueError(
-                "At least one line item is required when is_lump_sum is false"
-            )
+    def items_match_bid_format(self):
+        _reject_items_on_lump_sum(self.is_lump_sum, self.items)
         return self
 
 

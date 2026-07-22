@@ -13,10 +13,15 @@ import pytest
 from .conftest import TEMPLATE_ID
 
 
+# is_lump_sum is False because the payload carries items: a lump-sum template
+# with line items is now a 422 (the submit validator ignores items for lump-sum
+# templates, so storing them would put the preview and the vendor form out of
+# step). The guard under test runs after model validation, so the payload has
+# to be valid for these tests to reach it.
 PUT_PAYLOAD = {
     "name": "Renamed Template",
     "trade_id": None,
-    "is_lump_sum": True,
+    "is_lump_sum": False,
     "items": [
         {
             "description": "New mob",
