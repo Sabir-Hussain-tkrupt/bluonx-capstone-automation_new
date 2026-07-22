@@ -9,13 +9,13 @@
 
 All buckets are **private**. Create via **Supabase Dashboard → Storage → New Bucket**.
 
-| Bucket Name | Purpose | MIME Types | File Size Limit |
+| Bucket Name | Purpose | Allowed extensions | File Size Limit |
 |---|---|---|---|
-| `vendor-documents` | W-9, insurance certs, master trade agreements | `application/pdf`, `image/jpeg`, `image/png` | Dev: 50 MB · Prod: 200 MB |
-| `project-documents` | Civil plans, drawings, specs, site photos | `application/pdf`, `image/jpeg`, `image/png`, `image/tiff` | Dev: 50 MB · Prod: 200 MB |
-| `bid-attachments` | Docs vendors upload with bid submissions | `application/pdf`, `image/jpeg`, `image/png` | Dev: 50 MB · Prod: 200 MB |
+| `vendor-documents` | W-9, insurance certs, master trade agreements | `.pdf .jpg .jpeg .png .doc .docx` | Dev: 50 MB · Prod: 200 MB |
+| `project-documents` | Civil plans, drawings, specs, site photos, budgets, notes | `.pdf .jpg .jpeg .png .tif .tiff .txt .doc .docx .xls .xlsx .dwg .dxf .dwf .dgn` | Dev: 50 MB · Prod: 200 MB |
+| `bid-attachments` | Docs vendors upload with bid submissions | `.pdf .jpg .jpeg .png` | Dev: 50 MB · Prod: 200 MB |
 
-> **DWG support:** If needed later, add `application/octet-stream` to `project-documents` MIME types (DWG has no standardized MIME type).
+> **Validation is extension-first** (see `backend/app/core/file_validation.py`). The allow-list above is by **extension**; declared MIME is advisory. A generic/blank type or `application/octet-stream` is trusted (CAD `.dwg/.dxf/.dwf/.dgn` and some Office files arrive that way), while a specific content-type that contradicts the extension is rejected. Magic bytes are checked by extension where a signature exists (PDF/image/TIFF, ZIP for `.docx/.xlsx`, OLE for `.doc/.xls`, `AC10` for `.dwg`); `.txt/.dxf/.dwf/.dgn` have none and pass on extension alone. The Supabase bucket-level MIME allow-list (Dashboard) should be left permissive or unset for `project-documents`, since app-layer validation is the gate.
 
 ---
 

@@ -205,7 +205,7 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
                 <input
                   type="file"
                   className="hidden"
-                  accept=".pdf,.jpg,.jpeg,.png,.tiff"
+                  accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.dwf,.dgn"
                   disabled={sowUploading}
                   onChange={(e) => handleSowSelect(e.target.files?.[0])}
                 />

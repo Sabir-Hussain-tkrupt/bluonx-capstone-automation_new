@@ -169,7 +169,7 @@ export function VendorDocumentUpload({
             File <span className="text-danger-500">*</span>
           </label>
           <FileUpload
-            accept=".pdf,.jpg,.jpeg,.png"
+            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
             maxSizeMB={50}
             onFilesSelected={(files) => {
               setSelectedFile(files[0] ?? null);
@@ -178,7 +178,7 @@ export function VendorDocumentUpload({
             onError={setFileError}
             error={fileError}
             uploading={uploadMutation.isPending}
-            hint="PDF, JPEG, or PNG up to 50MB"
+            hint="PDF, JPEG, PNG, or Word up to 50MB"
             onRemoveFile={() => setSelectedFile(null)}
           />
         </div>

@@ -143,3 +143,18 @@ describe('VendorDocumentUpload — single-instance replace', () => {
     expect(fd.get('replace')).toBeNull();
   });
 });
+
+describe('VendorDocumentUpload — file-type validation', () => {
+  it('rejects a spreadsheet (vendor docs are PDF/image/Word only)', () => {
+    renderWithRouter(<VendorDocumentUpload vendorId="v-1" isOpen onClose={() => {}} />);
+    selectFile('budget.xlsx');
+    expect(screen.getByText(/not an accepted file type/i)).toBeInTheDocument();
+  });
+
+  it('accepts a Word document', () => {
+    renderWithRouter(<VendorDocumentUpload vendorId="v-1" isOpen onClose={() => {}} />);
+    selectFile('mta.docx');
+    expect(screen.queryByText(/not an accepted file type/i)).not.toBeInTheDocument();
+    expect(screen.getByText('mta.docx')).toBeInTheDocument();
+  });
+});
