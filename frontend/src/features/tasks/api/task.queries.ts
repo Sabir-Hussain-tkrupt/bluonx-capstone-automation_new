@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { api, type ApiError } from '@/lib/api';
+import { API_ENDPOINTS } from '@/constants/api';
+import { toNumberOrNull } from '@/lib/format';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -49,59 +51,34 @@ export interface Trade {
   is_active: boolean;
 }
 
-// ─── Supabase Direct Reads ────────────────────────────────────────────
+// ─── Reads ────────────────────────────────────────────────────────────
 
+/** budget_estimate reaches the client as a string over FastAPI; pin to number. */
+function normalizeTask(row: Task): Task {
+  return { ...row, budget_estimate: toNumberOrNull(row.budget_estimate) };
+}
+
+/**
+ * Fetch a project's tasks through the hardened FastAPI endpoint rather than a
+ * direct Supabase read. GET /projects/{id}/tasks already enforces the sort
+ * allow-list, LIKE-metacharacter escaping, page-size ceiling and a count-first
+ * fetch, and flattens trade_name server-side. Reading Supabase directly meant
+ * re-implementing all of that in a second place. Detail reads still go direct
+ * (see fetchTaskById).
+ */
 export async function fetchTasks(filters: TaskListFilters): Promise<PaginatedTasks> {
-  const page = filters.page ?? 1;
-  const pageSize = filters.page_size ?? 50;
-  const sortBy = filters.sort_by ?? 'sort_order';
-  const ascending = (filters.sort_dir ?? 'asc') !== 'desc';
-
-  let query = supabase
-    .from('tasks')
-    .select('*, trades(name)', { count: 'exact' })
-    .eq('project_id', filters.projectId)
-    .is('deleted_at', null);
-
-  if (filters.search) {
-    query = query.ilike('name', `%${filters.search}%`);
-  }
-
-  if (filters.status) {
-    query = query.eq('status', filters.status);
-  }
-
-  query = query.order(sortBy, { ascending });
-
-  const offset = (page - 1) * pageSize;
-  query = query.range(offset, offset + pageSize - 1);
-
-  const { data, error, count } = await query;
-
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
-
-  // Flatten trade join
-  const rows = (data ?? []) as unknown as Record<string, unknown>[];
-  const items = rows.map((row) => {
-    const trades = row.trades as { name: string } | null;
-    const { trades: _trades, ...rest } = row;
-    return { ...rest, trade_name: trades?.name ?? null } as unknown as Task;
+  const { data } = await api.get<PaginatedTasks>(API_ENDPOINTS.PROJECT_TASKS(filters.projectId), {
+    params: {
+      search: filters.search || undefined,
+      status: filters.status || undefined,
+      sort_by: filters.sort_by,
+      sort_dir: filters.sort_dir,
+      page: filters.page,
+      page_size: filters.page_size,
+    },
   });
 
-  return {
-    items,
-    total: count ?? 0,
-    page,
-    page_size: pageSize,
-  };
+  return { ...data, items: (data.items ?? []).map(normalizeTask) };
 }
 
 export async function fetchTaskById(projectId: string, taskId: string): Promise<Task> {
@@ -126,7 +103,7 @@ export async function fetchTaskById(projectId: string, taskId: string): Promise<
   const row = data as unknown as Record<string, unknown>;
   const trades = row.trades as { name: string } | null;
   const { trades: _trades, ...rest } = row;
-  return { ...rest, trade_name: trades?.name ?? null } as unknown as Task;
+  return normalizeTask({ ...rest, trade_name: trades?.name ?? null } as unknown as Task);
 }
 
 export async function fetchActiveTrades(): Promise<Trade[]> {
