@@ -15,7 +15,7 @@ from app.core.auth import get_current_active_user
 from app.services.geocoding import geocode_address
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
-from app.core.storage import delete_file, get_signed_url, upload_file
+from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.common import SignedUrlResponse
 from app.models.projects import (
@@ -527,9 +527,10 @@ async def upload_project_document(
     filename = sanitize_filename(file.filename or "document")
     validate_upload(file_bytes, filename, content_type, PROJECT_BUCKET)
 
-    # Upload to storage: {project_id}/{filename}, or {project_id}/sow/{filename} for SoW.
+    # Upload to storage under a per-upload uuid segment so a same-named
+    # re-upload can't collide (SoW keeps its {project_id}/sow prefix).
     prefix = f"{project_id}/sow" if document_kind == "scope_of_work" else str(project_id)
-    storage_path = f"{prefix}/{filename}"
+    storage_path = unique_object_path(prefix, filename)
     upload_file(db, PROJECT_BUCKET, storage_path, file_bytes, content_type)
 
     # Insert project_documents row
@@ -615,8 +616,44 @@ async def delete_project_document(
             detail="Document not found",
         )
 
+    # Block deletion of a document still referenced by a bid package. Both FKs
+    # (bid_packages.scope_of_work_document_id and bid_package_documents
+    # .project_document_id) are ON DELETE RESTRICT, so an unguarded delete would
+    # surface as a raw 23503. Pre-check for a clean 409 with a specific message.
+    sow_ref = (
+        db.table("bid_packages")
+        .select("id", count="exact")
+        .eq("scope_of_work_document_id", str(document_id))
+        .execute()
+    )
+    if sow_ref.count and sow_ref.count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is the scope of work for a bid package and can't be deleted.",
+        )
+
+    pool_ref = (
+        db.table("bid_package_documents")
+        .select("id", count="exact")
+        .eq("project_document_id", str(document_id))
+        .execute()
+    )
+    if pool_ref.count and pool_ref.count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is attached to a bid package and can't be deleted.",
+        )
+
     # Delete from storage first
     delete_file(db, PROJECT_BUCKET, doc_resp.data["file_path"])
 
-    # Delete DB row
-    db.table("project_documents").delete().eq("id", str(document_id)).execute()
+    # Delete DB row (23503 backstop for any other RESTRICT FK not pre-checked).
+    try:
+        db.table("project_documents").delete().eq("id", str(document_id)).execute()
+    except APIError as exc:
+        if getattr(exc, "code", None) == "23503":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This document is in use and can't be deleted.",
+            ) from exc
+        raise

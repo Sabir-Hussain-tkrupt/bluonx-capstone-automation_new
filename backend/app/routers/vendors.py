@@ -17,7 +17,7 @@ from app.services.geocoding import geocode_address
 from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
-from app.core.storage import delete_file, get_signed_url, upload_file
+from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import EmailLogResponse
 from app.models.common import SignedUrlResponse
@@ -915,6 +915,16 @@ async def list_vendor_documents(
 VENDOR_DOC_TYPES = {"w9", "insurance_certificate", "master_trade_agreement"}
 VENDOR_BUCKET = "vendor-documents"
 
+# One current document per vendor for these types; a re-upload replaces the
+# prior one, but only after the caller confirms with replace=true. Insurance
+# certificates are intentionally NOT single-instance (renewals are history).
+_SINGLE_INSTANCE_DOC_TYPES = {"w9", "master_trade_agreement"}
+_VENDOR_DOC_LABELS = {
+    "w9": "W-9",
+    "insurance_certificate": "Insurance Certificate",
+    "master_trade_agreement": "Master Trade Agreement",
+}
+
 
 @router.post(
     "/vendors/{vendor_id}/documents",
@@ -926,6 +936,7 @@ async def upload_vendor_document(
     file: UploadFile = File(...),
     document_type: str = Form(...),
     expiration_date: str | None = Form(default=None),
+    replace: bool = Form(default=False),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
@@ -935,6 +946,7 @@ async def upload_vendor_document(
     - file: the document file (PDF, JPEG, PNG; max 50MB)
     - document_type: w9 | insurance_certificate | master_trade_agreement
     - expiration_date: YYYY-MM-DD (required for insurance_certificate)
+    - replace: for w9/master_trade_agreement, confirm replacing the existing one
     """
     _get_vendor_or_404(db, vendor_id)
 
@@ -944,6 +956,25 @@ async def upload_vendor_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid document_type. Must be one of: {', '.join(sorted(VENDOR_DOC_TYPES))}",
         )
+
+    # Single-instance types: block a second upload unless the caller confirms a
+    # replacement. The existing rows (captured here) are removed after the new
+    # one is safely stored.
+    existing_single: list[dict] = []
+    if document_type in _SINGLE_INSTANCE_DOC_TYPES:
+        existing_single = (
+            db.table("vendor_documents")
+            .select("id, file_path")
+            .eq("vendor_id", str(vendor_id))
+            .eq("document_type", document_type)
+            .execute()
+        ).data or []
+        if existing_single and not replace:
+            label = _VENDOR_DOC_LABELS.get(document_type, document_type)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A {label} already exists for this vendor.",
+            )
 
     # Require expiration_date for insurance_certificate
     parsed_expiration: date | None = None
@@ -982,8 +1013,9 @@ async def upload_vendor_document(
     filename = sanitize_filename(file.filename or "document")
     validate_upload(file_bytes, filename, content_type, VENDOR_BUCKET)
 
-    # Upload to storage: {vendor_id}/{document_type}/{filename}
-    storage_path = f"{vendor_id}/{document_type}/{filename}"
+    # Upload under a per-upload uuid segment so a same-named re-upload can't
+    # collide (which used to surface as an opaque 500).
+    storage_path = unique_object_path(f"{vendor_id}/{document_type}", filename)
     upload_file(db, VENDOR_BUCKET, storage_path, file_bytes, content_type)
 
     # Insert vendor_documents row
@@ -1009,6 +1041,16 @@ async def upload_vendor_document(
             detail="Failed to save document record.",
         )
 
+    new_doc = response.data[0]
+
+    # Replacement confirmed: the new single-instance doc is stored, so remove the
+    # prior row(s) and their objects. Insert-then-delete means the vendor is never
+    # momentarily left with none, and it self-heals any pre-existing duplicates.
+    if document_type in _SINGLE_INSTANCE_DOC_TYPES and existing_single:
+        for old in existing_single:
+            delete_file(db, VENDOR_BUCKET, old["file_path"])
+            db.table("vendor_documents").delete().eq("id", old["id"]).execute()
+
     # Recompute vendors.insurance_expiration_date from the full set of valid
     # insurance certs. PostgREST has no multi-statement transaction, so the
     # vendor_documents row above is already committed when this runs — we
@@ -1032,7 +1074,7 @@ async def upload_vendor_document(
                 ),
             ) from exc
 
-    return response.data[0]
+    return new_doc
 
 
 @router.get(

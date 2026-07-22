@@ -5,11 +5,23 @@ and signed-URL generation. Used by document upload endpoints.
 """
 
 import logging
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from supabase import Client
 
 logger = logging.getLogger(__name__)
+
+
+def unique_object_path(prefix: str, filename: str) -> str:
+    """Build a collision-proof storage key: ``{prefix}/{uuid}/{filename}``.
+
+    The Supabase upload is not upsert-enabled, so a deterministic key made a
+    same-named re-upload collide and surface as a 500. A per-upload uuid segment
+    keeps the human-readable filename intact (it stays in file_name for display)
+    while guaranteeing the object key is unique.
+    """
+    return f"{prefix}/{uuid4().hex}/{filename}"
 
 
 def upload_file(

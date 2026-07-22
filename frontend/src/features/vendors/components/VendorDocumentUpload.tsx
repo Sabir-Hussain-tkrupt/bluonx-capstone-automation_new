@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { errorMessage } from '@/lib/api';
 import { useUploadVendorDocument } from '@/features/vendors/hooks/useVendorDocuments';
 import type { VendorDocument } from '@/features/vendors/api/vendor.queries';
 
@@ -13,6 +15,14 @@ const DOC_TYPE_OPTIONS = [
   { value: 'insurance_certificate', label: 'Insurance Certificate' },
   { value: 'master_trade_agreement', label: 'Master Trade Agreement' },
 ];
+
+// w9 and master_trade_agreement are one current doc per vendor: a re-upload
+// replaces the existing one, but only after the user confirms. Insurance is
+// kept as history (renewals), so it is not single-instance.
+const SINGLE_INSTANCE_TYPES = ['w9', 'master_trade_agreement'];
+const DOC_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  DOC_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+);
 
 interface VendorDocumentUploadProps {
   vendorId: string;
@@ -34,6 +44,7 @@ export function VendorDocumentUpload({
   const [expirationDate, setExpirationDate] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
+  const [confirmReplace, setConfirmReplace] = useState(false);
 
   const isInsurance = documentType === 'insurance_certificate';
   const canSubmit = documentType && selectedFile && (!isInsurance || expirationDate);
@@ -42,11 +53,18 @@ export function VendorDocumentUpload({
   );
   const showSupersedeHint = isInsurance && hasExistingValidInsurance;
 
+  // For a single-instance type, is one already on file? If so, submit must
+  // confirm a replacement before uploading.
+  const existingOfType = SINGLE_INSTANCE_TYPES.includes(documentType)
+    ? (existingDocuments ?? []).find((doc) => doc.document_type === documentType)
+    : undefined;
+
   const resetForm = () => {
     setDocumentType('');
     setExpirationDate('');
     setSelectedFile(null);
     setFileError('');
+    setConfirmReplace(false);
   };
 
   const handleClose = () => {
@@ -54,7 +72,7 @@ export function VendorDocumentUpload({
     onClose();
   };
 
-  const handleSubmit = () => {
+  const doUpload = (replace: boolean) => {
     if (!selectedFile || !documentType) return;
 
     const formData = new FormData();
@@ -62,6 +80,9 @@ export function VendorDocumentUpload({
     formData.append('document_type', documentType);
     if (expirationDate) {
       formData.append('expiration_date', expirationDate);
+    }
+    if (replace) {
+      formData.append('replace', 'true');
     }
 
     uploadMutation.mutate(
@@ -72,14 +93,24 @@ export function VendorDocumentUpload({
           handleClose();
         },
         onError: (error) => {
-          const msg = (error as { message?: string })?.message ?? 'Failed to upload document.';
-          toast({ variant: 'danger', message: msg });
+          setConfirmReplace(false);
+          toast({ variant: 'danger', message: errorMessage(error, 'Failed to upload document.') });
         },
       },
     );
   };
 
+  const handleSubmit = () => {
+    if (!selectedFile || !documentType) return;
+    if (existingOfType) {
+      setConfirmReplace(true);
+      return;
+    }
+    doUpload(false);
+  };
+
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
@@ -153,5 +184,22 @@ export function VendorDocumentUpload({
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      isOpen={confirmReplace}
+      title="Replace existing document?"
+      message={
+        <>
+          A {DOC_TYPE_LABELS[documentType] ?? 'document'} is already on file for this vendor.
+          Uploading this file will replace it.
+        </>
+      }
+      confirmText="Replace"
+      confirmVariant="primary"
+      isLoading={uploadMutation.isPending}
+      onConfirm={() => doUpload(true)}
+      onCancel={() => setConfirmReplace(false)}
+    />
+    </>
   );
 }

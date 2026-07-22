@@ -227,6 +227,90 @@ class TestUploadVendorDocument:
         # The vendor_documents row was already inserted before recompute ran.
         assert len(fake_db.inserted_documents) == 1
 
+    def test_two_uploads_get_distinct_storage_paths(self, client_with, fake_db):
+        # Uniquify keys: a same-named re-upload must not collide (it used to 500).
+        vendor_id = str(uuid4())
+        _upload(client_with, vendor_id, document_type="w9", expiration_date=None)
+        _upload(client_with, vendor_id, document_type="w9", expiration_date=None)
+        assert len(fake_db.inserted_documents) == 2
+        paths = {d["file_path"] for d in fake_db.inserted_documents}
+        assert len(paths) == 2  # distinct
+
+
+# ── Single-instance replace (w9 / master_trade_agreement) ────────────────
+
+
+def _upload_with(client, vendor_id, *, document_type, replace=None, expiration_date=None):
+    files = {"file": ("cert.pdf", _PDF_BYTES, "application/pdf")}
+    data = {"document_type": document_type}
+    if replace is not None:
+        data["replace"] = replace
+    if expiration_date is not None:
+        data["expiration_date"] = expiration_date
+    return client.post(f"/api/v1/vendors/{vendor_id}/documents", files=files, data=data)
+
+
+def _client_for(fake):
+    app.dependency_overrides[get_current_active_user] = lambda: USER
+    app.dependency_overrides[get_supabase] = lambda: fake
+    return TestClient(app)
+
+
+class TestSingleInstanceReplace:
+    def test_second_w9_without_replace_conflicts(self):
+        vendor_id = str(uuid4())
+        fake = FakeDB(existing_doc={"id": "old", "file_path": f"{vendor_id}/w9/a/w9.pdf"})
+        try:
+            resp = _upload_with(_client_for(fake), vendor_id, document_type="w9")
+            assert resp.status_code == 409, resp.text
+            assert "already exists" in resp.json()["detail"]
+            assert fake.inserted_documents == []  # nothing stored
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_master_trade_agreement_without_replace_conflicts(self):
+        vendor_id = str(uuid4())
+        fake = FakeDB(existing_doc={"id": "old", "file_path": f"{vendor_id}/mta/a/m.pdf"})
+        try:
+            resp = _upload_with(_client_for(fake), vendor_id, document_type="master_trade_agreement")
+            assert resp.status_code == 409, resp.text
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_w9_with_replace_supersedes_prior(self):
+        vendor_id = str(uuid4())
+        fake = FakeDB(existing_doc={"id": "old", "file_path": f"{vendor_id}/w9/a/w9.pdf"})
+        try:
+            resp = _upload_with(_client_for(fake), vendor_id, document_type="w9", replace="true")
+            assert resp.status_code == 201, resp.text
+            assert len(fake.inserted_documents) == 1        # new one stored
+            assert fake.deleted_document_ids == ["old"]     # prior one removed
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_insurance_is_not_single_instance(self):
+        # A second insurance cert is allowed (renewals); no 409.
+        vendor_id = str(uuid4())
+        fake = FakeDB(
+            existing_doc={
+                "id": "old",
+                "file_path": f"{vendor_id}/insurance_certificate/a/c.pdf",
+                "document_type": "insurance_certificate",
+            }
+        )
+        try:
+            with patch("app.routers.vendors.recompute_vendor_insurance_expiration"):
+                resp = _upload_with(
+                    _client_for(fake),
+                    vendor_id,
+                    document_type="insurance_certificate",
+                    expiration_date="2027-01-01",
+                )
+            assert resp.status_code == 201, resp.text  # kept, not blocked
+            assert fake.deleted_document_ids == []      # prior cert not removed
+        finally:
+            app.dependency_overrides.clear()
+
 
 # ── Delete ───────────────────────────────────────────────────────────────
 
