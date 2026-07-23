@@ -75,7 +75,7 @@ export function ProjectDocumentUpload({ projectId, isOpen, onClose }: ProjectDoc
           File <span className="text-danger-500">*</span>
         </label>
         <FileUpload
-          accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff"
+          accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.dwf,.dgn"
           maxSizeMB={50}
           onFilesSelected={(files) => {
             setSelectedFile(files[0] ?? null);
@@ -84,7 +84,7 @@ export function ProjectDocumentUpload({ projectId, isOpen, onClose }: ProjectDoc
           onError={setFileError}
           error={fileError}
           uploading={uploadMutation.isPending}
-          hint="PDF, JPEG, PNG, or TIFF up to 50MB"
+          hint="PDF, images, Office docs, TXT, or CAD (DWG/DXF/DWF/DGN) up to 50MB"
           onRemoveFile={() => setSelectedFile(null)}
         />
       </div>

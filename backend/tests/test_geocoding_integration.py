@@ -22,6 +22,21 @@ from app.services.geocoding import GeocodingError
 from tests._fakes import FakeResponse, FakeSupabase
 
 
+# resolve_coordinates() lives in the service and is what the routers call, so
+# the seam moved here from the old per-router `geocode_address` import. These
+# tests therefore now cover the real coordinate-resolution rules (null on
+# not-locatable, keep on lookup failure) rather than just the router glue.
+_GEOCODE_TARGET = "app.services.geocoding.geocode_address"
+
+
+@pytest.fixture(autouse=True)
+def _api_key_configured():
+    """resolve_coordinates() short-circuits with no key, which would make
+    every assertion below vacuous."""
+    with patch("app.services.geocoding.settings.GOOGLE_MAPS_API_KEY", "test-key"):
+        yield
+
+
 # ── Constants ─────────────────────────────────────────────────────────────
 
 MOCK_LAT = Decimal("30.2672")
@@ -133,7 +148,7 @@ class TestVendorGeocodingIntegration:
             ("vendor_contacts", "insert"): lambda p: FakeResponse([_contact_row(**p)]),
         })
         with patch(
-            "app.routers.vendors.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:
@@ -166,7 +181,7 @@ class TestVendorGeocodingIntegration:
             ("vendors", "update"): lambda p: FakeResponse([_vendor_row(id=str(vendor_id), **p)]),
         })
         with patch(
-            "app.routers.vendors.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:
@@ -186,7 +201,7 @@ class TestVendorGeocodingIntegration:
             ("vendors", "update"): lambda p: FakeResponse([_vendor_row(id=str(vendor_id), **p)]),
         })
         with patch(
-            "app.routers.vendors.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:
@@ -205,7 +220,7 @@ class TestVendorGeocodingIntegration:
             ("vendor_contacts", "insert"): lambda p: FakeResponse([_contact_row(**p)]),
         })
         with patch(
-            "app.routers.vendors.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             side_effect=GeocodingError("Geocoding service unavailable"),
         ):
@@ -235,7 +250,7 @@ class TestVendorGeocodingIntegration:
             ("vendor_contacts", "insert"): lambda p: FakeResponse([_contact_row(**p)]),
         })
         with patch(
-            "app.routers.vendors.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:
@@ -266,7 +281,7 @@ class TestProjectGeocodingIntegration:
             ("projects", "insert"): lambda p: FakeResponse([_project_row(**p)]),
         })
         with patch(
-            "app.routers.projects.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:
@@ -295,7 +310,7 @@ class TestProjectGeocodingIntegration:
             ("projects", "update"): lambda p: FakeResponse([_project_row(id=str(project_id), **p)]),
         })
         with patch(
-            "app.routers.projects.geocode_address",
+            _GEOCODE_TARGET,
             new_callable=AsyncMock,
             return_value=(MOCK_LAT, MOCK_LNG),
         ) as mock_geo:

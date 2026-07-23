@@ -9,7 +9,10 @@ export function useCreateVendor() {
   return useMutation({
     mutationFn: (input: CreateVendorInput) => createVendor(input),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.vendors.lists() });
+      // vendors.all, not vendors.lists(): a new vendor can carry an insurance
+      // expiration inside the 30-day window, which changes the expiring-soon
+      // count shown beside the page title. Matches useImportVendors.
+      queryClient.invalidateQueries({ queryKey: queryKeys.vendors.all });
     },
   });
 }

@@ -1,13 +1,16 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { Alert } from '@/components/ui/Alert';
+import { errorMessage } from '@/lib/api';
 import { useBidTemplate } from '@/features/bid-templates/hooks/useBidTemplate';
 import { BidTemplatePreview } from '@/features/bid-templates/components/BidTemplatePreview';
 
 export function BidTemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: template, isLoading } = useBidTemplate(id);
+  const { data: template, isLoading, error, refetch, isFetching } =
+    useBidTemplate(id);
 
   if (isLoading) {
     return (
@@ -18,12 +21,32 @@ export function BidTemplateDetailPage() {
   }
 
   if (!template) {
+    // A load failure is not a missing template. Reporting "doesn't exist" for
+    // a dropped connection sends the user hunting for a record that is fine,
+    // and gives them no way to try again.
+    const isMissing = !error || error.status === 404;
+
     return (
-      <div className="py-12 text-center">
-        <h2 className="text-lg font-semibold text-secondary-900">Template not found</h2>
-        <p className="mt-1 text-sm text-secondary-500">
-          The bid template you're looking for doesn't exist or has been deleted.
-        </p>
+      <div className="py-12">
+        {isMissing ? (
+          <Alert variant="danger" title="Template not found">
+            The bid template you're looking for doesn't exist or has been deleted.
+          </Alert>
+        ) : (
+          <Alert variant="danger" title="Could not load template">
+            <div className="space-y-3">
+              <p>{errorMessage(error, 'Something went wrong. Please try again.')}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                isLoading={isFetching}
+              >
+                Retry
+              </Button>
+            </div>
+          </Alert>
+        )}
         <Button variant="outline" className="mt-4" onClick={() => navigate('/bid-templates')}>
           Back to Templates
         </Button>

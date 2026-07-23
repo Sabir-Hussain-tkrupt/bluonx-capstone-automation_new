@@ -14,6 +14,15 @@ export interface ApiError {
   details?: unknown;
 }
 
+/**
+ * Pull a user-facing message off a rejected API error, falling back to a fixed
+ * string. Preferring the server message keeps 409 guard explanations and 403
+ * permission text intact instead of replacing them with a generic fallback.
+ */
+export function errorMessage(error: unknown, fallback: string): string {
+  return (error as ApiError | undefined)?.message || fallback;
+}
+
 // ─── Axios Instance ───────────────────────────────────────────────────
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 

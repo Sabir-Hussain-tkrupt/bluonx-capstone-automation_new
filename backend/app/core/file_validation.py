@@ -12,25 +12,43 @@ from fastapi import HTTPException, status
 
 # ── Bucket configurations ────────────────────────────────────────────────
 
+# Office (OOXML .docx/.xlsx are ZIP; legacy .doc/.xls are OLE compound files).
+_OOXML_MIME_WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_OOXML_MIME_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 BUCKET_CONFIGS: dict[str, dict] = {
     "vendor-documents": {
+        # Compliance paperwork: W-9, insurance cert, master trade agreement.
+        # PDFs, scanned images, or a Word agreement — no CAD/spreadsheets.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
         "allowed_mimes": {
             "application/pdf",
             "image/jpeg",
             "image/png",
+            "application/msword",
+            _OOXML_MIME_WORD,
         },
-        "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png"},
+        "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"},
     },
     "project-documents": {
+        # Plans, specs, budgets, notes: images, PDF/TIFF, TXT, Office, and CAD.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
         "allowed_mimes": {
             "application/pdf",
             "image/jpeg",
             "image/png",
             "image/tiff",
+            "text/plain",
+            "application/msword",
+            "application/vnd.ms-excel",
+            _OOXML_MIME_WORD,
+            _OOXML_MIME_EXCEL,
         },
-        "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"},
+        "allowed_extensions": {
+            ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+            ".txt", ".doc", ".docx", ".xls", ".xlsx",
+            ".dwg", ".dxf", ".dwf", ".dgn",
+        },
     },
     "bid-attachments": {
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
@@ -44,16 +62,17 @@ BUCKET_CONFIGS: dict[str, dict] = {
 }
 
 
-# ── Magic byte signatures ────────────────────────────────────────────────
+# ── Content-type handling ────────────────────────────────────────────────
 
-MAGIC_BYTES: dict[str, list[bytes]] = {
-    "application/pdf": [b"%PDF"],
-    "image/jpeg": [b"\xff\xd8\xff"],
-    "image/png": [b"\x89PNG"],
-    "image/tiff": [b"II\x2a\x00", b"MM\x00\x2a"],  # little-endian / big-endian
-}
+# Browsers send these when they can't (or don't) determine a specific type — CAD
+# and, occasionally, Office files arrive this way. Treated as "trust the
+# extension" rather than rejected outright.
+_GENERIC_CONTENT_TYPES = {"", "application/octet-stream", "application/x-download"}
 
-# Map extensions to expected MIME types
+# Expected MIME(s) per extension, used only to catch an obvious mismatch when a
+# *specific* content-type is declared (e.g. a PNG renamed .pdf). Extensions with
+# unreliable browser MIME (CAD) are intentionally absent, so they trust the magic
+# check + extension allow-list instead.
 EXTENSION_TO_MIME: dict[str, set[str]] = {
     ".pdf": {"application/pdf"},
     ".jpg": {"image/jpeg"},
@@ -61,14 +80,41 @@ EXTENSION_TO_MIME: dict[str, set[str]] = {
     ".png": {"image/png"},
     ".tif": {"image/tiff"},
     ".tiff": {"image/tiff"},
+    ".txt": {"text/plain"},
+    ".doc": {"application/msword"},
+    ".docx": {_OOXML_MIME_WORD},
+    ".xls": {"application/vnd.ms-excel"},
+    ".xlsx": {_OOXML_MIME_EXCEL},
 }
 
 
-def _check_magic_bytes(file_bytes: bytes, content_type: str) -> bool:
-    """Check if file content matches expected magic bytes for the MIME type."""
-    signatures = MAGIC_BYTES.get(content_type)
+# ── Magic byte signatures (keyed by extension) ───────────────────────────
+
+# Keyed by extension, not content-type, so a CAD/Office file that arrives as
+# application/octet-stream still gets sniffed. Extensions absent here have no
+# reliable signature (.txt, .dxf, .dwf, .dgn) and are accepted on extension alone.
+_ZIP = [b"PK\x03\x04"]  # OOXML .docx/.xlsx are ZIP containers
+_OLE = [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"]  # legacy .doc/.xls compound files
+EXTENSION_SIGNATURES: dict[str, list[bytes]] = {
+    ".pdf": [b"%PDF"],
+    ".jpg": [b"\xff\xd8\xff"],
+    ".jpeg": [b"\xff\xd8\xff"],
+    ".png": [b"\x89PNG"],
+    ".tif": [b"II\x2a\x00", b"MM\x00\x2a"],
+    ".tiff": [b"II\x2a\x00", b"MM\x00\x2a"],
+    ".docx": _ZIP,
+    ".xlsx": _ZIP,
+    ".doc": _OLE,
+    ".xls": _OLE,
+    ".dwg": [b"AC10"],  # AutoCAD version tag, e.g. AC1027/AC1032
+}
+
+
+def _check_magic_bytes(file_bytes: bytes, ext: str) -> bool:
+    """Whether file content matches the expected signature for its extension."""
+    signatures = EXTENSION_SIGNATURES.get(ext)
     if signatures is None:
-        # No magic bytes defined for this type — skip check
+        # No reliable signature for this extension — skip the check.
         return True
     return any(file_bytes[: len(sig)] == sig for sig in signatures)
 
@@ -126,24 +172,9 @@ def validate_upload(
             detail=f"File exceeds the {max_mb:.0f}MB size limit.",
         )
 
-    # 2. Check MIME type
-    if content_type not in config["allowed_mimes"]:
-        allowed = ", ".join(sorted(config["allowed_mimes"]))
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"File type '{content_type}' is not allowed. Accepted types: {allowed}",
-        )
-
-    # 3. Check extension matches MIME
+    # 2. Extension is the primary gate. CAD/Office files often arrive as
+    #    application/octet-stream, so the declared MIME can't be the gate.
     ext = os.path.splitext(filename)[1].lower()
-    expected_mimes = EXTENSION_TO_MIME.get(ext)
-    if expected_mimes and content_type not in expected_mimes:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"File extension '{ext}' does not match content type '{content_type}'.",
-        )
-
-    # 4. Also verify extension is in allowed set
     if ext not in config["allowed_extensions"]:
         allowed_ext = ", ".join(sorted(config["allowed_extensions"]))
         raise HTTPException(
@@ -151,8 +182,24 @@ def validate_upload(
             detail=f"File extension '{ext}' is not allowed. Accepted extensions: {allowed_ext}",
         )
 
-    # 5. Magic byte validation
-    if len(file_bytes) >= 8 and not _check_magic_bytes(file_bytes, content_type):
+    # 3. Content-type is advisory. A generic/blank type is trusted (extension is
+    #    already vetted); a *specific* declared type that contradicts the
+    #    extension is rejected, which still catches an image renamed .pdf.
+    normalized_ct = (content_type or "").lower()
+    expected_mimes = EXTENSION_TO_MIME.get(ext)
+    if (
+        normalized_ct not in _GENERIC_CONTENT_TYPES
+        and expected_mimes
+        and normalized_ct not in expected_mimes
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File extension '{ext}' does not match content type '{content_type}'.",
+        )
+
+    # 4. Magic byte validation, keyed by extension (so octet-stream CAD/Office is
+    #    still sniffed where a signature exists; unsignatured types are skipped).
+    if len(file_bytes) >= 8 and not _check_magic_bytes(file_bytes, ext):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="File content does not match its declared type. The file may be corrupted or mislabeled.",

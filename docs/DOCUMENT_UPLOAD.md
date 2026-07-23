@@ -8,8 +8,8 @@
 
 | Bucket | Purpose | Path Pattern | Allowed Types | Max Size (Dev) |
 |--------|---------|-------------|---------------|----------------|
-| `vendor-documents` | W-9, insurance certs, MTAs | `{vendor_id}/{document_type}/{filename}` | PDF, JPEG, PNG | 50 MB |
-| `project-documents` | Civil plans, drawings, specs, photos | `{project_id}/{filename}` | PDF, JPEG, PNG, TIFF | 50 MB |
+| `vendor-documents` | W-9, insurance certs, MTAs | `{vendor_id}/{document_type}/{uuid}/{filename}` | PDF, JPEG, PNG, Word (DOC/DOCX) | 50 MB |
+| `project-documents` | Civil plans, drawings, specs, photos | `{project_id}/{uuid}/{filename}` | PDF, JPEG, PNG, TIFF, TXT, Word (DOC/DOCX), Excel (XLS/XLSX), CAD (DWG/DXF/DWF/DGN) | 50 MB |
 | `bid-attachments` | Vendor bid submission docs | `{bid_submission_id}/{filename}` | PDF, JPEG, PNG | 50 MB |
 
 > `bid-attachments` endpoints will be wired in Phase 5. The reusable components are ready.
@@ -52,8 +52,8 @@ Document statuses: `valid` (default on upload), `expired`, `pending_review`.
 
 ## Validation
 
-- **Server-side**: MIME type check, file size check, extension-to-MIME consistency, magic byte verification
-- **Client-side**: File size and extension pre-check before upload
+- **Server-side (extension-first)**: file size check, extension allow-list (the primary gate), an advisory content-type check (a generic/blank or `application/octet-stream` type is trusted, since CAD/Office files often arrive that way; a *specific* type that contradicts the extension is rejected), and magic-byte verification keyed by extension (PDF/image/TIFF, ZIP for `.docx`/`.xlsx`, OLE for `.doc`/`.xls`, `AC10` for `.dwg`; `.txt`/`.dxf`/`.dwf`/`.dgn` have no signature and validate on extension alone)
+- **Client-side**: File size and extension pre-check before upload (the `accept` list on each upload mirrors its bucket)
 - Invalid uploads return `422` with a descriptive error message
 
 ---

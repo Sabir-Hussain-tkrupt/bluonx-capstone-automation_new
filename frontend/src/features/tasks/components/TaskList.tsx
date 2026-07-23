@@ -19,11 +19,12 @@ import {
 } from '@dnd-kit/sortable';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { errorMessage } from '@/lib/api';
 import { useTasks } from '@/features/tasks/hooks/useTasks';
 import { useCreateTask } from '@/features/tasks/hooks/useCreateTask';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
@@ -53,7 +54,7 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
   const [deleteTarget, setDeleteTarget] = useState<Task | undefined>();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
 
-  const { data, isLoading, error } = useTasks({ projectId, page_size: 100 });
+  const { data, isLoading, isError, error, refetch, isFetching } = useTasks({ projectId, page_size: 100 });
   const createMutation = useCreateTask(projectId);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId);
@@ -109,11 +110,14 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
   }, []);
 
   // ─── Budget summary ────────────────────────────────────────────────
+  // Coerce with Number() before summing: numeric columns can reach the client
+  // as strings, and `0 + "500"` concatenates into "0500" rather than adding.
   const totalTaskBudget = useMemo(
-    () => tasks.reduce((sum, t) => sum + (t.budget_estimate ?? 0), 0),
+    () => tasks.reduce((sum, t) => sum + (Number(t.budget_estimate) || 0), 0),
     [tasks],
   );
-  const budgetRemaining = projectBudget != null ? projectBudget - totalTaskBudget : null;
+  const projectBudgetNum = projectBudget != null ? Number(projectBudget) : null;
+  const budgetRemaining = projectBudgetNum != null ? projectBudgetNum - totalTaskBudget : null;
   const isOverBudget = budgetRemaining != null && budgetRemaining < 0;
 
   // ─── Loading / Error ───────────────────────────────────────────────
@@ -126,8 +130,17 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
     );
   }
 
-  if (error) {
-    return <Alert variant="danger" title="Failed to load tasks">Could not fetch tasks for this project.</Alert>;
+  if (isError) {
+    return (
+      <Alert variant="danger" title="Could not load tasks">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>{errorMessage(error, 'Could not fetch tasks for this project.')}</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} isLoading={isFetching}>
+            Retry
+          </Button>
+        </div>
+      </Alert>
+    );
   }
 
   // ─── CRUD handlers ─────────────────────────────────────────────────
@@ -167,7 +180,7 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
         toast({ variant: 'success', message: 'Task deleted.' });
       },
       onError: (err) => {
-        toast({ variant: 'danger', message: (err as { message?: string })?.message || 'Failed to delete task. It may have active bids, awards, or contracts.' });
+        toast({ variant: 'danger', message: errorMessage(err, 'Failed to delete task. It may have active bids, awards, or contracts.') });
       },
     });
   };
@@ -284,23 +297,20 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
       />
 
       {/* Delete Confirmation */}
-      <Modal
+      <ConfirmDialog
         isOpen={!!deleteTarget}
-        onClose={() => setDeleteTarget(undefined)}
         title="Delete Task"
-        size="sm"
-        footer={
+        message={
           <>
-            <Button variant="ghost" onClick={() => setDeleteTarget(undefined)}>Cancel</Button>
-            <Button variant="danger" onClick={handleDelete} isLoading={deleteMutation.isPending}>Delete Task</Button>
+            Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This
+            soft-deletes the task and it will no longer appear in lists.
           </>
         }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete <strong>{deleteTarget?.name}</strong>?
-          This action will soft-delete the task and it will no longer appear in lists.
-        </p>
-      </Modal>
+        confirmText="Delete Task"
+        isLoading={deleteMutation.isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(undefined)}
+      />
     </div>
   );
 }

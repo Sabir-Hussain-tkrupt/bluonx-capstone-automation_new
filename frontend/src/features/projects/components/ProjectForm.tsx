@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select';
 import type { Project } from '@/features/projects/api/project.queries';
 
 const projectSchema = z.object({
-  name: z.string().min(2, 'Project name is required (min 2 characters)').max(255, 'Project name must be 255 characters or fewer'),
+  name: z.string().trim().min(2, 'Project name is required (min 2 characters)').max(255, 'Project name must be 255 characters or fewer'),
   description: z.string().optional(),
   address: z.string().optional(),
   city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),
@@ -102,7 +102,12 @@ export function ProjectForm({ isOpen, onClose, project, onSubmit, isLoading = fa
         </>
       }
     >
-      <form id="project-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form
+        id="project-form"
+        onSubmit={handleSubmit(handleFormSubmit)}
+        className="space-y-6"
+        noValidate
+      >
         {/* Project Information */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Project Information</h3>
@@ -162,7 +167,7 @@ export function ProjectForm({ isOpen, onClose, project, onSubmit, isLoading = fa
             <FormField label="Budget ($)" error={errors.budget?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('budget')}
                 error={errors.budget?.message}

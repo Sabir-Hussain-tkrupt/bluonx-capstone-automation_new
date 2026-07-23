@@ -13,6 +13,7 @@ import type { Task } from '@/features/tasks/api/task.queries';
 const taskSchema = z.object({
   name: z
     .string()
+    .trim()
     .min(2, 'Task name is required (min 2 characters)')
     .max(255, 'Task name must be 255 characters or fewer'),
   description: z
@@ -24,7 +25,9 @@ const taskSchema = z.object({
     message: 'Phase is required',
   }),
   trade_id: z.string().min(1, 'Trade is required'),
-  bid_type: z.enum(['competitive', 'direct_assign', 'internal'], {
+  // direct_assign stays in the DB/backend but is a dormant seam with no built
+  // award flow, so the PM only ever chooses competitive or internal here.
+  bid_type: z.enum(['competitive', 'internal'], {
     message: 'Bid type is required',
   }),
   budget_estimate: z.coerce
@@ -67,7 +70,7 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
       description: task?.description ?? '',
       phase: task?.phase ?? ('' as unknown as 'due_diligence'),
       trade_id: task?.trade_id ?? '',
-      bid_type: task?.bid_type ?? ('' as unknown as 'competitive'),
+      bid_type: (task?.bid_type ?? '') as unknown as 'competitive',
       budget_estimate: task?.budget_estimate ?? ('' as unknown as number),
     },
   });
@@ -102,7 +105,7 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
         description: task?.description ?? '',
         phase: task?.phase ?? ('' as unknown as 'due_diligence'),
         trade_id: task?.trade_id ?? '',
-        bid_type: task?.bid_type ?? ('' as unknown as 'competitive'),
+        bid_type: (task?.bid_type ?? '') as unknown as 'competitive',
         budget_estimate: task?.budget_estimate ?? ('' as unknown as number),
       });
     }
@@ -114,7 +117,7 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
       phase: data.phase,
       trade_id: data.trade_id,
       bid_type: data.bid_type,
-      description: data.description || undefined,
+      description: data.description?.trim() || undefined,
       budget_estimate: data.budget_estimate === '' ? undefined : Number(data.budget_estimate),
     };
     onSubmit(cleanedData);
@@ -142,7 +145,12 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
         </>
       }
     >
-      <form id="task-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form
+        id="task-form"
+        onSubmit={handleSubmit(handleFormSubmit)}
+        className="space-y-6"
+        noValidate
+      >
         {/* Task Information */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Task Information</h3>
@@ -218,7 +226,6 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
                     error={errors.bid_type?.message}
                     options={[
                       { value: 'competitive', label: 'Competitive' },
-                      { value: 'direct_assign', label: 'Direct Assign' },
                       { value: 'internal', label: 'Internal' },
                     ]}
                   />
@@ -228,7 +235,7 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
             <FormField label="Budget Estimate ($)" error={errors.budget_estimate?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('budget_estimate')}
                 error={errors.budget_estimate?.message}
@@ -239,7 +246,6 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
           {/* Bid type hints */}
           <div className="mt-2 text-xs text-secondary-500">
             {watch('bid_type') === 'competitive' && 'Full pipeline: invite vendors, collect bids, compare, award.'}
-            {watch('bid_type') === 'direct_assign' && 'PM picks vendor directly. No bidding phase.'}
             {watch('bid_type') === 'internal' && 'Budget line item only. No vendor involvement.'}
           </div>
         </div>

@@ -10,6 +10,7 @@ import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { ROUTES } from '@/constants/routes';
 import { Alert } from '@/components/ui/Alert';
+import { errorMessage } from '@/lib/api';
 import { useBidTemplate } from '@/features/bid-templates/hooks/useBidTemplate';
 import { useCreateBidTemplate } from '@/features/bid-templates/hooks/useCreateBidTemplate';
 import { useUpdateBidTemplate } from '@/features/bid-templates/hooks/useUpdateBidTemplate';
@@ -20,40 +21,61 @@ import { BidTemplatePreview } from '@/features/bid-templates/components/BidTempl
 
 // ─── Zod Schema ──────────────────────────────────────────────────────
 
+// Shape only. The per-item rules live in the superRefine below so they can be
+// skipped entirely for lump-sum templates -- see the note on formSchema.
 const itemSchema = z.object({
-  description: z.string().min(1, 'Description is required'),
+  description: z.string(),
   item_type: z.enum(['lump_sum', 'unit_price']),
   unit_of_measure: z.string().optional().nullable(),
-}).refine(
-  (item) => {
-    if (item.item_type === 'unit_price') {
-      return !!item.unit_of_measure && item.unit_of_measure.trim().length > 0;
-    }
-    return true;
-  },
-  {
-    message: 'Unit of measure is required for unit price items',
-    path: ['unit_of_measure'],
-  },
-);
+});
 
-const formSchema = z.object({
-  name: z.string().min(1, 'Template name is required').max(255),
-  trade_id: z.string().optional(),
-  is_lump_sum: z.boolean(),
-  items: z.array(itemSchema),
-}).refine(
-  (data) => {
-    if (!data.is_lump_sum && data.items.length === 0) {
-      return false;
+const formSchema = z
+  .object({
+    // Trim so a whitespace-only name fails here rather than reaching the API,
+    // which strips and rejects it with a less specific message.
+    name: z.string().trim().min(1, 'Template name is required').max(255),
+    trade_id: z.string().optional(),
+    is_lump_sum: z.boolean(),
+    items: z.array(itemSchema),
+  })
+  .superRefine((data, ctx) => {
+    // Item rules are conditional on the bid format. Validating them
+    // unconditionally made the form silently unsubmittable: the items section
+    // only renders when !is_lump_sum, so a half-filled item left behind by a
+    // toggle to Lump Sum failed validation with the error painted inside a
+    // hidden section, and Save just did nothing. onSubmit discards items for
+    // lump-sum templates anyway, so there is nothing to validate there.
+    if (data.is_lump_sum) return;
+
+    if (data.items.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one line item is required for structured templates',
+        path: ['items'],
+      });
+      return;
     }
-    return true;
-  },
-  {
-    message: 'At least one line item is required for structured templates',
-    path: ['items'],
-  },
-);
+
+    data.items.forEach((item, index) => {
+      if (item.description.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Description is required',
+          path: ['items', index, 'description'],
+        });
+      }
+      if (
+        item.item_type === 'unit_price' &&
+        !(item.unit_of_measure && item.unit_of_measure.trim().length > 0)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Unit of measure is required for unit price items',
+          path: ['items', index, 'unit_of_measure'],
+        });
+      }
+    });
+  });
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -65,7 +87,14 @@ export function BidTemplateFormPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: template, isLoading: isLoadingTemplate, isError: isTemplateError } = useBidTemplate(id);
+  const {
+    data: template,
+    isLoading: isLoadingTemplate,
+    isError: isTemplateError,
+    error: templateError,
+    refetch: refetchTemplate,
+    isFetching: isRefetchingTemplate,
+  } = useBidTemplate(id);
   const { data: tradesData } = useTrades();
   const trades = tradesData ?? [];
 
@@ -95,13 +124,11 @@ export function BidTemplateFormPage() {
         });
         navigate(ROUTES.BID_TEMPLATE_EDIT.replace(':id', newTemplate.id));
       },
-      onError: (error) => {
-        const apiError = error as { message?: string };
+      onError: (error) =>
         toast({
           variant: 'danger',
-          message: apiError.message || 'Failed to duplicate template.',
-        });
-      },
+          message: errorMessage(error, 'Failed to duplicate template.'),
+        }),
     });
   };
 
@@ -142,14 +169,29 @@ export function BidTemplateFormPage() {
     }
   }, [template, isEdit, reset]);
 
-  // Trade dropdown options
+  // Trade dropdown options.
+  //
+  // useTrades only returns active trades. If this template points at one that
+  // has since been deactivated, the Select would have no matching option, the
+  // browser would fall back to the first ("None"), and saving would silently
+  // drop the association. Keep the stored value as an option so it round-trips.
+  // It is only ever offered on the template that already holds it.
   const tradeOptions = useMemo(() => {
     const options = [{ value: '', label: 'None \u2014 General Purpose' }];
     for (const trade of trades) {
       options.push({ value: trade.id, label: trade.name });
     }
+    if (
+      template?.trade_id &&
+      !options.some((option) => option.value === template.trade_id)
+    ) {
+      options.splice(1, 0, {
+        value: template.trade_id,
+        label: `${template.trade_name ?? 'Unknown trade'} (inactive)`,
+      });
+    }
     return options;
-  }, [trades]);
+  }, [trades, template?.trade_id, template?.trade_name]);
 
   const onSubmit = (data: FormValues) => {
     const payload = {
@@ -159,11 +201,14 @@ export function BidTemplateFormPage() {
       items: data.is_lump_sum
         ? []
         : data.items.map((item) => ({
-            description: item.description,
+            // Trim on the way out so what passed validation is what is stored;
+            // the backend strips these too, and disagreeing would mean a value
+            // that validates here and 422s there.
+            description: item.description.trim(),
             item_type: item.item_type,
             unit_of_measure:
               item.item_type === 'unit_price'
-                ? item.unit_of_measure || null
+                ? item.unit_of_measure?.trim() || null
                 : null,
           })),
     };
@@ -176,13 +221,11 @@ export function BidTemplateFormPage() {
             toast({ variant: 'success', message: 'Template updated successfully.' });
             navigate(ROUTES.BID_TEMPLATES);
           },
-          onError: (error) => {
-            const apiError = error as { message?: string };
+          onError: (error) =>
             toast({
               variant: 'danger',
-              message: apiError.message || 'Failed to update template.',
-            });
-          },
+              message: errorMessage(error, 'Failed to update template.'),
+            }),
         },
       );
     } else {
@@ -191,13 +234,11 @@ export function BidTemplateFormPage() {
           toast({ variant: 'success', message: 'Template created successfully.' });
           navigate(ROUTES.BID_TEMPLATES);
         },
-        onError: (error) => {
-          const apiError = error as { message?: string };
+        onError: (error) =>
           toast({
             variant: 'danger',
-            message: apiError.message || 'Failed to create template.',
-          });
-        },
+            message: errorMessage(error, 'Failed to create template.'),
+          }),
       });
     }
   };
@@ -211,12 +252,32 @@ export function BidTemplateFormPage() {
   }
 
   if (isEdit && !isLoadingTemplate && (isTemplateError || !template)) {
+    // A dropped connection is not a missing template. Saying "doesn't exist"
+    // for a 500 sends the user looking for a record that is fine, and offers
+    // no way to try again.
+    const isMissing = !templateError || templateError.status === 404;
+
     return (
-      <div className="py-12 text-center">
-        <h2 className="text-lg font-semibold text-secondary-900">Template not found</h2>
-        <p className="mt-1 text-sm text-secondary-500">
-          The bid template you're trying to edit doesn't exist or has been deleted.
-        </p>
+      <div className="py-12">
+        {isMissing ? (
+          <Alert variant="danger" title="Template not found">
+            The bid template you're trying to edit doesn't exist or has been deleted.
+          </Alert>
+        ) : (
+          <Alert variant="danger" title="Could not load template">
+            <div className="space-y-3">
+              <p>{errorMessage(templateError, 'Something went wrong. Please try again.')}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchTemplate()}
+                isLoading={isRefetchingTemplate}
+              >
+                Retry
+              </Button>
+            </div>
+          </Alert>
+        )}
         <Button variant="outline" className="mt-4" onClick={() => navigate(ROUTES.BID_TEMPLATES)}>
           Back to Templates
         </Button>

@@ -6,7 +6,6 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { AppRoutes } from '@/routes';
 import { ScrollToTop } from '@/components/layout/ScrollToTop';
 import { ToastProvider } from '@/components/ui/Toast';
-import { GoogleMapsProvider } from '@/providers/GoogleMapsProvider';
 
 function App() {
   return (
@@ -15,9 +14,7 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ToastProvider>
-            <GoogleMapsProvider>
-              <AppRoutes />
-            </GoogleMapsProvider>
+            <AppRoutes />
           </ToastProvider>
         </AuthProvider>
         <ReactQueryDevtools initialIsOpen={false} />

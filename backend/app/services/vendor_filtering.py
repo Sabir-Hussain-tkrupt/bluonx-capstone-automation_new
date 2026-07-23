@@ -20,7 +20,7 @@ from app.models.vendor_filtering import (
     QualifiedVendorsResponse,
     VendorPrimaryContact,
 )
-from app.services.distance import calculate_distance, haversine_distance
+from app.services.distance import haversine_distance, routes_api_distance
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,8 @@ async def filter_qualified_vendors(
     if has_project_coords and qualified_raw:
         still_qualified: list[dict] = []
         buffer_radius = radius_miles * 1.33
+        # Per-request circuit breaker for the Routes API. See the note below.
+        routes_api_available = True
 
         for entry in qualified_raw:
             v = entry["vendor"]
@@ -198,8 +200,39 @@ async def filter_qualified_vendors(
                 disqualified_raw.append(entry)
                 continue
 
-            # Precise distance
-            dist = await calculate_distance(proj_lat, proj_lng, v_lat, v_lng)
+            # Precise (driving) distance, unless the Routes API has already
+            # failed once in this request. Each call carries its own 10s
+            # timeout, so without this breaker a misconfigured or unreachable
+            # Routes API costs 10s PER VENDOR: 20 qualified vendors becomes a
+            # 200-second request that no browser or proxy will wait for. One
+            # failure is enough to conclude it is unavailable right now, so the
+            # rest of the cohort goes straight to Haversine.
+            #
+            # routes_api_distance is called directly rather than through
+            # calculate_distance because it returns None on failure, whereas
+            # calculate_distance silently substitutes the Haversine value and
+            # leaves no way to tell a successful call from a fallback.
+            dist = None
+            if routes_api_available:
+                dist = await routes_api_distance(proj_lat, proj_lng, v_lat, v_lng)
+                if dist is None:
+                    routes_api_available = False
+                    logger.warning(
+                        "Routes API unavailable for task %s; using straight-line "
+                        "distance for the remaining vendors. Driving distance "
+                        "typically runs 1.2-1.4x straight-line, so vendors near "
+                        "the radius edge may be included when they are out of "
+                        "range by road.",
+                        task_id,
+                    )
+                    warnings.append(
+                        "Driving distances were unavailable, so straight-line "
+                        "distance was used. Vendors near the radius edge may be "
+                        "further than they appear."
+                    )
+            if dist is None:
+                dist = h_dist
+
             if dist is not None and dist > radius_miles:
                 entry["reasons"].append("outside_radius")
                 disqualified_raw.append(entry)

@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { api, type ApiError } from '@/lib/api';
+import { API_ENDPOINTS } from '@/constants/api';
+import { toNumberOrNull } from '@/lib/format';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -28,6 +30,12 @@ export interface Project {
   deleted_at: string | null;
   archived_at: string | null;
   archived_by: string | null;
+  /**
+   * Present only on a create/update response when geocoding could not refresh
+   * this record's coordinates. Non-fatal: the write succeeded. Surfaced as a
+   * warning toast so the user learns at save time rather than never.
+   */
+  geocode_warning?: string | null;
 }
 
 export interface ProjectListFilters {
@@ -47,63 +55,48 @@ export interface PaginatedProjects {
   page_size: number;
 }
 
-// ─── Supabase Direct Reads ────────────────────────────────────────────
+// ─── Reads ────────────────────────────────────────────────────────────
 
-/**
- * Fetch projects with optional search, filter, sort, and pagination.
- * RLS ensures only authenticated users see data.
- */
-export async function fetchProjects(filters?: ProjectListFilters): Promise<PaginatedProjects> {
-  const page = filters?.page ?? 1;
-  const pageSize = filters?.page_size ?? 25;
-  const sortBy = filters?.sort_by ?? 'name';
-  const ascending = (filters?.sort_dir ?? 'asc') !== 'desc';
-
-  let query = supabase
-    .from('projects')
-    .select('*', { count: 'exact' })
-    .is('deleted_at', null);
-
-  if (filters?.search) {
-    query = query.ilike('name', `%${filters.search}%`);
-  }
-
-  if (filters?.archived) {
-    query = query.not('archived_at', 'is', null);
-  } else {
-    query = query.is('archived_at', null);
-    if (filters?.status) {
-      query = query.eq('status', filters.status);
-    }
-  }
-
-  query = query.order(sortBy, { ascending });
-
-  const offset = (page - 1) * pageSize;
-  query = query.range(offset, offset + pageSize - 1);
-
-  const { data, error, count } = await query;
-
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
-
+/** Numeric columns arrive as strings over FastAPI; pin them to `number`. */
+function normalizeProject(row: Project): Project {
   return {
-    items: (data ?? []) as unknown as Project[],
-    total: count ?? 0,
-    page,
-    page_size: pageSize,
+    ...row,
+    latitude: toNumberOrNull(row.latitude),
+    longitude: toNumberOrNull(row.longitude),
+    budget: toNumberOrNull(row.budget),
   };
 }
 
 /**
- * Fetch a single project by ID.
+ * Fetch projects with optional search, filter, sort, and pagination.
+ *
+ * Goes through FastAPI rather than Supabase directly. GET /projects already
+ * enforces a sort-column allow-list, a page-size ceiling, LIKE-metacharacter
+ * escaping on search, and a count-first fetch so a page past the last row
+ * returns an empty page instead of a 416. Reading Supabase directly here meant
+ * re-implementing all of that, badly, in a second place. Detail reads still go
+ * direct (see fetchProjectById).
+ */
+export async function fetchProjects(filters?: ProjectListFilters): Promise<PaginatedProjects> {
+  const { data } = await api.get<PaginatedProjects>(API_ENDPOINTS.PROJECTS, {
+    params: {
+      search: filters?.search || undefined,
+      // The archived-only view has no status sub-filter; the backend applies
+      // `status` regardless, so omit it when asking for archived only.
+      status: filters?.archived ? undefined : filters?.status || undefined,
+      archived_only: filters?.archived || undefined,
+      sort_by: filters?.sort_by,
+      sort_dir: filters?.sort_dir,
+      page: filters?.page,
+      page_size: filters?.page_size,
+    },
+  });
+
+  return { ...data, items: (data.items ?? []).map(normalizeProject) };
+}
+
+/**
+ * Fetch a single project by ID. Direct Supabase read (RLS-protected).
  */
 export async function fetchProjectById(id: string): Promise<Project> {
   const { data, error } = await supabase
@@ -123,5 +116,5 @@ export async function fetchProjectById(id: string): Promise<Project> {
     throw apiError;
   }
 
-  return data as unknown as Project;
+  return normalizeProject(data as unknown as Project);
 }

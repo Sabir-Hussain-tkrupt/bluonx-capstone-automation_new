@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -26,8 +27,36 @@ import { TradeMultiSelect } from '@/features/vendors/components/TradeMultiSelect
 import { VendorDocumentUpload } from '@/features/vendors/components/VendorDocumentUpload';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
+import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import type { StatusVariant } from '@/components/ui/types';
+import type { ApiError } from '@/lib/api';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
+
+/**
+ * Prefer the server's message over a generic one.
+ *
+ * The delete guard's 409 names exactly what blocks the delete, and a 403
+ * explains that the action is admin-only. Both are the most useful thing we
+ * can show, and both used to be discarded in favour of "Failed to ...".
+ */
+function errorMessage(error: unknown, fallback: string): string {
+  return (error as ApiError | undefined)?.message || fallback;
+}
+
+/**
+ * The destructive action awaiting confirmation.
+ *
+ * One dialog serves all four so they cannot drift: deleting a vendor used to
+ * be the only one that asked, while removing a contact or a document — both
+ * hard deletes — happened on a single click.
+ */
+type PendingAction =
+  | { kind: 'deleteVendor' }
+  | { kind: 'deleteContact'; contact: VendorContact }
+  | { kind: 'removeTrade'; tradeId: string; label: string }
+  | { kind: 'deleteDocument'; docId: string; label: string }
+  | null;
 
 const statusVariantMap: Record<string, StatusVariant> = {
   active: 'success', inactive: 'neutral', suspended: 'danger',
@@ -44,7 +73,7 @@ export function VendorDetailPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: vendor, isLoading, error } = useVendor(id!);
+  const { data: vendor, isLoading, error, refetch, isFetching } = useVendor(id!);
   const updateVendorMutation = useUpdateVendor();
   const deleteVendorMutation = useDeleteVendor();
   const createContactMutation = useCreateContact();
@@ -61,13 +90,12 @@ export function VendorDetailPage() {
     activeTab === 'communication',
   );
   const [showEditForm, setShowEditForm] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [confirming, setConfirming] = useState<PendingAction>(null);
   const [showAddContact, setShowAddContact] = useState(false);
   const [editingContact, setEditingContact] = useState<VendorContact | null>(null);
   const [showAddTrades, setShowAddTrades] = useState(false);
   const [newTradeIds, setNewTradeIds] = useState<string[]>([]);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
-  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -78,10 +106,26 @@ export function VendorDetailPage() {
     );
   }
 
+  // A missing vendor and an unreachable server are different problems and need
+  // different messages: telling someone their vendor was deleted when the
+  // network dropped sends them looking for the wrong thing.
   if (error || !vendor) {
+    const status = (error as ApiError | undefined)?.status;
+    if (!error || status === 404) {
+      return (
+        <Alert variant="danger" title="Vendor not found">
+          The vendor you are looking for does not exist or has been deleted.
+        </Alert>
+      );
+    }
     return (
-      <Alert variant="danger" title="Vendor not found">
-        The vendor you are looking for does not exist or has been deleted.
+      <Alert variant="danger" title="Could not load vendor">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>{errorMessage(error, 'Something went wrong. Please try again.')}</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} isLoading={isFetching}>
+            Retry
+          </Button>
+        </div>
       </Alert>
     );
   }
@@ -91,15 +135,111 @@ export function VendorDetailPage() {
   const documents = vendor.vendor_documents ?? [];
   const flags = vendor.vendor_flags ?? [];
 
-  const handleDelete = () => {
-    deleteVendorMutation.mutate(id!, {
-      onSuccess: () => {
-        toast({ variant: 'success', message: 'Vendor deleted.' });
-        navigate('/vendors');
-      },
-      onError: () => toast({ variant: 'danger', message: 'Failed to delete vendor.' }),
-    });
+  const closeConfirm = () => setConfirming(null);
+
+  const handleConfirm = () => {
+    if (!confirming) return;
+
+    const done = (message: string) => () => {
+      closeConfirm();
+      toast({ variant: 'success', message });
+    };
+    const failed = (fallback: string) => (err: unknown) => {
+      closeConfirm();
+      toast({ variant: 'danger', message: errorMessage(err, fallback) });
+    };
+
+    switch (confirming.kind) {
+      case 'deleteVendor':
+        deleteVendorMutation.mutate(id!, {
+          onSuccess: () => {
+            closeConfirm();
+            toast({ variant: 'success', message: 'Vendor deleted.' });
+            navigate('/vendors');
+          },
+          onError: failed('Failed to delete vendor.'),
+        });
+        break;
+      case 'deleteContact':
+        deleteContactMutation.mutate(
+          { vendorId: id!, contactId: confirming.contact.id },
+          { onSuccess: done('Contact deleted.'), onError: failed('Failed to delete contact.') },
+        );
+        break;
+      case 'removeTrade':
+        removeTradesMutation.mutate(
+          { vendorId: id!, tradeId: confirming.tradeId },
+          { onSuccess: done('Trade removed.'), onError: failed('Failed to remove trade.') },
+        );
+        break;
+      case 'deleteDocument':
+        deleteDocMutation.mutate(
+          { vendorId: id!, docId: confirming.docId },
+          { onSuccess: done('Document deleted.'), onError: failed('Failed to delete document.') },
+        );
+        break;
+    }
   };
+
+  const confirmIsPending =
+    deleteVendorMutation.isPending ||
+    deleteContactMutation.isPending ||
+    removeTradesMutation.isPending ||
+    deleteDocMutation.isPending;
+
+  // Say what is being removed and whether it can be undone. Contacts,
+  // documents and trade links are hard deletes; the vendor itself is not.
+  const confirmCopy = (() => {
+    switch (confirming?.kind) {
+      case 'deleteContact':
+        return {
+          title: 'Delete Contact',
+          confirmText: 'Delete Contact',
+          message: (
+            <>
+              Delete <strong>{confirming.contact.full_name}</strong>? This cannot be undone.
+              {confirming.contact.is_primary && contacts.length > 1 && (
+                <> The next contact will become the primary contact.</>
+              )}
+            </>
+          ),
+        };
+      case 'removeTrade':
+        return {
+          title: 'Remove Trade',
+          confirmText: 'Remove Trade',
+          message: (
+            <>
+              Remove <strong>{confirming.label}</strong> from this vendor? They will stop
+              matching bid packages for this trade. You can add it back later.
+            </>
+          ),
+        };
+      case 'deleteDocument':
+        return {
+          title: 'Delete Document',
+          confirmText: 'Delete Document',
+          message: (
+            <>
+              Delete <strong>{confirming.label}</strong>? The file is removed from storage
+              and cannot be recovered.
+            </>
+          ),
+        };
+      default:
+        return {
+          title: 'Delete Vendor',
+          confirmText: 'Delete Vendor',
+          message: (
+            <>
+              Are you sure you want to delete <strong>{vendor.company_name}</strong>? This
+              soft-deletes the vendor and they will no longer appear in lists. Deletion is
+              blocked while they have live bids or active contracts.
+            </>
+          ),
+        };
+    }
+  })();
 
   const handleSaveTrades = () => {
     if (newTradeIds.length === 0) return;
@@ -111,21 +251,34 @@ export function VendorDetailPage() {
           setNewTradeIds([]);
           toast({ variant: 'success', message: 'Trades updated.' });
         },
-        onError: () => toast({ variant: 'danger', message: 'Failed to add trades.' }),
+        onError: (err) => toast({
+          variant: 'danger',
+          message: errorMessage(err, 'Failed to add trades.'),
+        }),
       },
     );
   };
 
   const existingTradeIds = trades.map((t) => t.trade_id);
+  const isOnlyContact = contacts.length === 1;
 
-  const emailLogCount = emailLog?.items.length ?? 0;
+  // Derived from the pending action so the row spinner tracks the actual
+  // in-flight delete rather than a separate piece of state to keep in sync.
+  const deletingDocId =
+    confirming?.kind === 'deleteDocument' && deleteDocMutation.isPending
+      ? confirming.docId
+      : null;
+
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
     { id: 'contacts', label: 'Contacts', count: contacts.length },
     { id: 'trades', label: 'Trades', count: trades.length },
     { id: 'documents', label: 'Documents', count: documents.length },
     { id: 'flags', label: 'Flags', count: flags.length },
-    { id: 'communication', label: 'Communication', count: emailLogCount },
+    // The email log is only fetched once its tab is opened, so before that a
+    // count would always read 0 and look like "no messages" rather than
+    // "not loaded yet". Show it only when we actually know.
+    { id: 'communication', label: 'Communication', count: emailLog?.items.length },
   ];
 
   const unresolvedFlagCount = flags.filter((f) => !f.is_resolved).length;
@@ -181,7 +334,7 @@ export function VendorDetailPage() {
             <DropdownMenuItem
               icon={<Trash2 className="h-4 w-4" />}
               destructive
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={() => setConfirming({ kind: 'deleteVendor' })}
             >
               Delete
             </DropdownMenuItem>
@@ -197,7 +350,19 @@ export function VendorDetailPage() {
               <div>
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <Field label="Address" value={vendor.address} />
+                  <Field
+                    label="Address"
+                    value={
+                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                        {vendor.address}
+                        <AddressNotLocatableBadge
+                          address={vendor.address}
+                          latitude={vendor.latitude}
+                          entity="vendor"
+                        />
+                      </span>
+                    }
+                  />
                   <Field label="City" value={vendor.city} />
                   <Field label="State" value={vendor.state} />
                   <Field label="ZIP Code" value={vendor.zip_code} />
@@ -207,18 +372,20 @@ export function VendorDetailPage() {
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Insurance & Capacity</h3>
                 <dl className="divide-y divide-secondary-100">
                   <Field label="Insurance Expiration" value={vendor.insurance_expiration_date} />
+                  {/* Compare against null, not truthiness: a genuine 0 is a
+                      real value and must not render as "not set". */}
                   <Field
                     label="Insurance Coverage"
-                    value={vendor.insurance_coverage_amount ? `$${Number(vendor.insurance_coverage_amount).toLocaleString()}` : null}
+                    value={vendor.insurance_coverage_amount != null ? `$${Number(vendor.insurance_coverage_amount).toLocaleString()}` : null}
                   />
                   <Field
                     label="Bonding Capacity"
-                    value={vendor.bonding_capacity ? `$${Number(vendor.bonding_capacity).toLocaleString()}` : null}
+                    value={vendor.bonding_capacity != null ? `$${Number(vendor.bonding_capacity).toLocaleString()}` : null}
                   />
                   <Field
                     label="Active Jobs"
                     value={
-                      vendor.max_active_jobs
+                      vendor.max_active_jobs != null
                         ? `${vendor.current_active_jobs} / ${vendor.max_active_jobs}`
                         : `${vendor.current_active_jobs}`
                     }
@@ -261,15 +428,18 @@ export function VendorDetailPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            deleteContactMutation.mutate(
-                              { vendorId: id!, contactId: c.id },
-                              {
-                                onSuccess: () => toast({ variant: 'success', message: 'Contact deleted.' }),
-                                onError: () => toast({ variant: 'danger', message: 'Failed to delete contact.' }),
-                              },
-                            );
-                          }}
+                          // A vendor must keep at least one contact: the
+                          // invitation and milestone emails resolve their
+                          // recipient through it. The API enforces this with a
+                          // 409; disabling here avoids offering an action that
+                          // cannot succeed.
+                          disabled={isOnlyContact}
+                          title={
+                            isOnlyContact
+                              ? 'A vendor must have at least one contact. Add another before removing this one.'
+                              : undefined
+                          }
+                          onClick={() => setConfirming({ kind: 'deleteContact', contact: c })}
                         >
                           Delete
                         </Button>
@@ -290,7 +460,10 @@ export function VendorDetailPage() {
                     { vendorId: id!, ...data },
                     {
                       onSuccess: () => { setShowAddContact(false); toast({ variant: 'success', message: 'Contact added.' }); },
-                      onError: () => toast({ variant: 'danger', message: 'Failed to add contact.' }),
+                      onError: (err) => toast({
+                        variant: 'danger',
+                        message: errorMessage(err, 'Failed to add contact.'),
+                      }),
                     },
                   );
                 }}
@@ -309,7 +482,10 @@ export function VendorDetailPage() {
                       { vendorId: id!, contactId: editingContact.id, ...data },
                       {
                         onSuccess: () => { setEditingContact(null); toast({ variant: 'success', message: 'Contact updated.' }); },
-                        onError: () => toast({ variant: 'danger', message: 'Failed to update contact.' }),
+                        onError: (err) => toast({
+                          variant: 'danger',
+                          message: errorMessage(err, 'Failed to update contact.'),
+                        }),
                       },
                     );
                   }}
@@ -338,15 +514,14 @@ export function VendorDetailPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        removeTradesMutation.mutate(
-                          { vendorId: id!, tradeId: vt.trade_id },
-                          {
-                            onSuccess: () => toast({ variant: 'success', message: 'Trade removed.' }),
-                            onError: () => toast({ variant: 'danger', message: 'Failed to remove trade.' }),
-                          },
-                        );
-                      }}
+                      onClick={() =>
+                        setConfirming({
+                          kind: 'removeTrade',
+                          tradeId: vt.trade_id,
+                          label: vt.trades?.name ?? 'this trade',
+                        })
+                      }
+                      aria-label={`Remove ${vt.trades?.name ?? 'trade'}`}
                       className="text-secondary-400 hover:text-danger-600"
                     >
                       <X className="h-4 w-4" aria-hidden="true" />
@@ -370,8 +545,13 @@ export function VendorDetailPage() {
                 </>
               }
             >
+              {/* Trades the vendor already has are shown selected but locked,
+                  rather than silently discarding clicks on them. Removal
+                  happens from the Trades tab, where it is confirmed. */}
               <TradeMultiSelect
                 selectedTradeIds={[...existingTradeIds, ...newTradeIds]}
+                lockedTradeIds={existingTradeIds}
+                lockedHint="Already associated. Remove it from the Trades tab."
                 onChange={(ids) => setNewTradeIds(ids.filter((tid) => !existingTradeIds.includes(tid)))}
               />
             </Modal>
@@ -386,22 +566,13 @@ export function VendorDetailPage() {
             <DocumentList
               documents={documents}
               onDownload={(docId) => downloadDoc(id!, docId)}
-              onDelete={(docId) => {
-                setDeletingDocId(docId);
-                deleteDocMutation.mutate(
-                  { vendorId: id!, docId },
-                  {
-                    onSuccess: () => {
-                      setDeletingDocId(null);
-                      toast({ variant: 'success', message: 'Document deleted.' });
-                    },
-                    onError: () => {
-                      setDeletingDocId(null);
-                      toast({ variant: 'danger', message: 'Failed to delete document.' });
-                    },
-                  },
-                );
-              }}
+              onDelete={(docId) =>
+                setConfirming({
+                  kind: 'deleteDocument',
+                  docId,
+                  label: documents.find((d) => d.id === docId)?.file_name ?? 'this document',
+                })
+              }
               isDeleting={deletingDocId}
               isDownloading={downloadingId}
               emptyMessage="No documents uploaded yet. Upload W-9, Insurance Certificate, or Master Trade Agreement."
@@ -443,41 +614,45 @@ export function VendorDetailPage() {
         )}
       </Tabs>
 
-      {/* Edit Vendor Modal */}
-      <VendorForm
-        isOpen={showEditForm}
-        onClose={() => setShowEditForm(false)}
-        vendor={vendor}
-        isLoading={updateVendorMutation.isPending}
-        onSubmit={(formData) => {
-          updateVendorMutation.mutate(
-            { id: id!, ...formData } as Parameters<typeof updateVendorMutation.mutate>[0],
-            {
-              onSuccess: () => { setShowEditForm(false); toast({ variant: 'success', message: 'Vendor updated.' }); },
-              onError: () => toast({ variant: 'danger', message: 'Failed to update vendor.' }),
-            },
-          );
-        }}
-      />
+      {/* Edit Vendor Modal.
+          Mounted only while open: React Hook Form captures defaultValues at
+          mount, so a form left mounted keeps serving the values the vendor had
+          when the page first loaded, even after a save. */}
+      {showEditForm && (
+        <VendorForm
+          isOpen={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          vendor={vendor}
+          isLoading={updateVendorMutation.isPending}
+          onSubmit={(formData) => {
+            updateVendorMutation.mutate(
+              { id: id!, ...formData } as Parameters<typeof updateVendorMutation.mutate>[0],
+              {
+                onSuccess: (updated) => {
+                  setShowEditForm(false);
+                  toast({ variant: 'success', message: 'Vendor updated.' });
+                  notifyGeocodeWarning(toast, updated);
+                },
+                onError: (err) => toast({
+                  variant: 'danger',
+                  message: errorMessage(err, 'Failed to update vendor.'),
+                }),
+              },
+            );
+          }}
+        />
+      )}
 
-      {/* Delete Confirmation */}
-      <Modal
-        isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Vendor"
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button variant="danger" onClick={handleDelete} isLoading={deleteVendorMutation.isPending}>Delete Vendor</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete <strong>{vendor.company_name}</strong>?
-          This action will soft-delete the vendor and they will no longer appear in lists.
-        </p>
-      </Modal>
+      {/* One confirmation for every destructive action on this page. */}
+      <ConfirmDialog
+        isOpen={confirming !== null}
+        title={confirmCopy.title}
+        message={confirmCopy.message}
+        confirmText={confirmCopy.confirmText}
+        isLoading={confirmIsPending}
+        onConfirm={handleConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }

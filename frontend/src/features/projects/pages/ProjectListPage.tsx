@@ -1,5 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/constants/routes';
+import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
@@ -10,9 +12,12 @@ import { useToast } from '@/components/ui/Toast/useToast';
 import { useProjects } from '@/features/projects/hooks/useProjects';
 import { useCreateProject } from '@/features/projects/hooks/useCreateProject';
 import { ProjectForm } from '@/features/projects/components/ProjectForm';
+import { formatCurrency, formatDateOnly } from '@/lib/format';
+import { errorMessage } from '@/lib/api';
 import type { Project, ProjectListFilters } from '@/features/projects/api/project.queries';
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -21,16 +26,6 @@ const statusVariantMap: Record<string, StatusVariant> = {
   completed: 'neutral',
   cancelled: 'danger',
 };
-
-function formatCurrency(value: number | null): string {
-  if (value == null) return '\u2014';
-  return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '\u2014';
-  return new Date(value + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
 
 export function ProjectListPage() {
   const navigate = useNavigate();
@@ -74,7 +69,7 @@ export function ProjectListPage() {
     page_size: pageSize,
   }), [debouncedSearch, statusFilter, archivedView, sortBy, sortDir, page, pageSize]);
 
-  const { data, isLoading } = useProjects(filters);
+  const { data, isLoading, isError, error, refetch, isFetching } = useProjects(filters);
   const createProjectMutation = useCreateProject();
 
   const projects = data?.items ?? [];
@@ -131,7 +126,7 @@ export function ProjectListPage() {
     {
       id: 'start_date',
       header: 'Start Date',
-      accessor: (row: Project) => muted(formatDate(row.start_date)),
+      accessor: (row: Project) => muted(formatDateOnly(row.start_date)),
       sortable: true,
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,6 +174,27 @@ export function ProjectListPage() {
         />
       </div>
 
+      {/* Load failure. Without this a failed fetch falls through to an empty
+          list and reads as "no projects match your filters", which is a very
+          different thing from "we could not reach the server". */}
+      {isError && (
+        <Alert variant="danger" title="Could not load projects">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {errorMessage(error, 'Something went wrong. Please try again.')}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              isLoading={isFetching}
+            >
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       {/* Table */}
       <Table
         columns={columns}
@@ -198,34 +214,48 @@ export function ProjectListPage() {
           onPageSizeChange: (size) => { setPageSize(size); setPage(1); },
         }}
         emptyState={
-          <EmptyState
-            title="No projects found"
-            description={
-              debouncedSearch || statusFilter
-                ? 'Try adjusting your filters.'
-                : 'Get started by creating a new project.'
-            }
-          />
+          isError ? (
+            <EmptyState
+              title="Projects unavailable"
+              description="The list could not be loaded. Retry above to try again."
+            />
+          ) : (
+            <EmptyState
+              title="No projects found"
+              description={
+                debouncedSearch || statusFilter
+                  ? 'Try adjusting your filters.'
+                  : 'Get started by creating a new project.'
+              }
+            />
+          )
         }
       />
 
-      {/* Create Project Modal */}
-      <ProjectForm
-        isOpen={showCreateForm}
-        onClose={() => setShowCreateForm(false)}
-        isLoading={createProjectMutation.isPending}
-        onSubmit={(formData) => {
-          createProjectMutation.mutate(formData as unknown as Parameters<typeof createProjectMutation.mutate>[0], {
-            onSuccess: () => {
-              setShowCreateForm(false);
-              toast({ variant: 'success', message: 'Project created successfully.' });
-            },
-            onError: (error) => {
-              toast({ variant: 'danger', message: (error as { message?: string }).message || 'Failed to create project.' });
-            },
-          });
-        }}
-      />
+      {/* Create Project Modal.
+          Mounted only while open. Left permanently mounted, React Hook Form's
+          mount-time defaultValues survived a close, so a reopened form could
+          serve stale values. */}
+      {showCreateForm && (
+        <ProjectForm
+          isOpen={showCreateForm}
+          onClose={() => setShowCreateForm(false)}
+          isLoading={createProjectMutation.isPending}
+          onSubmit={(formData) => {
+            createProjectMutation.mutate(formData as unknown as Parameters<typeof createProjectMutation.mutate>[0], {
+              onSuccess: (created) => {
+                setShowCreateForm(false);
+                toast({ variant: 'success', message: 'Project created successfully.' });
+                notifyGeocodeWarning(toast, created);
+                if (created?.id) navigate(ROUTES.PROJECT_DETAIL.replace(':id', created.id));
+              },
+              onError: (err) => {
+                toast({ variant: 'danger', message: errorMessage(err, 'Failed to create project.') });
+              },
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

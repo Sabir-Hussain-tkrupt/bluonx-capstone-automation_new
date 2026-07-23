@@ -7,12 +7,13 @@ import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
+import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { MilestoneTimeline } from '@/features/milestones/components/MilestoneTimeline';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -28,7 +29,9 @@ import {
 import { ProjectForm } from '@/features/projects/components/ProjectForm';
 import { ProjectDocumentUpload } from '@/features/projects/components/ProjectDocumentUpload';
 import type { StatusVariant } from '@/components/ui/types';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, formatDateOnly } from '@/lib/format';
+import { errorMessage, type ApiError } from '@/lib/api';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -38,31 +41,37 @@ const statusVariantMap: Record<string, StatusVariant> = {
   cancelled: 'danger',
 };
 
-function formatDate(value: string | null): string {
-  if (!value) return '\u2014';
-  return new Date(value + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
+type PendingAction =
+  | { kind: 'deleteProject' }
+  | { kind: 'archiveProject' }
+  | { kind: 'deleteDocument'; docId: string; fileName: string }
+  | null;
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: project, isLoading, error } = useProject(id!);
+  const { data: project, isLoading, error, refetch, isFetching } = useProject(id!);
   const updateProjectMutation = useUpdateProject();
   const deleteProjectMutation = useDeleteProject();
   const archiveProjectMutation = useArchiveProject();
   const unarchiveProjectMutation = useUnarchiveProject();
-  const { data: projectDocuments = [] } = useProjectDocumentsList(id!);
+  const {
+    data: projectDocuments = [],
+    isError: docsError,
+    refetch: refetchDocs,
+  } = useProjectDocumentsList(id!);
   const deleteDocMutation = useDeleteProjectDocument();
   const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [showEditForm, setShowEditForm] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
-  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  // One dialog for all three destructive actions, so their confirmations
+  // cannot drift apart. Document delete used to fire with no confirmation.
+  const [pending, setPending] = useState<PendingAction>(null);
+  const closePending = () => setPending(null);
 
   if (isLoading) {
     return (
@@ -73,6 +82,22 @@ export function ProjectDetailPage() {
     );
   }
 
+  if (error) {
+    const status = (error as unknown as ApiError | undefined)?.status;
+    if (status !== 404) {
+      return (
+        <Alert variant="danger" title="Could not load project">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{errorMessage(error, 'Something went wrong. Please try again.')}</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()} isLoading={isFetching}>
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      );
+    }
+  }
+
   if (error || !project) {
     return (
       <Alert variant="danger" title="Project not found">
@@ -81,43 +106,99 @@ export function ProjectDetailPage() {
     );
   }
 
-  const handleDelete = () => {
-    deleteProjectMutation.mutate(id!, {
-      onSuccess: () => {
-        toast({ variant: 'success', message: 'Project deleted.' });
-        navigate('/projects');
-      },
-      onError: () => toast({ variant: 'danger', message: 'Failed to delete project.' }),
-    });
-  };
-
-  const handleArchive = () => {
-    archiveProjectMutation.mutate(id!, {
-      onSuccess: () => {
-        setShowArchiveConfirm(false);
-        toast({ variant: 'success', message: 'Project archived.' });
-        navigate('/projects');
-      },
-      onError: (error) => {
-        toast({
-          variant: 'danger',
-          message: (error as { message?: string }).message || 'Failed to archive project.',
-        });
-      },
-    });
-  };
-
   const handleUnarchive = () => {
     unarchiveProjectMutation.mutate(id!, {
       onSuccess: () => toast({ variant: 'success', message: 'Project unarchived.' }),
-      onError: (error) => {
-        toast({
-          variant: 'danger',
-          message: (error as { message?: string }).message || 'Failed to unarchive project.',
-        });
+      onError: (err) => {
+        toast({ variant: 'danger', message: errorMessage(err, 'Failed to unarchive project.') });
       },
     });
   };
+
+  const handleConfirm = () => {
+    if (!pending) return;
+    if (pending.kind === 'deleteProject') {
+      deleteProjectMutation.mutate(id!, {
+        onSuccess: () => {
+          closePending();
+          toast({ variant: 'success', message: 'Project deleted.' });
+          navigate('/projects');
+        },
+        onError: (err) => {
+          closePending();
+          toast({ variant: 'danger', message: errorMessage(err, 'Failed to delete project.') });
+        },
+      });
+    } else if (pending.kind === 'archiveProject') {
+      archiveProjectMutation.mutate(id!, {
+        onSuccess: () => {
+          closePending();
+          toast({ variant: 'success', message: 'Project archived.' });
+          navigate('/projects');
+        },
+        onError: (err) => {
+          closePending();
+          toast({ variant: 'danger', message: errorMessage(err, 'Failed to archive project.') });
+        },
+      });
+    } else if (pending.kind === 'deleteDocument') {
+      const { docId } = pending;
+      deleteDocMutation.mutate(
+        { projectId: id!, docId },
+        {
+          onSuccess: () => {
+            closePending();
+            toast({ variant: 'success', message: 'Document deleted.' });
+          },
+          onError: (err) => {
+            closePending();
+            toast({ variant: 'danger', message: errorMessage(err, 'Failed to delete document.') });
+          },
+        },
+      );
+    }
+  };
+
+  const confirmCopy = {
+    deleteProject: {
+      title: 'Delete Project',
+      message: (
+        <>
+          Are you sure you want to delete <strong>{project.name}</strong>? This will
+          soft-delete the project and it will no longer appear in lists.
+        </>
+      ),
+      confirmText: 'Delete Project',
+      confirmVariant: 'danger' as const,
+      isLoading: deleteProjectMutation.isPending,
+    },
+    archiveProject: {
+      title: 'Archive Project',
+      message: (
+        <>
+          Archive <strong>{project.name}</strong>? This hides the project from your default
+          view. You can find it later using the Archived filter. The project and all its data
+          are preserved.
+        </>
+      ),
+      confirmText: 'Archive Project',
+      confirmVariant: 'primary' as const,
+      isLoading: archiveProjectMutation.isPending,
+    },
+    deleteDocument: {
+      title: 'Delete Document',
+      message: (
+        <>
+          Delete <strong>{pending?.kind === 'deleteDocument' ? pending.fileName : ''}</strong>?
+          This permanently removes the file.
+        </>
+      ),
+      confirmText: 'Delete',
+      confirmVariant: 'danger' as const,
+      isLoading: deleteDocMutation.isPending,
+    },
+  };
+  const activeCopy = pending ? confirmCopy[pending.kind] : null;
 
   const isArchived = !!project.archived_at;
   const canArchive = project.status !== 'active';
@@ -168,7 +249,7 @@ export function ProjectDetailPage() {
                   variant="outline"
                   leftIcon={<Archive className="h-4 w-4" />}
                   disabled={!canArchive}
-                  onClick={() => setShowArchiveConfirm(true)}
+                  onClick={() => setPending({ kind: 'archiveProject' })}
                 >
                   Archive
                 </Button>
@@ -197,7 +278,7 @@ export function ProjectDetailPage() {
             <DropdownMenuItem
               icon={<Trash2 className="h-4 w-4" />}
               destructive
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={() => setPending({ kind: 'deleteProject' })}
             >
               Delete
             </DropdownMenuItem>
@@ -219,7 +300,19 @@ export function ProjectDetailPage() {
               <div>
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <Field label="Address" value={project.address} />
+                  <Field
+                    label="Address"
+                    value={
+                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                        {project.address}
+                        <AddressNotLocatableBadge
+                          address={project.address}
+                          latitude={project.latitude}
+                          entity="project"
+                        />
+                      </span>
+                    }
+                  />
                   <Field label="City" value={project.city} />
                   <Field label="State" value={project.state} />
                   <Field label="ZIP Code" value={project.zip_code} />
@@ -229,8 +322,8 @@ export function ProjectDetailPage() {
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Budget & Schedule</h3>
                 <dl className="divide-y divide-secondary-100">
                   <Field label="Budget" value={formatCurrency(project.budget)} />
-                  <Field label="Start Date" value={formatDate(project.start_date)} />
-                  <Field label="Est. End Date" value={formatDate(project.estimated_end_date)} />
+                  <Field label="Start Date" value={formatDateOnly(project.start_date)} />
+                  <Field label="Est. End Date" value={formatDateOnly(project.estimated_end_date)} />
                 </dl>
               </div>
               {project.description && (
@@ -256,26 +349,22 @@ export function ProjectDetailPage() {
                 <Button size="sm" onClick={() => setShowUploadDoc(true)}>+ Upload Document</Button>
               </div>
             )}
+            {docsError && (
+              <Alert variant="danger" title="Could not load documents">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span>The document list could not be loaded.</span>
+                  <Button variant="outline" size="sm" onClick={() => refetchDocs()}>Retry</Button>
+                </div>
+              </Alert>
+            )}
             <DocumentList
               documents={projectDocuments}
               onDownload={(docId) => downloadDoc(id!, docId)}
               onDelete={isArchived ? undefined : (docId) => {
-                setDeletingDocId(docId);
-                deleteDocMutation.mutate(
-                  { projectId: id!, docId },
-                  {
-                    onSuccess: () => {
-                      setDeletingDocId(null);
-                      toast({ variant: 'success', message: 'Document deleted.' });
-                    },
-                    onError: () => {
-                      setDeletingDocId(null);
-                      toast({ variant: 'danger', message: 'Failed to delete document.' });
-                    },
-                  },
-                );
+                const doc = projectDocuments.find((d) => d.id === docId);
+                setPending({ kind: 'deleteDocument', docId, fileName: doc?.file_name ?? 'this document' });
               }}
-              isDeleting={deletingDocId}
+              isDeleting={deleteDocMutation.isPending ? deleteDocMutation.variables?.docId ?? null : null}
               isDownloading={downloadingId}
               emptyMessage="No documents uploaded yet. Upload civil plans, drawings, specs, or site photos."
             />
@@ -288,67 +377,42 @@ export function ProjectDetailPage() {
         )}
       </Tabs>
 
-      {/* Edit Project Modal */}
-      <ProjectForm
-        isOpen={showEditForm}
-        onClose={() => setShowEditForm(false)}
-        project={project}
-        isLoading={updateProjectMutation.isPending}
-        onSubmit={(formData) => {
-          updateProjectMutation.mutate(
-            { id: id!, ...formData } as Parameters<typeof updateProjectMutation.mutate>[0],
-            {
-              onSuccess: () => { setShowEditForm(false); toast({ variant: 'success', message: 'Project updated.' }); },
-              onError: () => toast({ variant: 'danger', message: 'Failed to update project.' }),
-            },
-          );
-        }}
+      {/* Edit Project Modal.
+          Mounted only while open, so React Hook Form's mount-time defaultValues
+          cannot keep serving pre-edit values after a save. */}
+      {showEditForm && (
+        <ProjectForm
+          isOpen={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          project={project}
+          isLoading={updateProjectMutation.isPending}
+          onSubmit={(formData) => {
+            updateProjectMutation.mutate(
+              { id: id!, ...formData } as Parameters<typeof updateProjectMutation.mutate>[0],
+              {
+                onSuccess: (updated) => {
+                  setShowEditForm(false);
+                  toast({ variant: 'success', message: 'Project updated.' });
+                  notifyGeocodeWarning(toast, updated);
+                },
+                onError: (err) => toast({ variant: 'danger', message: errorMessage(err, 'Failed to update project.') }),
+              },
+            );
+          }}
+        />
+      )}
+
+      {/* One dialog for delete project, archive project, and delete document. */}
+      <ConfirmDialog
+        isOpen={pending !== null}
+        title={activeCopy?.title ?? ''}
+        message={activeCopy?.message ?? ''}
+        confirmText={activeCopy?.confirmText}
+        confirmVariant={activeCopy?.confirmVariant}
+        isLoading={activeCopy?.isLoading ?? false}
+        onConfirm={handleConfirm}
+        onCancel={closePending}
       />
-
-      {/* Delete Confirmation */}
-      <Modal
-        isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Project"
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button variant="danger" onClick={handleDelete} isLoading={deleteProjectMutation.isPending}>Delete Project</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete <strong>{project.name}</strong>?
-          This action will soft-delete the project and it will no longer appear in lists.
-        </p>
-      </Modal>
-
-      {/* Archive Confirmation */}
-      <Modal
-        isOpen={showArchiveConfirm}
-        onClose={() => setShowArchiveConfirm(false)}
-        title="Archive Project"
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowArchiveConfirm(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={handleArchive}
-              isLoading={archiveProjectMutation.isPending}
-            >
-              Archive Project
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          Archive <strong>{project.name}</strong>? This will hide the project from your
-          default view. You can find it later using the Archived filter. The project
-          and all its data will be preserved.
-        </p>
-      </Modal>
     </div>
   );
 }

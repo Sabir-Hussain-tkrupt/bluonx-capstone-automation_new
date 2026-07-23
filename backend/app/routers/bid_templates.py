@@ -8,6 +8,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.auth import get_current_active_user
+from app.core.query_filters import escape_like_pattern
 from app.core.supabase_client import get_supabase
 from app.models.bid_templates import (
     BidTemplateCreate,
@@ -30,41 +31,56 @@ router = APIRouter()
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
+#: Returned instead of the driver's text whenever Postgres rejects a write.
+#: The raw exc.message leaks schema/constraint internals to the client; the
+#: full exception still goes to the log.
+_DB_REJECTED_DETAIL = (
+    "The submitted data was rejected. Please review the values and try again."
+)
+
+
 def _parse_uuid(value: str, field_name: str = "id") -> UUID:
-    """Parse a string as UUID, raise 400 if invalid."""
+    """Parse a string as UUID, raise 422 if invalid.
+
+    422 (not 400) so a malformed UUID in a query param matches what FastAPI
+    already returns for a malformed UUID in the path — one class of error,
+    one status code.
+    """
     try:
         return UUID(value)
     except (ValueError, AttributeError):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid {field_name}: '{value}' is not a valid UUID",
         )
 
 
 def _get_template_or_404(db: Client, template_id: UUID) -> dict:
-    """Fetch a bid template by ID, raise 404 if not found."""
+    """Fetch a bid template by ID, raise 404 if not found.
+
+    Uses maybe_single(), not single(): PostgREST's single() raises an
+    APIError (PGRST116) on zero rows, so "not found" had to be recovered by
+    string-matching the driver's error text — which silently turns into a 502
+    the moment that text changes. With maybe_single() a missing row returns
+    data=None (and the response object itself may be None), which we translate
+    into a clean 404. Matches _get_vendor_or_404 in routers/vendors.py.
+    """
     try:
         response = (
             db.table("bid_templates")
             .select("*")
             .eq("id", str(template_id))
-            .single()
+            .maybe_single()
             .execute()
         )
     except APIError as exc:
-        # .single() throws when 0 rows found
-        if "PGRST116" in str(getattr(exc, "code", "")) or "0 rows" in str(getattr(exc, "message", "")):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Bid template not found",
-            ) from exc
         logger.error("Supabase query failed for bid_templates: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to fetch bid template from database",
         ) from exc
 
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Bid template not found",
@@ -72,41 +88,88 @@ def _get_template_or_404(db: Client, template_id: UUID) -> dict:
     return response.data
 
 
-def _build_template_response(db: Client, template: dict) -> dict:
-    """Enrich a template dict with trade_name, item_count, is_in_use."""
-    trade_name = None
-    if template.get("trade_id"):
-        try:
-            trade_resp = (
-                db.table("trades")
-                .select("name")
-                .eq("id", template["trade_id"])
-                .single()
-                .execute()
-            )
-            if trade_resp.data:
-                trade_name = trade_resp.data["name"]
-        except APIError as exc:
-            logger.warning("Failed to fetch trade name for %s: %s", template["trade_id"], exc)
+def _enrich_templates_batched(db: Client, templates: list[dict]) -> list[dict]:
+    """Attach trade_name, item_count and is_in_use to a page of templates.
 
+    The per-row path (_build_template_response) fires three queries each —
+    trade, item count, and referencing packages — so a default page of 25 cost
+    ~75 sequential round trips. This does the same work in three queries total,
+    regardless of page size, and returns the identical shape.
+    """
+    if not templates:
+        return []
+
+    template_ids = [t["id"] for t in templates]
+    trade_ids = list({t["trade_id"] for t in templates if t.get("trade_id")})
+
+    # 1. Trade names
+    trade_names: dict[str, str] = {}
+    if trade_ids:
+        try:
+            resp = db.table("trades").select("id, name").in_("id", trade_ids).execute()
+            for row in (resp.data or []):
+                trade_names[str(row["id"])] = row["name"]
+        except APIError as exc:
+            logger.warning("Failed to batch-fetch trade names: %s", exc)
+
+    # 2. Item counts
+    item_counts: dict[str, int] = {}
     try:
-        items_resp = (
+        resp = (
             db.table("bid_template_items")
-            .select("id", count="exact")
-            .eq("bid_template_id", template["id"])
+            .select("bid_template_id")
+            .in_("bid_template_id", template_ids)
             .execute()
         )
-        item_count = items_resp.count or 0
+        for row in (resp.data or []):
+            key = str(row["bid_template_id"])
+            item_counts[key] = item_counts.get(key, 0) + 1
     except APIError as exc:
-        logger.warning("Failed to count items for template %s: %s", template["id"], exc)
-        item_count = 0
+        logger.warning("Failed to batch-count template items: %s", exc)
 
-    return {
-        **template,
-        "trade_name": trade_name,
-        "item_count": item_count,
-        "is_in_use": _is_template_in_use(db, template["id"]),
-    }
+    # 3. Usage flags. One unfiltered query answers both questions, because
+    #    they are asked of different subsets of the same rows:
+    #      is_in_use    — any NON-CANCELLED reference (edit freeze; lifts when
+    #                     the round ends)
+    #      is_deletable — NO reference at all, cancelled included. The FK is
+    #                     ON DELETE RESTRICT and packages are never hard
+    #                     deleted, so this never becomes true again once a
+    #                     template has been used.
+    #    Filtering server-side would answer only the first.
+    in_use: set[str] = set()
+    referenced: set[str] = set()
+    try:
+        resp = (
+            db.table("bid_packages")
+            .select("bid_template_id, status")
+            .in_("bid_template_id", template_ids)
+            .execute()
+        )
+        for row in (resp.data or []):
+            tid = row.get("bid_template_id")
+            if not tid:
+                continue
+            referenced.add(str(tid))
+            if row.get("status") != "cancelled":
+                in_use.add(str(tid))
+    except APIError as exc:
+        logger.error("Failed to batch-check template usage: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to check template usage",
+        ) from exc
+
+    enriched = []
+    for t in templates:
+        tid = str(t["id"])
+        enriched.append({
+            **t,
+            "trade_name": trade_names.get(str(t["trade_id"])) if t.get("trade_id") else None,
+            "item_count": item_counts.get(tid, 0),
+            "is_in_use": tid in in_use,
+            "is_deletable": tid not in referenced,
+        })
+    return enriched
 
 
 def _build_detail_response(db: Client, template: dict) -> dict:
@@ -118,10 +181,10 @@ def _build_detail_response(db: Client, template: dict) -> dict:
                 db.table("trades")
                 .select("name")
                 .eq("id", template["trade_id"])
-                .single()
+                .maybe_single()
                 .execute()
             )
-            if trade_resp.data:
+            if trade_resp and trade_resp.data:
                 trade_name = trade_resp.data["name"]
         except APIError as exc:
             logger.warning("Failed to fetch trade name for %s: %s", template["trade_id"], exc)
@@ -139,7 +202,12 @@ def _build_detail_response(db: Client, template: dict) -> dict:
         logger.warning("Failed to fetch items for template %s: %s", template["id"], exc)
         items = []
 
-    live_pkgs = _referencing_live_packages(db, template["id"])
+    # One fetch of every reference answers both flags, so this stays a single
+    # query. is_in_use is the edit freeze (live refs only, lifts when the round
+    # ends); is_deletable is the FK reality (any ref at all, cancelled included,
+    # and permanent once set because packages are never hard deleted).
+    all_pkgs = _all_referencing_packages(db, template["id"])
+    live_pkgs = [p for p in all_pkgs if p["status"] != "cancelled"]
 
     return {
         **template,
@@ -147,6 +215,7 @@ def _build_detail_response(db: Client, template: dict) -> dict:
         "item_count": len(items),
         "items": items,
         "is_in_use": len(live_pkgs) > 0,
+        "is_deletable": len(all_pkgs) == 0,
         # Cap the array; expose true total separately so the UI can render
         # "+N more" without us shipping potentially thousands of rows.
         "referencing_packages": live_pkgs[:_MAX_REFERENCING_PACKAGES],
@@ -155,13 +224,25 @@ def _build_detail_response(db: Client, template: dict) -> dict:
 
 
 def _validate_trade_id(db: Client, trade_id: UUID) -> None:
-    """Verify trade_id references an existing trade."""
+    """Verify trade_id references an existing, active trade.
+
+    maybe_single() for the same reason as _get_template_or_404: with single(),
+    a nonexistent trade raised APIError and was caught below as a 502, making
+    the 422 beneath it unreachable — a PM picking a stale trade got a gateway
+    error instead of a validation message.
+
+    is_active is part of the check because trades are retired by flag, never
+    deleted (schema: trades.is_active). Retired trades must not be selectable
+    on new writes. This is a write-time gate only: templates already pointing
+    at a since-retired trade keep working and still resolve their trade_name.
+    """
     try:
         resp = (
             db.table("trades")
             .select("id")
             .eq("id", str(trade_id))
-            .single()
+            .eq("is_active", True)
+            .maybe_single()
             .execute()
         )
     except APIError as exc:
@@ -171,11 +252,95 @@ def _validate_trade_id(db: Client, trade_id: UUID) -> None:
             detail="Failed to validate trade",
         ) from exc
 
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Trade not found",
+            detail="Trade not found or inactive",
         )
+
+
+def _find_name_conflict(
+    db: Client, name: str, *, exclude_id: UUID | str | None = None
+) -> bool:
+    """True if another template already uses this name.
+
+    Case-insensitive and whitespace-insensitive, app-layer only (no DB unique
+    constraint, by decision). Mirrors _company_name_exists in routers/vendors.py:
+    narrow the fetch with ilike, then re-compare each candidate in Python, since
+    a literal % or _ in the name would otherwise be read as an ilike wildcard.
+
+    Scope is global rather than per-trade: the bid package wizard lists every
+    template in one picker, which is exactly where two identical names hurt.
+
+    exclude_id skips the row being updated, so re-saving a template without
+    renaming it is not a conflict with itself.
+    """
+    target = name.strip().casefold()
+    if not target:
+        return False
+
+    try:
+        resp = (
+            db.table("bid_templates")
+            .select("id, name")
+            .ilike("name", escape_like_pattern(name.strip()))
+            .execute()
+        )
+    except APIError as exc:
+        # Fail closed rather than silently allowing a duplicate through.
+        logger.error("Failed to check bid template name uniqueness: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to verify template name availability",
+        ) from exc
+
+    exclude = str(exclude_id) if exclude_id is not None else None
+    for row in (resp.data or []):
+        if exclude is not None and str(row.get("id")) == exclude:
+            continue
+        if (row.get("name") or "").strip().casefold() == target:
+            return True
+    return False
+
+
+def _reject_duplicate_name(
+    db: Client, name: str, *, exclude_id: UUID | str | None = None
+) -> None:
+    if _find_name_conflict(db, name, exclude_id=exclude_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A bid template named '{name.strip()}' already exists.",
+        )
+
+
+#: Upper bound on the "Copy of X (n)" probe in the duplicate endpoint, so a
+#: pathological name collision can't spin unbounded queries.
+_MAX_COPY_NAME_ATTEMPTS = 50
+
+
+def _available_copy_name(db: Client, source_name: str) -> str:
+    """Pick a free name for a duplicate: 'Copy of X', then 'Copy of X (2)'...
+
+    Duplicating twice collides by construction, and duplicate is the documented
+    escape hatch for the freeze guard — it must not start returning 409s just
+    because we added a name policy.
+    """
+    base = f"Copy of {source_name.strip()}"
+    if not _find_name_conflict(db, base):
+        return base
+
+    for suffix in range(2, _MAX_COPY_NAME_ATTEMPTS + 1):
+        candidate = f"{base} ({suffix})"
+        if not _find_name_conflict(db, candidate):
+            return candidate
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"Could not find an available name for a copy of '{source_name}'. "
+            "Rename some existing copies and try again."
+        ),
+    )
 
 
 def _insert_items(db: Client, template_id: str, items: list) -> None:
@@ -194,7 +359,7 @@ def _insert_items(db: Client, template_id: str, items: list) -> None:
         logger.error("Failed to insert bid_template_items: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to create template items: {exc.message}",
+            detail=_DB_REJECTED_DETAIL,
         ) from exc
 
 
@@ -307,7 +472,7 @@ async def list_bid_templates(
     query = db.table("bid_templates").select("*", count="exact")
 
     if search:
-        query = query.ilike("name", f"%{search}%")
+        query = query.ilike("name", f"%{escape_like_pattern(search)}%")
 
     if trade_id == "null":
         query = query.is_("trade_id", "null")
@@ -336,10 +501,8 @@ async def list_bid_templates(
 
     templates = response.data or []
 
-    # Enrich each template with trade_name and item_count
-    enriched = []
-    for t in templates:
-        enriched.append(_build_template_response(db, t))
+    # Enrich the whole page in three queries rather than three per row.
+    enriched = _enrich_templates_batched(db, templates)
 
     return BidTemplateListResponse(
         items=enriched,
@@ -372,6 +535,8 @@ async def create_bid_template(
 ):
     """Create a new bid template with inline items."""
 
+    _reject_duplicate_name(db, body.name)
+
     # Validate trade_id if provided
     if body.trade_id:
         _validate_trade_id(db, body.trade_id)
@@ -388,7 +553,7 @@ async def create_bid_template(
         logger.error("Supabase insert failed for bid_templates: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail=_DB_REJECTED_DETAIL,
         ) from exc
 
     if not resp.data:
@@ -434,6 +599,10 @@ async def update_bid_template(
             ),
         )
 
+    # Exclude self: re-saving a template without renaming it is not a
+    # conflict with its own row.
+    _reject_duplicate_name(db, body.name, exclude_id=template_id)
+
     # Validate trade_id if provided
     if body.trade_id:
         _validate_trade_id(db, body.trade_id)
@@ -449,7 +618,7 @@ async def update_bid_template(
         logger.error("Supabase update failed for bid_templates: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the data: {exc.message}",
+            detail=_DB_REJECTED_DETAIL,
         ) from exc
 
     # Replace items: delete all existing, insert new
@@ -514,7 +683,7 @@ async def delete_bid_template(
         logger.error("Supabase delete failed for bid_templates: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to delete template: {exc.message}",
+            detail=_DB_REJECTED_DETAIL,
         ) from exc
 
 
@@ -539,7 +708,7 @@ async def duplicate_bid_template(
     source = _get_template_or_404(db, template_id)
 
     new_template_data = {
-        "name": f"Copy of {source['name']}",
+        "name": _available_copy_name(db, source["name"]),
         "trade_id": source.get("trade_id"),
         "is_lump_sum": source.get("is_lump_sum", True),
         "created_by": user["user_id"],
@@ -551,7 +720,7 @@ async def duplicate_bid_template(
         logger.error("Supabase insert failed duplicating bid_template: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Database rejected the duplicate: {exc.message}",
+            detail=_DB_REJECTED_DETAIL,
         ) from exc
 
     if not resp.data:
@@ -599,7 +768,7 @@ async def duplicate_bid_template(
             logger.error("Failed to insert duplicated items: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Failed to copy template items: {exc.message}",
+                detail=_DB_REJECTED_DETAIL,
             ) from exc
 
     return _build_detail_response(db, new_template)

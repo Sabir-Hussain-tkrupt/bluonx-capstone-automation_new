@@ -25,6 +25,12 @@ export interface Vendor {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /**
+   * Present only on a create/update response when geocoding could not refresh
+   * this record's coordinates. Non-fatal: the write succeeded. Surfaced as a
+   * warning toast so the user learns at save time rather than never.
+   */
+  geocode_warning?: string | null;
 }
 
 export interface VendorContact {
@@ -112,74 +118,27 @@ export interface PaginatedVendors {
 
 /**
  * Fetch vendors with filtering, sorting, and pagination.
+ *
+ * Goes through FastAPI rather than Supabase directly. GET /vendors already
+ * enforces a sort-column allow-list, a page-size ceiling, and a count-first
+ * fetch so a page past the last row returns an empty page instead of a 416.
+ * Reading Supabase directly here meant re-implementing all of that, badly, in
+ * a second place. Detail reads still go direct (see fetchVendorById).
  */
 export async function fetchVendors(filters?: VendorListFilters): Promise<PaginatedVendors> {
-  const page = filters?.page ?? 1;
-  const pageSize = filters?.page_size ?? 25;
-  const sortBy = filters?.sort_by ?? 'company_name';
-  const sortDir = filters?.sort_dir ?? 'asc';
-
-  // If filtering by trade, first get vendor IDs with that trade
-  let vendorIdsForTrade: string[] | null = null;
-  if (filters?.trade_id) {
-    const { data: tradeData } = await supabase
-      .from('vendor_trades')
-      .select('vendor_id')
-      .eq('trade_id', filters.trade_id);
-
-    vendorIdsForTrade = (tradeData ?? []).map((r: unknown) => (r as { vendor_id: string }).vendor_id);
-    if (vendorIdsForTrade.length === 0) {
-      return { items: [], total: 0, page, page_size: pageSize };
-    }
-  }
-
-  let query = supabase
-    .from('vendors')
-    .select('*', { count: 'exact' })
-    .is('deleted_at', null);
-
-  if (filters?.search) {
-    query = query.ilike('company_name', `%${filters.search}%`);
-  }
-
-  if (filters?.status) {
-    query = query.eq('status', filters.status);
-  }
-
-  if (filters?.onboarding_status) {
-    query = query.eq('onboarding_status', filters.onboarding_status);
-  }
-
-  if (vendorIdsForTrade) {
-    query = query.in('id', vendorIdsForTrade);
-  }
-
-  // Sorting
-  const ascending = sortDir !== 'desc';
-  query = query.order(sortBy, { ascending });
-
-  // Pagination
-  const offset = (page - 1) * pageSize;
-  query = query.range(offset, offset + pageSize - 1);
-
-  const { data, error, count } = await query;
-
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
-
-  return {
-    items: (data ?? []) as unknown as Vendor[],
-    total: count ?? 0,
-    page,
-    page_size: pageSize,
-  };
+  const { data } = await api.get<PaginatedVendors>(API_ENDPOINTS.VENDORS, {
+    params: {
+      search: filters?.search || undefined,
+      status: filters?.status || undefined,
+      onboarding_status: filters?.onboarding_status || undefined,
+      trade_id: filters?.trade_id || undefined,
+      sort_by: filters?.sort_by,
+      sort_dir: filters?.sort_dir,
+      page: filters?.page,
+      page_size: filters?.page_size,
+    },
+  });
+  return data;
 }
 
 /**

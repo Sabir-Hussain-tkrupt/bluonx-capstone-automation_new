@@ -13,10 +13,18 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user, require_admin
-from app.services.geocoding import geocode_address
-from app.services.vendor_service import recompute_vendor_insurance_expiration
+from app.services.geocoding import (
+    ADDRESS_FIELDS,
+    address_fields_changed,
+    resolve_coordinates,
+)
+from app.services.vendor_service import (
+    missing_requirements_for_complete,
+    recompute_vendor_insurance_expiration,
+)
 from app.core.file_validation import sanitize_filename, validate_upload
-from app.core.storage import delete_file, get_signed_url, upload_file
+from app.core.query_filters import escape_like_pattern
+from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import EmailLogResponse
 from app.models.common import SignedUrlResponse
@@ -146,30 +154,24 @@ async def list_vendors(
 ):
     """List all active vendors with search, filter, sort, and pagination."""
 
-    # If filtering by trade, first get the vendor IDs that have that trade
-    vendor_ids_for_trade: list[str] | None = None
-    if trade_id:
-        trade_resp = (
-            db.table("vendor_trades")
-            .select("vendor_id")
-            .eq("trade_id", str(trade_id))
-            .execute()
-        )
-        vendor_ids_for_trade = [r["vendor_id"] for r in (trade_resp.data or [])]
-        if not vendor_ids_for_trade:
-            return VendorListResponse(items=[], total=0, page=page, page_size=page_size)
-
-    # Build the (filtered) query — reused for the count and the page fetch
+    # Build the (filtered) query — reused for the count and the page fetch.
+    #
+    # The trade filter is an embedded inner join rather than a two-step "fetch
+    # matching vendor ids, then .in_(...)" lookup. That older shape silently
+    # truncated at PostgREST's default 1000-row ceiling once a trade had enough
+    # vendors, and pushed every id into the query string.
     def _filtered(select_expr: str):
+        if trade_id:
+            select_expr = f"{select_expr}, vendor_trades!inner(trade_id)"
         q = db.table("vendors").select(select_expr, count="exact").is_("deleted_at", "null")
         if search:
-            q = q.ilike("company_name", f"%{search}%")
+            q = q.ilike("company_name", f"%{escape_like_pattern(search)}%")
         if vendor_status:
             q = q.eq("status", vendor_status)
         if onboarding_status:
             q = q.eq("onboarding_status", onboarding_status)
-        if vendor_ids_for_trade is not None:
-            q = q.in_("id", vendor_ids_for_trade)
+        if trade_id:
+            q = q.eq("vendor_trades.trade_id", str(trade_id))
         return q
 
     # Sorting
@@ -374,23 +376,16 @@ async def _create_vendor_with_contacts(
         if vendor_data.get(key) is not None:
             vendor_data[key] = str(vendor_data[key])
 
-    # Convert date fields to string
-    if vendor_data.get("insurance_expiration_date") is not None:
-        vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
-
-    # Auto-geocode if address fields are provided
-    if geocode:
-        address_fields = (vendor.address, vendor.city, vendor.state, vendor.zip_code)
-        if any(f for f in address_fields):
-            try:
-                lat, lng = await geocode_address(
-                    vendor.address, vendor.city, vendor.state, vendor.zip_code,
-                )
-                if lat is not None and lng is not None:
-                    vendor_data["latitude"] = str(lat)
-                    vendor_data["longitude"] = str(lng)
-            except Exception as exc:
-                logger.warning("Geocoding failed for vendor %s: %s", vendor.company_name, exc)
+    # Auto-geocode if address fields are provided. Never fatal: a vendor with
+    # an address we cannot locate is still a vendor, it just sits out distance
+    # filtering until the address is corrected.
+    geocode_warning: str | None = None
+    if geocode and any((vendor.address, vendor.city, vendor.state, vendor.zip_code)):
+        coord_updates, geocode_warning = await resolve_coordinates(
+            vendor.address, vendor.city, vendor.state, vendor.zip_code,
+        )
+        for key, value in coord_updates.items():
+            vendor_data[key] = str(value) if value is not None else None
 
     try:
         response = db.table("vendors").insert(vendor_data).execute()
@@ -446,6 +441,7 @@ async def _create_vendor_with_contacts(
 
     return {
         **new_vendor,
+        "geocode_warning": geocode_warning,
         "contacts": created_contacts,
         "trades": trades_with_names,
         "documents": [],
@@ -473,7 +469,11 @@ async def update_vendor(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Update a vendor."""
+    """Update a vendor.
+
+    Marking a vendor onboarding_status='complete' is guarded: see
+    missing_requirements_for_complete. POST cannot set it at all.
+    """
     existing = _get_vendor_or_404(db, vendor_id)
 
     update_data = vendor.model_dump(exclude_unset=True)
@@ -483,32 +483,44 @@ async def update_vendor(
             detail="No fields to update",
         )
 
-    # Re-geocode if any address field changed
-    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
-    if _ADDRESS_FIELDS & set(update_data.keys()):
-        try:
-            merged_address = update_data.get("address", existing.get("address"))
-            merged_city = update_data.get("city", existing.get("city"))
-            merged_state = update_data.get("state", existing.get("state"))
-            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
-            logger.info("Re-geocoding vendor %s: address=%s, city=%s, state=%s, zip=%s",
-                        vendor_id, merged_address, merged_city, merged_state, merged_zip)
-            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
-            logger.info("Geocode result for vendor %s: lat=%s, lng=%s", vendor_id, lat, lng)
-            if lat is not None and lng is not None:
-                update_data["latitude"] = lat
-                update_data["longitude"] = lng
-        except Exception as exc:
-            logger.warning("Geocoding failed for vendor %s: %s", vendor_id, exc)
+    # Guard the promotion to 'complete'. Checked against the row as it will be
+    # AFTER this update, so a PATCH that supplies the missing address and marks
+    # the vendor complete in one call succeeds. 409 rather than 422: the payload
+    # is well formed, it is the vendor's state that blocks the transition.
+    if update_data.get("onboarding_status") == "complete":
+        merged_vendor = {**existing, **update_data}
+        missing = missing_requirements_for_complete(merged_vendor)
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot mark this vendor as complete without "
+                    + ", ".join(missing)
+                    + ". Upload the missing items first, or set the status to "
+                    "'partial' in the meantime."
+                ),
+            )
+
+    # Re-geocode if any address field changed. Coordinates are derived data:
+    # the client cannot send them (they are not on VendorUpdate), so this is
+    # the only writer.
+    geocode_warning: str | None = None
+    if address_fields_changed(update_data):
+        merged = {
+            field: update_data.get(field, existing.get(field))
+            for field in ADDRESS_FIELDS
+        }
+        coord_updates, geocode_warning = await resolve_coordinates(**merged)
+        # An empty patch means the lookup failed and the stored coordinates
+        # stand. A patch of Nones means the address is not locatable and the
+        # old coordinates must go, or the vendor keeps matching projects near
+        # wherever it used to be.
+        update_data.update(coord_updates)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("insurance_coverage_amount", "bonding_capacity", "latitude", "longitude"):
         if key in update_data and update_data[key] is not None:
             update_data[key] = str(update_data[key])
-
-    # Convert date fields to string
-    if "insurance_expiration_date" in update_data and update_data["insurance_expiration_date"] is not None:
-        update_data["insurance_expiration_date"] = update_data["insurance_expiration_date"].isoformat()
 
     try:
         response = (
@@ -530,7 +542,7 @@ async def update_vendor(
             detail="Vendor not found",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.delete("/vendors/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -651,6 +663,12 @@ async def update_vendor_contact(
 
     If is_primary is set to True, all other contacts for this vendor are
     automatically demoted to non-primary.
+
+    Clearing is_primary on the vendor's only primary is rejected with 409: the
+    invitation and milestone email paths look the recipient up by is_primary,
+    so a vendor with no primary silently stops being reachable. Promoting a
+    different contact is the supported way to move the flag, since that demotes
+    this one as a side effect.
     """
     _get_vendor_or_404(db, vendor_id)
 
@@ -660,6 +678,38 @@ async def update_vendor_contact(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    if update_data.get("is_primary") is False:
+        target = (
+            db.table("vendor_contacts")
+            .select("is_primary")
+            .eq("id", str(contact_id))
+            .eq("vendor_id", str(vendor_id))
+            .maybe_single()
+            .execute()
+        )
+        # Only a contact that is currently primary can leave the vendor without
+        # one; clearing the flag on any other contact is a no-op.
+        if target and target.data and target.data.get("is_primary"):
+            other_primaries = (
+                db.table("vendor_contacts")
+                .select("id", count="exact")
+                .eq("vendor_id", str(vendor_id))
+                .eq("is_primary", True)
+                .neq("id", str(contact_id))
+                .limit(1)
+                .execute()
+                .count
+            ) or 0
+            if other_primaries == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "A vendor must have a primary contact. Mark another "
+                        "contact as primary instead — that will clear this one "
+                        "automatically."
+                    ),
+                )
 
     # If promoting to primary, demote all other primaries first
     if update_data.get("is_primary") is True:
@@ -700,6 +750,10 @@ async def delete_vendor_contact(
 ):
     """Delete a vendor contact.
 
+    A vendor must keep at least one contact: creation requires one, and the
+    invitation and milestone email paths resolve a recipient through the
+    vendor's primary contact. Removing the last one is rejected with 409.
+
     If the deleted contact was primary, the first remaining contact is
     automatically promoted to primary.
     """
@@ -718,6 +772,24 @@ async def delete_vendor_contact(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contact not found",
+        )
+
+    # Refuse to leave the vendor with no contacts at all.
+    contact_count = (
+        db.table("vendor_contacts")
+        .select("id", count="exact")
+        .eq("vendor_id", str(vendor_id))
+        .limit(1)
+        .execute()
+        .count
+    ) or 0
+    if contact_count <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is the vendor's only contact. Add another contact before "
+                "removing this one."
+            ),
         )
 
     was_primary = target.data.get("is_primary", False)
@@ -860,6 +932,16 @@ async def list_vendor_documents(
 VENDOR_DOC_TYPES = {"w9", "insurance_certificate", "master_trade_agreement"}
 VENDOR_BUCKET = "vendor-documents"
 
+# One current document per vendor for these types; a re-upload replaces the
+# prior one, but only after the caller confirms with replace=true. Insurance
+# certificates are intentionally NOT single-instance (renewals are history).
+_SINGLE_INSTANCE_DOC_TYPES = {"w9", "master_trade_agreement"}
+_VENDOR_DOC_LABELS = {
+    "w9": "W-9",
+    "insurance_certificate": "Insurance Certificate",
+    "master_trade_agreement": "Master Trade Agreement",
+}
+
 
 @router.post(
     "/vendors/{vendor_id}/documents",
@@ -871,6 +953,7 @@ async def upload_vendor_document(
     file: UploadFile = File(...),
     document_type: str = Form(...),
     expiration_date: str | None = Form(default=None),
+    replace: bool = Form(default=False),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
@@ -880,6 +963,7 @@ async def upload_vendor_document(
     - file: the document file (PDF, JPEG, PNG; max 50MB)
     - document_type: w9 | insurance_certificate | master_trade_agreement
     - expiration_date: YYYY-MM-DD (required for insurance_certificate)
+    - replace: for w9/master_trade_agreement, confirm replacing the existing one
     """
     _get_vendor_or_404(db, vendor_id)
 
@@ -889,6 +973,25 @@ async def upload_vendor_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid document_type. Must be one of: {', '.join(sorted(VENDOR_DOC_TYPES))}",
         )
+
+    # Single-instance types: block a second upload unless the caller confirms a
+    # replacement. The existing rows (captured here) are removed after the new
+    # one is safely stored.
+    existing_single: list[dict] = []
+    if document_type in _SINGLE_INSTANCE_DOC_TYPES:
+        existing_single = (
+            db.table("vendor_documents")
+            .select("id, file_path")
+            .eq("vendor_id", str(vendor_id))
+            .eq("document_type", document_type)
+            .execute()
+        ).data or []
+        if existing_single and not replace:
+            label = _VENDOR_DOC_LABELS.get(document_type, document_type)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A {label} already exists for this vendor.",
+            )
 
     # Require expiration_date for insurance_certificate
     parsed_expiration: date | None = None
@@ -927,8 +1030,9 @@ async def upload_vendor_document(
     filename = sanitize_filename(file.filename or "document")
     validate_upload(file_bytes, filename, content_type, VENDOR_BUCKET)
 
-    # Upload to storage: {vendor_id}/{document_type}/{filename}
-    storage_path = f"{vendor_id}/{document_type}/{filename}"
+    # Upload under a per-upload uuid segment so a same-named re-upload can't
+    # collide (which used to surface as an opaque 500).
+    storage_path = unique_object_path(f"{vendor_id}/{document_type}", filename)
     upload_file(db, VENDOR_BUCKET, storage_path, file_bytes, content_type)
 
     # Insert vendor_documents row
@@ -954,6 +1058,16 @@ async def upload_vendor_document(
             detail="Failed to save document record.",
         )
 
+    new_doc = response.data[0]
+
+    # Replacement confirmed: the new single-instance doc is stored, so remove the
+    # prior row(s) and their objects. Insert-then-delete means the vendor is never
+    # momentarily left with none, and it self-heals any pre-existing duplicates.
+    if document_type in _SINGLE_INSTANCE_DOC_TYPES and existing_single:
+        for old in existing_single:
+            delete_file(db, VENDOR_BUCKET, old["file_path"])
+            db.table("vendor_documents").delete().eq("id", old["id"]).execute()
+
     # Recompute vendors.insurance_expiration_date from the full set of valid
     # insurance certs. PostgREST has no multi-statement transaction, so the
     # vendor_documents row above is already committed when this runs — we
@@ -977,7 +1091,7 @@ async def upload_vendor_document(
                 ),
             ) from exc
 
-    return response.data[0]
+    return new_doc
 
 
 @router.get(

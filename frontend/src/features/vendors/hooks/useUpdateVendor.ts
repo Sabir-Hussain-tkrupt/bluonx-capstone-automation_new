@@ -12,8 +12,11 @@ export function useUpdateVendor() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.vendors.detail(variables.id),
       });
+      // vendors.all rather than lists(): editing insurance_expiration_date
+      // changes the expiring-soon count too. Matches useCreateVendor and
+      // useDeleteVendor.
       queryClient.invalidateQueries({
-        queryKey: queryKeys.vendors.lists(),
+        queryKey: queryKeys.vendors.all,
       });
     },
   });

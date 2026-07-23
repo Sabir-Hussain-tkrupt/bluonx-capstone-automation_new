@@ -1,18 +1,22 @@
 """
-Distance calculation and vendor filtering service.
+Distance calculation primitives.
 
 Provides:
 - Haversine formula (pure math, no API calls)
 - Google Routes API distance (driving distance)
 - Combined distance with Haversine fallback
-- Vendor filtering by proximity to a project
+
+Proximity filtering itself lives in services/vendor_filtering.py, which is
+the single path the app uses. A second implementation here
+(filter_vendors_by_distance, feeding a nearby-vendors endpoint no page ever
+called) computed straight-line distance only, so the two disagreed on what
+"within 75 miles" meant. It was removed rather than reconciled.
 """
 
 import logging
 import math
 
 import httpx
-from supabase import Client
 
 from app.core.config import settings
 
@@ -148,99 +152,3 @@ async def calculate_distance(
 
     # Fallback to Haversine (straight-line)
     return haversine_distance(lat1, lng1, lat2, lng2)
-
-
-# ── Vendor Filtering by Distance ────────────────────────────────────────────
-
-
-async def filter_vendors_by_distance(
-    db: Client,
-    project_id: str,
-    trade_id: str | None = None,
-    radius_miles: float = 75,
-) -> list[dict]:
-    """Filter vendors by proximity to a project.
-
-    Steps:
-    1. Fetch project coords — raise ValueError if missing.
-    2. Fetch active vendors (optionally filtered by trade).
-    3. Haversine pre-filter at radius * 1.33 for generous buffer.
-    4. Return sorted by distance ascending, each with distance_miles.
-    """
-    # 1. Get project coordinates
-    project_resp = (
-        db.table("projects")
-        .select("id, latitude, longitude")
-        .eq("id", project_id)
-        .is_("deleted_at", "null")
-        .single()
-        .execute()
-    )
-
-    if not project_resp.data:
-        raise ValueError("Project not found")
-
-    project = project_resp.data
-    proj_lat = float(project["latitude"]) if project.get("latitude") else None
-    proj_lng = float(project["longitude"]) if project.get("longitude") else None
-
-    if proj_lat is None or proj_lng is None:
-        raise ValueError("Project has no geocoded coordinates")
-
-    # 2. Fetch vendors
-    if trade_id:
-        # Get vendor IDs with the specified trade
-        trade_resp = (
-            db.table("vendor_trades")
-            .select("vendor_id")
-            .eq("trade_id", trade_id)
-            .execute()
-        )
-        vendor_ids = [r["vendor_id"] for r in (trade_resp.data or [])]
-        if not vendor_ids:
-            return []
-
-        vendor_query = (
-            db.table("vendors")
-            .select("id, company_name, city, state, latitude, longitude, status")
-            .is_("deleted_at", "null")
-            .not_.is_("latitude", "null")
-            .in_("id", vendor_ids)
-        )
-    else:
-        vendor_query = (
-            db.table("vendors")
-            .select("id, company_name, city, state, latitude, longitude, status")
-            .is_("deleted_at", "null")
-            .not_.is_("latitude", "null")
-        )
-
-    vendor_resp = vendor_query.execute()
-    vendors = vendor_resp.data or []
-
-    # 3. Haversine pre-filter with generous buffer
-    buffer_radius = radius_miles * 1.33
-    results = []
-
-    for vendor in vendors:
-        v_lat = float(vendor["latitude"]) if vendor.get("latitude") else None
-        v_lng = float(vendor["longitude"]) if vendor.get("longitude") else None
-
-        if v_lat is None or v_lng is None:
-            continue
-
-        dist = haversine_distance(proj_lat, proj_lng, v_lat, v_lng)
-        if dist is None:
-            continue
-
-        if dist <= buffer_radius:
-            results.append({
-                **vendor,
-                "distance_miles": round(dist, 1),
-            })
-
-    # 4. Final filter at actual radius and sort
-    results = [r for r in results if r["distance_miles"] <= radius_miles]
-    results.sort(key=lambda r: r["distance_miles"])
-
-    return results

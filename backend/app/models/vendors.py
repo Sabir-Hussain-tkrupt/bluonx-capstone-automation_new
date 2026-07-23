@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import ConfigDict, EmailStr, Field, field_serializer
 
 from app.models.common import BluOnXBase
 
@@ -20,18 +20,23 @@ from app.models.common import BluOnXBase
 
 
 class VendorCreate(BluOnXBase):
+    # Strip before validating so a whitespace-only company_name fails
+    # min_length instead of passing and being stored padded. Pydantic merges
+    # this with BluOnXBase's config, so from_attributes still applies.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     company_name: str = Field(..., min_length=2, max_length=255)
     address: str | None = None
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
-    insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
     max_active_jobs: int | None = Field(default=None, ge=0)
-    onboarding_status: Literal["pending", "partial", "complete"] = "pending"
+    # "complete" is deliberately absent here. It requires a valid insurance
+    # certificate, and documents are stored under {vendor_id}/..., so none
+    # can exist before this row does. Promote the vendor after uploading one.
+    onboarding_status: Literal["pending", "partial"] = "pending"
     status: Literal["active", "inactive", "suspended"] = "active"
     notes: str | None = None
     # Optional inline creation of contacts and trade associations
@@ -40,14 +45,13 @@ class VendorCreate(BluOnXBase):
 
 
 class VendorUpdate(BluOnXBase):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     company_name: str | None = Field(default=None, min_length=2, max_length=255)
     address: str | None = None
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
-    insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
     max_active_jobs: int | None = Field(default=None, ge=0)
@@ -76,6 +80,28 @@ class VendorResponse(BluOnXBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    #: Set only on create/update when geocoding could not refresh this row's
+    #: coordinates. Null on reads. Non-fatal: the write succeeded, but the
+    #: record will not take part in distance filtering until the address is
+    #: fixed. Surfaced to the user as a warning toast.
+    geocode_warning: str | None = None
+
+    @field_serializer(
+        "latitude",
+        "longitude",
+        "insurance_coverage_amount",
+        "bonding_capacity",
+    )
+    def _decimal_as_number(self, value: Decimal | None) -> float | None:
+        """Emit decimals as JSON numbers, matching PostgREST.
+
+        Pydantic serializes Decimal to a string by default, but the frontend
+        reads these same columns straight from PostgREST elsewhere, where a
+        numeric comes back as a JSON number. Without this the same TypeScript
+        type would describe two different runtime shapes depending on which
+        path fetched the row.
+        """
+        return float(value) if value is not None else None
 
 
 class VendorDetailResponse(VendorResponse):
@@ -99,7 +125,12 @@ class VendorListResponse(BluOnXBase):
 
 class VendorContactCreateInline(BluOnXBase):
     """Contact creation when creating a vendor (no vendor_id needed)."""
-    full_name: str
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    # min_length guards the now-stripped value: without it a whitespace-only
+    # name would strip to "" and still validate.
+    full_name: str = Field(..., min_length=1)
     email: EmailStr
     phone: str | None = None
     title: str | None = None
@@ -116,7 +147,9 @@ class VendorContactCreate(BluOnXBase):
 
 
 class VendorContactUpdate(BluOnXBase):
-    full_name: str | None = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    full_name: str | None = Field(default=None, min_length=1)
     email: EmailStr | None = None
     phone: str | None = None
     title: str | None = None
@@ -231,9 +264,20 @@ class VendorImportRow(BluOnXBase):
     notes: str | None = None
 
 
+#: Maximum rows accepted in one import request.
+#:
+#: Each row costs a duplicate-name query, a Google geocode call (5s timeout),
+#: a vendor insert and a contact insert, all sequential — roughly 0.4s per row,
+#: or ~90s for a full batch when a tenth of the addresses fail to geocode.
+#: Beyond this the request outlives any reasonable client timeout and the user
+#: sees a failure while rows keep being created. Mirrored in the frontend
+#: importer so oversized files are caught before upload.
+VENDOR_IMPORT_MAX_ROWS = 100
+
+
 class VendorImportRequest(BluOnXBase):
     """Request body for bulk CSV import."""
-    rows: list[VendorImportRow]
+    rows: list[VendorImportRow] = Field(..., max_length=VENDOR_IMPORT_MAX_ROWS)
 
 
 class VendorImportError(BluOnXBase):

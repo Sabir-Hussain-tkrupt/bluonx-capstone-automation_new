@@ -6,11 +6,13 @@ import { IconButton } from '@/components/ui/IconButton';
 import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { Card } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { Field } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { formatCurrency } from '@/lib/format';
+import { errorMessage, type ApiError } from '@/lib/api';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
@@ -21,11 +23,6 @@ import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
 import { useTaskActiveContract } from '@/features/milestones/hooks/useTaskActiveContract';
 import { MilestonesCard } from '@/features/milestones/components/MilestonesCard';
 import { ContractPanel } from '@/features/contracts/components/ContractPanel';
-
-function formatCurrency(value: number | null): string {
-  if (value == null) return '\u2014';
-  return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
 
 function formatPhase(phase: string): string {
   return phase === 'due_diligence' ? 'Due Diligence' : 'Development';
@@ -50,7 +47,7 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: task, isLoading, error } = useTask(projectId!, taskId!);
+  const { data: task, isLoading, error, refetch, isFetching } = useTask(projectId!, taskId!);
   const { data: project } = useProject(projectId!);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId!);
@@ -72,6 +69,22 @@ export function TaskDetailPage() {
     );
   }
 
+  if (error) {
+    const status = (error as unknown as ApiError | undefined)?.status;
+    if (status !== 404) {
+      return (
+        <Alert variant="danger" title="Could not load task">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{errorMessage(error, 'Something went wrong. Please try again.')}</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()} isLoading={isFetching}>
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      );
+    }
+  }
+
   if (error || !task) {
     return (
       <Alert variant="danger" title="Task not found">
@@ -89,7 +102,7 @@ export function TaskDetailPage() {
           toast({ variant: 'success', message: 'Task updated.' });
         },
         onError: (err) => {
-          toast({ variant: 'danger', message: (err as { message?: string })?.message || 'Failed to update task.' });
+          toast({ variant: 'danger', message: errorMessage(err, 'Failed to update task.') });
         },
       },
     );
@@ -102,7 +115,7 @@ export function TaskDetailPage() {
         navigate(`/projects/${projectId}`);
       },
       onError: (err) => {
-        toast({ variant: 'danger', message: (err as { message?: string })?.message || 'Failed to delete task.' });
+        toast({ variant: 'danger', message: errorMessage(err, 'Failed to delete task.') });
       },
     });
   };
@@ -241,23 +254,20 @@ export function TaskDetailPage() {
       />
 
       {/* Delete Confirmation */}
-      <Modal
+      <ConfirmDialog
         isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
         title="Delete Task"
-        size="sm"
-        footer={
+        message={
           <>
-            <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button variant="danger" onClick={handleDelete} isLoading={deleteMutation.isPending}>Delete Task</Button>
+            Are you sure you want to delete <strong>{task.name}</strong>? This soft-deletes
+            the task and it will no longer appear in lists.
           </>
         }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete <strong>{task.name}</strong>?
-          This action will soft-delete the task and it will no longer appear in lists.
-        </p>
-      </Modal>
+        confirmText="Delete Task"
+        isLoading={deleteMutation.isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

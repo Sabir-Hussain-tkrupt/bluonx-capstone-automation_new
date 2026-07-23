@@ -28,6 +28,8 @@ export { Card } from './Card';
 export type { CardProps } from './Card';
 export { Modal } from './Modal';
 export type { ModalProps } from './Modal';
+export { ConfirmDialog } from './ConfirmDialog';
+export type { ConfirmDialogProps } from './ConfirmDialog';
 export { Alert } from './Alert';
 export type { AlertProps } from './Alert';
 export { Tabs } from './Tabs';

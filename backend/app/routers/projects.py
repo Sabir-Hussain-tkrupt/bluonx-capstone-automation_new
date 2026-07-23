@@ -12,9 +12,14 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
-from app.services.geocoding import geocode_address
+from app.services.geocoding import (
+    ADDRESS_FIELDS,
+    address_fields_changed,
+    resolve_coordinates,
+)
 from app.core.file_validation import sanitize_filename, validate_upload
-from app.core.storage import delete_file, get_signed_url, upload_file
+from app.core.query_filters import escape_like_pattern
+from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.common import SignedUrlResponse
 from app.models.projects import (
@@ -70,6 +75,7 @@ async def list_projects(
     search: str | None = Query(default=None, description="Search by project name"),
     project_status: str | None = Query(default=None, alias="status", description="Filter by status"),
     include_archived: bool = Query(default=False, description="Include archived projects (hidden by default)"),
+    archived_only: bool = Query(default=False, description="Return only archived projects (overrides include_archived)"),
     sort_by: str = Query(default="name", description="Column to sort by"),
     sort_dir: str = Query(default="asc", description="Sort direction: asc or desc"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -80,7 +86,8 @@ async def list_projects(
     """List active projects with search, filter, sort, and pagination.
 
     Archived projects are hidden by default (pass include_archived=true to show
-    them); soft-deleted projects are never returned.
+    them alongside active ones, or archived_only=true to show just the archived
+    ones); soft-deleted projects are never returned.
     """
 
     def _filtered(select_expr: str):
@@ -89,10 +96,12 @@ async def list_projects(
             .select(select_expr, count="exact")
             .is_("deleted_at", "null")
         )
-        if not include_archived:
+        if archived_only:
+            q = q.not_.is_("archived_at", "null")
+        elif not include_archived:
             q = q.is_("archived_at", "null")
         if search:
-            q = q.ilike("name", f"%{search}%")
+            q = q.ilike("name", f"%{escape_like_pattern(search)}%")
         if project_status:
             q = q.eq("status", project_status)
         return q
@@ -160,18 +169,16 @@ async def create_project(
         if project_data.get(key) is not None:
             project_data[key] = project_data[key].isoformat()
 
-    # Auto-geocode if address fields are provided
-    address_fields = (project.address, project.city, project.state, project.zip_code)
-    if any(f for f in address_fields):
-        try:
-            lat, lng = await geocode_address(
-                project.address, project.city, project.state, project.zip_code,
-            )
-            if lat is not None and lng is not None:
-                project_data["latitude"] = str(lat)
-                project_data["longitude"] = str(lng)
-        except Exception as exc:
-            logger.warning("Geocoding failed for project %s: %s", project.name, exc)
+    # Auto-geocode if address fields are provided. Never fatal: a project we
+    # cannot locate is still a project, but note that without coordinates the
+    # vendor distance filter has no origin to measure from.
+    geocode_warning: str | None = None
+    if any((project.address, project.city, project.state, project.zip_code)):
+        coord_updates, geocode_warning = await resolve_coordinates(
+            project.address, project.city, project.state, project.zip_code,
+        )
+        for key, value in coord_updates.items():
+            project_data[key] = str(value) if value is not None else None
 
     try:
         response = db.table("projects").insert(project_data).execute()
@@ -188,7 +195,7 @@ async def create_project(
             detail="Failed to create project",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -220,20 +227,18 @@ async def update_project(
             detail="estimated_end_date must be on or after start_date",
         )
 
-    # Re-geocode if any address field changed
-    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
-    if _ADDRESS_FIELDS & set(update_data.keys()):
-        try:
-            merged_address = update_data.get("address", existing.get("address"))
-            merged_city = update_data.get("city", existing.get("city"))
-            merged_state = update_data.get("state", existing.get("state"))
-            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
-            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
-            if lat is not None and lng is not None:
-                update_data["latitude"] = lat
-                update_data["longitude"] = lng
-        except Exception as exc:
-            logger.warning("Geocoding failed for project %s: %s", project_id, exc)
+    # Re-geocode if any address field changed. Same rules as vendors: a
+    # not-locatable address clears the stored coordinates rather than leaving
+    # the project pinned to where it used to be, while a failed lookup leaves
+    # them alone.
+    geocode_warning: str | None = None
+    if address_fields_changed(update_data):
+        merged = {
+            field: update_data.get(field, existing.get(field))
+            for field in ADDRESS_FIELDS
+        }
+        coord_updates, geocode_warning = await resolve_coordinates(**merged)
+        update_data.update(coord_updates)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("budget", "latitude", "longitude"):
@@ -265,7 +270,7 @@ async def update_project(
             detail="Project not found",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -522,9 +527,10 @@ async def upload_project_document(
     filename = sanitize_filename(file.filename or "document")
     validate_upload(file_bytes, filename, content_type, PROJECT_BUCKET)
 
-    # Upload to storage: {project_id}/{filename}, or {project_id}/sow/{filename} for SoW.
+    # Upload to storage under a per-upload uuid segment so a same-named
+    # re-upload can't collide (SoW keeps its {project_id}/sow prefix).
     prefix = f"{project_id}/sow" if document_kind == "scope_of_work" else str(project_id)
-    storage_path = f"{prefix}/{filename}"
+    storage_path = unique_object_path(prefix, filename)
     upload_file(db, PROJECT_BUCKET, storage_path, file_bytes, content_type)
 
     # Insert project_documents row
@@ -610,8 +616,44 @@ async def delete_project_document(
             detail="Document not found",
         )
 
+    # Block deletion of a document still referenced by a bid package. Both FKs
+    # (bid_packages.scope_of_work_document_id and bid_package_documents
+    # .project_document_id) are ON DELETE RESTRICT, so an unguarded delete would
+    # surface as a raw 23503. Pre-check for a clean 409 with a specific message.
+    sow_ref = (
+        db.table("bid_packages")
+        .select("id", count="exact")
+        .eq("scope_of_work_document_id", str(document_id))
+        .execute()
+    )
+    if sow_ref.count and sow_ref.count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is the scope of work for a bid package and can't be deleted.",
+        )
+
+    pool_ref = (
+        db.table("bid_package_documents")
+        .select("id", count="exact")
+        .eq("project_document_id", str(document_id))
+        .execute()
+    )
+    if pool_ref.count and pool_ref.count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is attached to a bid package and can't be deleted.",
+        )
+
     # Delete from storage first
     delete_file(db, PROJECT_BUCKET, doc_resp.data["file_path"])
 
-    # Delete DB row
-    db.table("project_documents").delete().eq("id", str(document_id)).execute()
+    # Delete DB row (23503 backstop for any other RESTRICT FK not pre-checked).
+    try:
+        db.table("project_documents").delete().eq("id", str(document_id)).execute()
+    except APIError as exc:
+        if getattr(exc, "code", None) == "23503":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This document is in use and can't be deleted.",
+            ) from exc
+        raise

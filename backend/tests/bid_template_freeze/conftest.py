@@ -100,12 +100,18 @@ def sample_trade() -> dict:
 
 
 def _pkg(pkg_id, task_id, task_name, status):
-    """Shape matches the Supabase `select("id, status, task_id, tasks(name)")` response."""
+    """Shape matches the Supabase `select("id, status, task_id, tasks(name)")` response.
+
+    `bid_template_id` is carried too: the batched list enrichment selects it
+    and groups by it to build the in-use set, so a row without it would never
+    mark its template as in use.
+    """
     return {
         "id": str(pkg_id),
         "status": status,
         "task_id": str(task_id),
         "tasks": {"name": task_name},
+        "bid_template_id": str(TEMPLATE_ID),
     }
 
 
@@ -221,6 +227,46 @@ def build_bid_templates_chain(source_row: dict | None):
     return chain
 
 
+def build_trades_chain(row: dict | None):
+    """Chain for `trades` that answers both access shapes correctly.
+
+    The detail path fetches one trade with `.maybe_single()` and expects a
+    dict; the batched list path fetches many with `.in_()` and expects a list.
+    A plain build_chain() would hand the same payload to both, so the list path
+    would iterate a dict's keys and blow up on row["id"].
+    """
+    state = {"single": False}
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.neq.return_value = chain
+    chain.in_.return_value = chain
+    chain.ilike.return_value = chain
+    chain.order.return_value = chain
+    chain.limit.return_value = chain
+
+    def _single():
+        state["single"] = True
+        return chain
+
+    chain.single.side_effect = _single
+    chain.maybe_single.side_effect = _single
+
+    def _execute():
+        result = MagicMock()
+        if state["single"]:
+            result.data = row
+            result.count = 1 if row else 0
+        else:
+            result.data = [row] if row else []
+            result.count = 1 if row else 0
+        state["single"] = False
+        return result
+
+    chain.execute.side_effect = _execute
+    return chain
+
+
 def build_bid_packages_chain(all_rows: list[dict]):
     """Chainable mock for the `bid_packages` table that respects the
     `.neq("status","cancelled")` filter applied by the live-refs helper.
@@ -237,6 +283,10 @@ def build_bid_packages_chain(all_rows: list[dict]):
     chain = MagicMock()
     chain.select.return_value = chain
     chain.eq.return_value = chain
+    # The batched list enrichment filters by .in_("bid_template_id", [...])
+    # instead of .eq(); without this the MagicMock would hand back a fresh
+    # mock and drop out of the chain.
+    chain.in_.return_value = chain
 
     def _neq(field, value):
         if field == "status" and value == "cancelled":
@@ -313,7 +363,7 @@ def _db_with_packages(
     return make_db({
         "bid_templates": build_bid_templates_chain(sample_template),
         "bid_template_items": sample_template_items,
-        "trades": sample_trade,
+        "trades": build_trades_chain(sample_trade),
         "bid_packages": build_bid_packages_chain(package_rows),
     })
 
@@ -406,7 +456,7 @@ def db_template_missing() -> MagicMock:
     return make_db({
         "bid_templates": build_bid_templates_chain(None),
         "bid_template_items": [],
-        "trades": None,
+        "trades": build_trades_chain(None),
         "bid_packages": build_bid_packages_chain([]),
     })
 

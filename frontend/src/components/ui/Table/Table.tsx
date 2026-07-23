@@ -110,6 +110,68 @@ function MobileCard<T>({
   );
 }
 
+/** Footer bar: result range, page-size picker, prev/next. */
+function Pagination({
+  pagination,
+  totalPages,
+  startRow,
+  endRow,
+}: {
+  pagination: TablePagination;
+  totalPages: number;
+  startRow: number;
+  endRow: number;
+}) {
+  return (
+    <div className="flex flex-col gap-3 border-t border-secondary-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <p className="text-sm text-secondary-500">
+        Showing <span className="font-medium">{startRow}</span> to{' '}
+        <span className="font-medium">{endRow}</span> of{' '}
+        <span className="font-medium">{pagination.total}</span> results
+      </p>
+      <div className="flex items-center gap-2">
+        {pagination.onPageSizeChange && (
+          <select
+            value={pagination.pageSize}
+            onChange={(e) => pagination.onPageSizeChange?.(Number(e.target.value))}
+            className="rounded-lg border border-secondary-300 bg-white px-2 py-1 text-sm text-secondary-700 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+            aria-label="Rows per page"
+          >
+            {[10, 25, 50, 100].map((size) => (
+              <option key={size} value={size}>
+                {size} / page
+              </option>
+            ))}
+          </select>
+        )}
+        <nav className="flex items-center gap-1" aria-label="Pagination">
+          <button
+            type="button"
+            disabled={pagination.page <= 1}
+            onClick={() => pagination.onPageChange(pagination.page - 1)}
+            className="rounded-lg px-3 py-1 text-sm font-medium text-secondary-700 hover:bg-secondary-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+            aria-label="Previous page"
+          >
+            Previous
+          </button>
+          <span className="px-2 text-sm text-secondary-500">
+            {pagination.page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={pagination.page >= totalPages}
+            onClick={() => pagination.onPageChange(pagination.page + 1)}
+            className="rounded-lg px-3 py-1 text-sm font-medium text-secondary-700 hover:bg-secondary-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+            aria-label="Next page"
+          >
+            Next
+          </button>
+        </nav>
+      </div>
+    </div>
+  );
+}
+
 export function Table<T>({
   columns,
   data,
@@ -169,6 +231,22 @@ export function Table<T>({
     );
   }
 
+  // Pagination calculations
+  const totalPages = pagination
+    ? Math.max(1, Math.ceil(pagination.total / pagination.pageSize))
+    : 1;
+  const startRow = pagination
+    ? (pagination.page - 1) * pagination.pageSize + 1
+    : 1;
+  const endRow = pagination
+    ? Math.min(pagination.page * pagination.pageSize, pagination.total)
+    : data.length;
+
+  // A page past the last one has no rows but a non-zero total. Keep the
+  // pagination controls visible in that case, otherwise the only way back is
+  // a reload: the empty branch below renders no Previous button.
+  const isStrandedPage = data.length === 0 && !!pagination && pagination.total > 0;
+
   // Empty state
   if (data.length === 0) {
     return (
@@ -191,26 +269,39 @@ export function Table<T>({
             </tr>
           </thead>
         </table>
-        {emptyState ?? (
+        {isStrandedPage ? (
           <EmptyState
-            title="No data found"
-            description="There are no records to display."
+            title="Nothing on this page"
+            description={`This page is past the end of the ${pagination.total} matching results.`}
+            action={
+              <button
+                type="button"
+                onClick={() => pagination.onPageChange(1)}
+                className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
+              >
+                Back to first page
+              </button>
+            }
+          />
+        ) : (
+          emptyState ?? (
+            <EmptyState
+              title="No data found"
+              description="There are no records to display."
+            />
+          )
+        )}
+        {isStrandedPage && (
+          <Pagination
+            pagination={pagination}
+            totalPages={totalPages}
+            startRow={0}
+            endRow={0}
           />
         )}
       </div>
     );
   }
-
-  // Pagination calculations
-  const totalPages = pagination
-    ? Math.ceil(pagination.total / pagination.pageSize)
-    : 1;
-  const startRow = pagination
-    ? (pagination.page - 1) * pagination.pageSize + 1
-    : 1;
-  const endRow = pagination
-    ? Math.min(pagination.page * pagination.pageSize, pagination.total)
-    : data.length;
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-secondary-200', className)}>
@@ -272,9 +363,23 @@ export function Table<T>({
               <tr
                 key={keyExtractor(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                // A click-only row is unreachable by keyboard. The mobile card
+                // view already renders a real <button>; this gives the desktop
+                // row the same reachability.
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
                 className={cn(
                   'transition-colors hover:bg-secondary-50',
-                  onRowClick && 'cursor-pointer',
+                  onRowClick && 'cursor-pointer focus-visible:bg-secondary-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500',
                 )}
               >
                 {columns.map((col) => (
@@ -296,52 +401,12 @@ export function Table<T>({
 
       {/* Pagination */}
       {pagination && (
-        <div className="flex flex-col gap-3 border-t border-secondary-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p className="text-sm text-secondary-500">
-            Showing <span className="font-medium">{startRow}</span> to{' '}
-            <span className="font-medium">{endRow}</span> of{' '}
-            <span className="font-medium">{pagination.total}</span> results
-          </p>
-          <div className="flex items-center gap-2">
-            {pagination.onPageSizeChange && (
-              <select
-                value={pagination.pageSize}
-                onChange={(e) => pagination.onPageSizeChange?.(Number(e.target.value))}
-                className="rounded-lg border border-secondary-300 bg-white px-2 py-1 text-sm text-secondary-700 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
-                aria-label="Rows per page"
-              >
-                {[10, 25, 50, 100].map((size) => (
-                  <option key={size} value={size}>
-                    {size} / page
-                  </option>
-                ))}
-              </select>
-            )}
-            <nav className="flex items-center gap-1" aria-label="Pagination">
-              <button
-                type="button"
-                disabled={pagination.page <= 1}
-                onClick={() => pagination.onPageChange(pagination.page - 1)}
-                className="rounded-lg px-3 py-1 text-sm font-medium text-secondary-700 hover:bg-secondary-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
-                aria-label="Previous page"
-              >
-                Previous
-              </button>
-              <span className="px-2 text-sm text-secondary-500">
-                {pagination.page} / {totalPages}
-              </span>
-              <button
-                type="button"
-                disabled={pagination.page >= totalPages}
-                onClick={() => pagination.onPageChange(pagination.page + 1)}
-                className="rounded-lg px-3 py-1 text-sm font-medium text-secondary-700 hover:bg-secondary-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none"
-                aria-label="Next page"
-              >
-                Next
-              </button>
-            </nav>
-          </div>
-        </div>
+        <Pagination
+          pagination={pagination}
+          totalPages={totalPages}
+          startRow={startRow}
+          endRow={endRow}
+        />
       )}
     </div>
   );

@@ -10,6 +10,14 @@ interface TradeMultiSelectProps {
   label?: string;
   error?: string;
   disabled?: boolean;
+  /**
+   * Trades that are shown as selected but cannot be toggled here, e.g. ones
+   * the vendor already has. Without this the caller has to silently drop
+   * changes to them, which leaves a checkbox that looks live but does nothing.
+   */
+  lockedTradeIds?: string[];
+  /** Explains why the locked entries can't be changed. */
+  lockedHint?: string;
 }
 
 const phaseLabels: Record<string, string> = {
@@ -24,6 +32,8 @@ export function TradeMultiSelect({
   label,
   error,
   disabled = false,
+  lockedTradeIds = [],
+  lockedHint,
 }: TradeMultiSelectProps) {
   const { data: trades = [], isLoading } = useTrades();
   const [isOpen, setIsOpen] = useState(false);
@@ -41,7 +51,10 @@ export function TradeMultiSelect({
 
   const selectedTrades = trades.filter((t) => selectedTradeIds.includes(t.id));
 
+  const isLocked = (tradeId: string) => lockedTradeIds.includes(tradeId);
+
   const toggleTrade = (tradeId: string) => {
+    if (isLocked(tradeId)) return;
     if (selectedTradeIds.includes(tradeId)) {
       onChange(selectedTradeIds.filter((id) => id !== tradeId));
     } else {
@@ -50,6 +63,7 @@ export function TradeMultiSelect({
   };
 
   const removeTrade = (tradeId: string) => {
+    if (isLocked(tradeId)) return;
     onChange(selectedTradeIds.filter((id) => id !== tradeId));
   };
 
@@ -92,19 +106,28 @@ export function TradeMultiSelect({
           selectedTrades.map((trade) => (
             <span
               key={trade.id}
-              className="inline-flex items-center gap-1 rounded-md bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
+                isLocked(trade.id)
+                  ? 'bg-secondary-100 text-secondary-600'
+                  : 'bg-primary-50 text-primary-700',
+              )}
+              title={isLocked(trade.id) ? lockedHint : undefined}
             >
               {trade.name}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTrade(trade.id);
-                }}
-                className="text-primary-400 hover:text-primary-700"
-              >
-                <X className="h-3 w-3" aria-hidden="true" />
-              </button>
+              {!isLocked(trade.id) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTrade(trade.id);
+                  }}
+                  aria-label={`Remove ${trade.name}`}
+                  className="text-primary-400 hover:text-primary-700"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              )}
             </span>
           ))
         )}
@@ -122,21 +145,29 @@ export function TradeMultiSelect({
               </div>
               {phaseTrades.map((trade) => {
                 const isSelected = selectedTradeIds.includes(trade.id);
+                const locked = isLocked(trade.id);
                 return (
                   <button
                     key={trade.id}
                     type="button"
                     onClick={() => toggleTrade(trade.id)}
+                    disabled={locked}
+                    title={locked ? lockedHint : undefined}
                     className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-secondary-50',
-                      isSelected && 'bg-primary-50',
+                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                      locked
+                        ? 'cursor-not-allowed opacity-60'
+                        : 'hover:bg-secondary-50',
+                      isSelected && !locked && 'bg-primary-50',
                     )}
                   >
                     <div
                       className={cn(
                         'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
                         isSelected
-                          ? 'border-primary-600 bg-primary-600 text-white'
+                          ? locked
+                            ? 'border-secondary-400 bg-secondary-400 text-white'
+                            : 'border-primary-600 bg-primary-600 text-white'
                           : 'border-secondary-300',
                       )}
                     >
@@ -145,6 +176,9 @@ export function TradeMultiSelect({
                       )}
                     </div>
                     <span className="text-secondary-900">{trade.name}</span>
+                    {locked && (
+                      <span className="ml-auto text-xs text-secondary-400">Added</span>
+                    )}
                   </button>
                 );
               })}
