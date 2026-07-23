@@ -85,7 +85,13 @@ api.interceptors.response.use(
           break;
         case 422:
           apiError.code = 'VALIDATION_ERROR';
-          apiError.message = 'Please check your input and try again.';
+          // Keep a server-supplied string detail (our services raise
+          // HTTPException(422, detail="…") with a specific reason, e.g. a
+          // past/invalid milestone date). FastAPI's own request-validation 422s
+          // put an array of error objects in `detail` — fall back to generic for
+          // those so the user never sees "[object Object]".
+          apiError.message =
+            typeof data?.detail === 'string' ? data.detail : 'Please check your input and try again.';
           break;
         case 500:
           apiError.code = 'SERVER_ERROR';

@@ -9,10 +9,8 @@ import { Alert } from '@/components/ui/Alert';
 import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
-import type { ApiError } from '@/lib/api';
 import { useMilestone } from '@/features/milestones/hooks/useMilestone';
 import { useUpdateMilestone } from '@/features/milestones/hooks/useUpdateMilestone';
-import { useDeleteMilestone } from '@/features/milestones/hooks/useDeleteMilestone';
 import { useMarkMilestoneStarted } from '@/features/milestones/hooks/useMarkMilestoneStarted';
 import { useMarkMilestoneCompleted } from '@/features/milestones/hooks/useMarkMilestoneCompleted';
 import { useRescheduleMilestone } from '@/features/milestones/hooks/useRescheduleMilestone';
@@ -21,14 +19,10 @@ import { MilestoneFormModal, type MilestoneFormValues } from '../components/Mile
 import { MilestoneActivityTimeline } from '../components/MilestoneActivityTimeline';
 import { MilestoneStatusBadge } from '../components/MilestoneStatusBadge';
 import { formatMilestoneDate } from '../utils/formatDate';
+import { todayStr } from '../utils/today';
 
 const TERMINAL_STATUSES = new Set(['completed', 'cancelled']);
 const RESCHEDULABLE_STATUSES = new Set(['in_progress', 'delayed', 'unresponsive']);
-
-/** Local calendar date as YYYY-MM-DD, for prefilling date inputs. */
-function todayStr(): string {
-  return new Date().toLocaleDateString('en-CA');
-}
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -50,14 +44,12 @@ export function MilestoneDetailPage() {
 
   const { data: milestone, isLoading, error } = useMilestone(milestoneId!);
   const updateMutation = useUpdateMilestone();
-  const deleteMutation = useDeleteMilestone();
   const startMutation = useMarkMilestoneStarted();
   const completeMutation = useMarkMilestoneCompleted();
   const rescheduleMutation = useRescheduleMilestone();
   const cancelMutation = useCancelMilestone();
 
   const [showEdit, setShowEdit] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
@@ -103,26 +95,6 @@ export function MilestoneDetailPage() {
         onError: onError('Failed to update milestone.'),
       },
     );
-  };
-
-  const handleDelete = () => {
-    deleteMutation.mutate(milestone.id, {
-      onSuccess: () => {
-        toast({ variant: 'success', message: 'Milestone deleted.' });
-        backToTask();
-      },
-      onError: (err) => {
-        const e = err as ApiError;
-        // A milestone with recorded activity can't be deleted — the backend
-        // returns 409 with a "cancel it instead" message. Point the PM at Cancel.
-        const message =
-          e?.status === 409
-            ? e.message || 'This milestone has recorded activity. Cancel it instead of deleting.'
-            : e?.message || 'Failed to delete milestone.';
-        setShowDelete(false);
-        toast({ variant: 'danger', message });
-      },
-    });
   };
 
   const handleCancel = () => {
@@ -213,9 +185,6 @@ export function MilestoneDetailPage() {
         <div className="flex shrink-0 gap-2">
           <Button variant="outline" onClick={() => setShowEdit(true)}>
             Edit
-          </Button>
-          <Button variant="danger" onClick={() => setShowDelete(true)}>
-            Delete
           </Button>
         </div>
       </div>
@@ -352,6 +321,7 @@ export function MilestoneDetailPage() {
         <FormField label="New End Date" required>
           <TextInput
             type="date"
+            min={todayStr()}
             value={rescheduleEnd}
             onChange={(e) => setRescheduleEnd(e.target.value)}
           />
@@ -415,30 +385,8 @@ export function MilestoneDetailPage() {
       >
         <p className="text-sm text-secondary-600">
           Cancel <strong>{milestone.name}</strong>? It stays on record (with its full activity
-          history) but is retired from the schedule. This is the right choice once a milestone has
-          activity.
-        </p>
-      </Modal>
-
-      {/* Delete confirmation */}
-      <Modal
-        isOpen={showDelete}
-        onClose={() => setShowDelete(false)}
-        title="Delete Milestone"
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowDelete(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={handleDelete} isLoading={deleteMutation.isPending}>
-              Delete Milestone
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to delete <strong>{milestone.name}</strong>? This cannot be undone.
+          history) but is retired from the schedule. This is how a milestone is removed —
+          whether it was created by mistake or is no longer going ahead.
         </p>
       </Modal>
     </div>

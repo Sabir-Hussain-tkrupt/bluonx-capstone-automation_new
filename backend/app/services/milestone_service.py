@@ -1,8 +1,10 @@
 """
 Milestone management write path (Phase 10 foundation).
 
-Owns PM-driven creation, edits, deletion, and the manual start/complete/reschedule/
-cancel transitions. Every status change funnels through ONE authoritative writer,
+Owns PM-driven creation, edits, and the manual start/complete/reschedule/cancel
+transitions. There is no hard delete: the milestone_events ledger is append-only
+(deleting a milestone would cascade into its immutable creation event and be
+blocked), so a mistaken milestone is retired via cancel, not removed. Every status change funnels through ONE authoritative writer,
 the `transition_milestone()` RPC: a single transaction under a row lock that applies
 the status + dates and writes one immutable `milestone_events` row. Creation is the
 same story via `fn_create_milestone()` (row + opening event, atomic). No application
@@ -63,6 +65,25 @@ def validate_date_order(start: date, end: date) -> None:
         )
 
 
+def validate_not_past(start: date) -> None:
+    """Reject a start date before today.
+
+    A past start suppresses the start_check (the daily job fires it only when
+    start_date == today), so the milestone never leaves 'scheduled' via the
+    normal vendor path — every later check-in the vendor answers is illegal from
+    'scheduled' and rolls back. Requiring start >= today keeps the lifecycle
+    reachable; combined with validate_date_order (end >= start) it also forbids a
+    past end date. Business-timezone today; DB business clock is America/Chicago.
+    """
+    today = business_today()
+    if start < today:
+        raise MilestoneError(
+            422,
+            f"Start date ({start.isoformat()}) cannot be in the past "
+            f"(today is {today.isoformat()}).",
+        )
+
+
 def next_sort_order(existing_orders: list[int]) -> int:
     """Next append position: max(existing) + 1, or 0 when there are none."""
     return max(existing_orders, default=-1) + 1
@@ -77,14 +98,6 @@ def _first(data: Any) -> dict | None:
     if isinstance(data, dict):
         return data
     return None
-
-
-def _is_fk_violation(err: APIError) -> bool:
-    """Postgres 23503 (foreign_key_violation) — a child row (milestone_responses /
-    milestone_alerts) still references this milestone."""
-    code = getattr(err, "code", None)
-    msg = str(err).lower()
-    return code == "23503" or "foreign key" in msg
 
 
 def _has_pt_code(err: APIError, pt: str) -> bool:
@@ -125,29 +138,46 @@ def _map_transition_error(err: APIError) -> MilestoneError:
 
 
 def _resolve_active_contract_id(db: Client, task_id: str) -> str:
-    """Return the task's single active contract id, or raise 422.
+    """Return the task's single active contract id, or raise.
+
+    A milestone requires a live contract. `completed` and `terminated` are dead
+    ends: a completed contract has already passed the fn_mark_contract_complete
+    gate (all milestones closed), so a new one would silently void it; a
+    terminated one is gone. Both are rejected with 409 naming the state. A task
+    with no contract at all is 422 (nothing exists yet to attach to).
 
     # NOTE: lenient gate — allows milestones while a contract is still
-    # 'sent_for_signature'. To require a SIGNED contract, filter
-    # status IN ('executed','active') here (and in the frontend
-    # useTaskActiveContract query). See the plan FLIP POINT.
+    # 'sent_for_signature'. To require a SIGNED contract, keep only
+    # status IN ('executed','active') as `active` below (and mirror it in the
+    # frontend useTaskActiveContract query). See the plan FLIP POINT.
     """
     resp = (
         db.table("contracts")
-        .select("id")
+        .select("id, status")
         .eq("task_id", str(task_id))
-        .neq("status", "terminated")
-        .limit(1)
         .execute()
     )
-    row = _first(resp.data)
-    if not row:
+    rows = resp.data or []
+    if not rows:
         raise MilestoneError(
             422,
             "Task has no active contract; a contract must exist before "
             "milestones can be added.",
         )
-    return row["id"]
+    # idx_contracts_one_active_per_task guarantees at most one non-terminated
+    # contract, so this picks the single live/completed one when it exists.
+    active = next((r for r in rows if r["status"] != "terminated"), None)
+    if active is None:
+        raise MilestoneError(
+            409,
+            "This task's contract is terminated; milestones cannot be added.",
+        )
+    if active["status"] == "completed":
+        raise MilestoneError(
+            409,
+            "This task's contract is completed; milestones cannot be added.",
+        )
+    return active["id"]
 
 
 def _get_milestone_or_404(db: Client, milestone_id: str) -> dict:
@@ -209,13 +239,15 @@ def _date_str(value: Any) -> str | None:
 def create_milestone(payload, *, created_by: str, db: Client) -> dict:
     """Create a milestone for the task's active contract.
 
-    Resolves contract_id server-side (contract gate), validates the date window,
-    computes the next sort_order, then calls `fn_create_milestone` so the row and
-    its opening `creation` ledger event are written atomically. `baseline_end_date`
-    is frozen to `end_date` by the RPC.
+    Resolves contract_id server-side (contract gate rejects completed/terminated),
+    validates the date window (end >= start, start not in the past), computes the
+    next sort_order, then calls `fn_create_milestone` so the row and its opening
+    `creation` ledger event are written atomically. `baseline_end_date` is frozen
+    to `end_date` by the RPC.
     """
     contract_id = _resolve_active_contract_id(db, str(payload.task_id))
     validate_date_order(payload.start_date, payload.end_date)
+    validate_not_past(payload.start_date)
     sort_order = next_sort_order(_existing_sort_orders(db, str(payload.task_id)))
 
     try:
@@ -273,6 +305,12 @@ def update_milestone(milestone_id: str, payload, *, db: Client) -> dict:
         new_end = update_data.get("end_date", current.get("end_date"))
         if new_start is not None and new_end is not None:
             validate_date_order(_as_date(new_start), _as_date(new_end))
+        # Moving the start into the past would strand it in 'scheduled' the same
+        # way a past start on create would, so guard the Edit path too. Only when
+        # start_date is actually being changed (a legacy past-start row may still
+        # have its end/name edited).
+        if "start_date" in update_data:
+            validate_not_past(_as_date(update_data["start_date"]))
 
     if "start_date" in update_data:
         update_data["start_date"] = _date_str(update_data["start_date"])
@@ -304,37 +342,6 @@ def update_milestone(milestone_id: str, payload, *, db: Client) -> dict:
         ) from exc
 
     return _first(resp.data) or current
-
-
-def delete_milestone(milestone_id: str, *, db: Client) -> None:
-    """Delete a PRISTINE milestone (created by mistake, no activity).
-
-    Blocked (409) once any milestone_responses / milestone_alerts row exists —
-    those are real history; the milestone should be cancelled instead. (The
-    milestone's own creation event CASCADEs, so the ledger never blocks a delete.)
-    """
-    _get_milestone_or_404(db, milestone_id)
-
-    if _milestone_has_rows(db, "milestone_responses", milestone_id) or _milestone_has_rows(
-        db, "milestone_alerts", milestone_id
-    ):
-        raise MilestoneError(
-            409,
-            "This milestone has recorded activity. Cancel it instead of deleting.",
-        )
-
-    try:
-        db.table("milestones").delete().eq("id", str(milestone_id)).execute()
-    except APIError as exc:
-        if _is_fk_violation(exc):
-            raise MilestoneError(
-                409,
-                "This milestone has recorded activity. Cancel it instead of deleting.",
-            ) from exc
-        logger.error("Supabase delete failed for milestones: %s", exc)
-        raise MilestoneError(
-            422, f"Failed to delete milestone: {exc.message}"
-        ) from exc
 
 
 def _transition(
@@ -419,7 +426,20 @@ def reschedule(milestone_id: str, *, actor_user_id: str, end_date: date, db: Cli
     A reschedule bumps cycle_number in the RPC, staleness-killing every outstanding
     check-in token for this milestone. baseline_end_date is left untouched — the gap
     to the moved end_date IS the drift.
+
+    Rejects a past end date here (422): the RPC's own guard only checks
+    new_end < start_date, so a past-but-after-start date would pass and resume the
+    milestone to in_progress with a finish that already elapsed. The date-vs-start
+    check stays in the RPC (it defends any writer); this past-date rule only needs
+    to hold on the one reachable path, and REVOKE makes the service that path.
     """
+    today = business_today()
+    if end_date < today:
+        raise MilestoneError(
+            422,
+            f"New end date ({end_date.isoformat()}) is in the past "
+            f"(today is {today.isoformat()}).",
+        )
     return _transition(
         milestone_id,
         action=_ACTION_RESCHEDULE,
