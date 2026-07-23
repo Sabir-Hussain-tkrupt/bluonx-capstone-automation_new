@@ -30,11 +30,13 @@ class VendorCreate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
     max_active_jobs: int | None = Field(default=None, ge=0)
-    onboarding_status: Literal["pending", "partial", "complete"] = "pending"
+    # "complete" is deliberately absent here. It requires a valid insurance
+    # certificate, and documents are stored under {vendor_id}/..., so none
+    # can exist before this row does. Promote the vendor after uploading one.
+    onboarding_status: Literal["pending", "partial"] = "pending"
     status: Literal["active", "inactive", "suspended"] = "active"
     notes: str | None = None
     # Optional inline creation of contacts and trade associations
@@ -50,7 +52,6 @@ class VendorUpdate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
     max_active_jobs: int | None = Field(default=None, ge=0)

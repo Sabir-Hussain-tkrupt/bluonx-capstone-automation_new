@@ -145,7 +145,12 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
         </>
       }
     >
-      <form id="task-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form
+        id="task-form"
+        onSubmit={handleSubmit(handleFormSubmit)}
+        className="space-y-6"
+        noValidate
+      >
         {/* Task Information */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Task Information</h3>
@@ -230,7 +235,7 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
             <FormField label="Budget Estimate ($)" error={errors.budget_estimate?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('budget_estimate')}
                 error={errors.budget_estimate?.message}

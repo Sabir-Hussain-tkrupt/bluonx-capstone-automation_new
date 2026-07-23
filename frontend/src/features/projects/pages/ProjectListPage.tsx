@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/constants/routes';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -246,6 +247,7 @@ export function ProjectListPage() {
                 setShowCreateForm(false);
                 toast({ variant: 'success', message: 'Project created successfully.' });
                 notifyGeocodeWarning(toast, created);
+                if (created?.id) navigate(ROUTES.PROJECT_DETAIL.replace(':id', created.id));
               },
               onError: (err) => {
                 toast({ variant: 'danger', message: errorMessage(err, 'Failed to create project.') });

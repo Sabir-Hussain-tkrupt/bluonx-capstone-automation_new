@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
+import type { Vendor } from '@/features/vendors/api/vendor.queries';
 
 // ─── Mutation Input Types ─────────────────────────────────────────────
 
@@ -88,8 +89,8 @@ export interface VendorImportResponse {
 
 // ─── FastAPI Write Operations ─────────────────────────────────────────
 
-export async function createVendor(input: CreateVendorInput) {
-  const { data } = await api.post(API_ENDPOINTS.VENDORS, input);
+export async function createVendor(input: CreateVendorInput): Promise<Vendor> {
+  const { data } = await api.post<Vendor>(API_ENDPOINTS.VENDORS, input);
   return data;
 }
 

@@ -18,7 +18,10 @@ from app.services.geocoding import (
     address_fields_changed,
     resolve_coordinates,
 )
-from app.services.vendor_service import recompute_vendor_insurance_expiration
+from app.services.vendor_service import (
+    missing_requirements_for_complete,
+    recompute_vendor_insurance_expiration,
+)
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
@@ -373,10 +376,6 @@ async def _create_vendor_with_contacts(
         if vendor_data.get(key) is not None:
             vendor_data[key] = str(vendor_data[key])
 
-    # Convert date fields to string
-    if vendor_data.get("insurance_expiration_date") is not None:
-        vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
-
     # Auto-geocode if address fields are provided. Never fatal: a vendor with
     # an address we cannot locate is still a vendor, it just sits out distance
     # filtering until the address is corrected.
@@ -470,7 +469,11 @@ async def update_vendor(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Update a vendor."""
+    """Update a vendor.
+
+    Marking a vendor onboarding_status='complete' is guarded: see
+    missing_requirements_for_complete. POST cannot set it at all.
+    """
     existing = _get_vendor_or_404(db, vendor_id)
 
     update_data = vendor.model_dump(exclude_unset=True)
@@ -479,6 +482,24 @@ async def update_vendor(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+
+    # Guard the promotion to 'complete'. Checked against the row as it will be
+    # AFTER this update, so a PATCH that supplies the missing address and marks
+    # the vendor complete in one call succeeds. 409 rather than 422: the payload
+    # is well formed, it is the vendor's state that blocks the transition.
+    if update_data.get("onboarding_status") == "complete":
+        merged_vendor = {**existing, **update_data}
+        missing = missing_requirements_for_complete(merged_vendor)
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot mark this vendor as complete without "
+                    + ", ".join(missing)
+                    + ". Upload the missing items first, or set the status to "
+                    "'partial' in the meantime."
+                ),
+            )
 
     # Re-geocode if any address field changed. Coordinates are derived data:
     # the client cannot send them (they are not on VendorUpdate), so this is
@@ -500,10 +521,6 @@ async def update_vendor(
     for key in ("insurance_coverage_amount", "bonding_capacity", "latitude", "longitude"):
         if key in update_data and update_data[key] is not None:
             update_data[key] = str(update_data[key])
-
-    # Convert date fields to string
-    if "insurance_expiration_date" in update_data and update_data["insurance_expiration_date"] is not None:
-        update_data["insurance_expiration_date"] = update_data["insurance_expiration_date"].isoformat()
 
     try:
         response = (

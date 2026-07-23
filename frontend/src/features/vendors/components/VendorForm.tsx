@@ -20,11 +20,10 @@ const vendorSchema = z.object({
   city: z.string().max(100, 'City must be 100 characters or fewer').optional().or(z.literal('')),
   state: z.string().max(50, 'State must be 50 characters or fewer').optional().or(z.literal('')),
   zip_code: z.string().max(20, 'ZIP code must be 20 characters or fewer').optional().or(z.literal('')),
-  insurance_expiration_date: z.string().optional(),
   insurance_coverage_amount: z.coerce.number().min(0, 'Must be >= 0').optional().or(z.literal('')),
   bonding_capacity: z.coerce.number().min(0, 'Must be >= 0').optional().or(z.literal('')),
   max_active_jobs: z.coerce.number().int().min(0, 'Must be >= 0').optional().or(z.literal('')),
-  onboarding_status: z.enum(['pending', 'partial', 'complete']),
+  onboarding_status: z.enum(['pending', 'partial', 'complete']),  // 'complete' is edit-only; see the Select below
   status: z.enum(['active', 'inactive', 'suspended']),
   notes: z.string().optional(),
 });
@@ -69,7 +68,6 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
       city: vendor?.city ?? '',
       state: vendor?.state ?? '',
       zip_code: vendor?.zip_code ?? '',
-      insurance_expiration_date: vendor?.insurance_expiration_date ?? '',
       insurance_coverage_amount: vendor?.insurance_coverage_amount ?? ('' as unknown as number),
       bonding_capacity: vendor?.bonding_capacity ?? ('' as unknown as number),
       max_active_jobs: vendor?.max_active_jobs ?? ('' as unknown as number),
@@ -94,7 +92,6 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
       insurance_coverage_amount: data.insurance_coverage_amount === '' ? undefined : Number(data.insurance_coverage_amount),
       bonding_capacity: data.bonding_capacity === '' ? undefined : Number(data.bonding_capacity),
       max_active_jobs: data.max_active_jobs === '' ? undefined : Number(data.max_active_jobs),
-      insurance_expiration_date: data.insurance_expiration_date || undefined,
       address: data.address || undefined,
       city: data.city || undefined,
       state: data.state || undefined,
@@ -188,7 +185,12 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
         </>
       }
     >
-      <form id="vendor-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form
+        id="vendor-form"
+        onSubmit={handleSubmit(handleFormSubmit)}
+        className="space-y-6"
+        noValidate
+      >
         {/* Company Info */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Company Information</h3>
@@ -231,14 +233,28 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
                 ]}
               />
             </FormField>
-            <FormField label="Onboarding Status">
+            <FormField
+              label="Onboarding Status"
+              hint={
+                isEdit
+                  ? undefined
+                  : 'Mark complete after uploading an insurance certificate.'
+              }
+            >
               <Select
                 {...register('onboarding_status')}
-                options={[
-                  { value: 'pending', label: 'Pending' },
-                  { value: 'partial', label: 'Partial' },
-                  { value: 'complete', label: 'Complete' },
-                ]}
+                options={
+                  isEdit
+                    ? [
+                        { value: 'pending', label: 'Pending' },
+                        { value: 'partial', label: 'Partial' },
+                        { value: 'complete', label: 'Complete' },
+                      ]
+                    : [
+                        { value: 'pending', label: 'Pending' },
+                        { value: 'partial', label: 'Partial' },
+                      ]
+                }
               />
             </FormField>
           </div>
@@ -248,13 +264,18 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Insurance & Capacity</h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Insurance Expiration" error={errors.insurance_expiration_date?.message}>
-              <TextInput type="date" {...register('insurance_expiration_date')} />
-            </FormField>
+            {/* Insurance Expiration is intentionally absent. The column is a
+                derived mirror of MAX(expiration_date) over this vendor's valid
+                insurance certificates, recomputed on every document upload and
+                delete. A hand-typed value here would claim coverage no
+                certificate backs (turning the pre-award "uninsurable" block
+                into a pass) and would be silently overwritten by the next
+                document change. Set it by uploading a certificate on the
+                vendor detail page. */}
             <FormField label="Insurance Coverage ($)" error={errors.insurance_coverage_amount?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('insurance_coverage_amount')}
                 error={errors.insurance_coverage_amount?.message}
@@ -263,7 +284,7 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
             <FormField label="Bonding Capacity ($)" error={errors.bonding_capacity?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('bonding_capacity')}
                 error={errors.bonding_capacity?.message}

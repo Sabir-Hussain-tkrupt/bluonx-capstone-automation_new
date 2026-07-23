@@ -102,7 +102,12 @@ export function ProjectForm({ isOpen, onClose, project, onSubmit, isLoading = fa
         </>
       }
     >
-      <form id="project-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form
+        id="project-form"
+        onSubmit={handleSubmit(handleFormSubmit)}
+        className="space-y-6"
+        noValidate
+      >
         {/* Project Information */}
         <div>
           <h3 className="mb-3 text-sm font-semibold text-secondary-900">Project Information</h3>
@@ -162,7 +167,7 @@ export function ProjectForm({ isOpen, onClose, project, onSubmit, isLoading = fa
             <FormField label="Budget ($)" error={errors.budget?.message}>
               <TextInput
                 type="number"
-                step="0.01"
+                step="1000"
                 min="0"
                 {...register('budget')}
                 error={errors.budget?.message}

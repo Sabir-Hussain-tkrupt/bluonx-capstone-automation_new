@@ -7,6 +7,12 @@ import userEventBase from '@testing-library/user-event';
 // when the whole suite runs in parallel, making this file intermittently fail.
 const userEvent = userEventBase.setup({ delay: null });
 import { renderWithRouter } from '@/test/test-utils';
+
+const navigateMock = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => navigateMock };
+});
 import { VendorListPage } from '../VendorListPage';
 
 const useVendorsMock = vi.fn();
@@ -158,5 +164,51 @@ describe('VendorListPage create form', () => {
       within(dialog).getByText('Enter a valid email address for the contact.'),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText('Dana Reed')).not.toBeInTheDocument();
+  });
+});
+
+describe('VendorListPage create redirect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useVendorsMock.mockReturnValue(emptySuccess);
+  });
+
+  it('lands on the new vendor detail page after a successful create', async () => {
+    renderWithRouter(<VendorListPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Add Vendor' }));
+    const dialog = screen.getByRole('dialog');
+    await userEvent.type(within(dialog).getAllByRole('textbox')[0], 'Acme Grading');
+    await userEvent.type(within(dialog).getByPlaceholderText('Contact name *'), 'Dana Reed');
+    await userEvent.type(within(dialog).getByPlaceholderText('Email *'), 'dana@acme.com');
+    await userEvent.click(within(dialog).getByRole('button', { name: '+ Add Contact' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: /create vendor/i }));
+
+    expect(createMutateMock).toHaveBeenCalledTimes(1);
+
+    // Drive onSuccess the way React Query would. A new vendor cannot be marked
+    // onboarding-complete at creation, so the detail page (where the insurance
+    // upload lives) is the next step and we should land there.
+    const onSuccess = createMutateMock.mock.calls[0][1].onSuccess;
+    onSuccess({ id: 'v-new-1', company_name: 'Acme Grading' });
+
+    expect(navigateMock).toHaveBeenCalledWith('/vendors/v-new-1');
+  });
+
+  it('does not navigate when the create fails', async () => {
+    renderWithRouter(<VendorListPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Add Vendor' }));
+    const dialog = screen.getByRole('dialog');
+    await userEvent.type(within(dialog).getAllByRole('textbox')[0], 'Acme Grading');
+    await userEvent.type(within(dialog).getByPlaceholderText('Contact name *'), 'Dana Reed');
+    await userEvent.type(within(dialog).getByPlaceholderText('Email *'), 'dana@acme.com');
+    await userEvent.click(within(dialog).getByRole('button', { name: '+ Add Contact' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: /create vendor/i }));
+
+    const onError = createMutateMock.mock.calls[0][1].onError;
+    onError({ status: 409, message: 'A vendor named that already exists.' });
+
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

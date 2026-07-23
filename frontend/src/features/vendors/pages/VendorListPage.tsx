@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/constants/routes';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -284,6 +285,11 @@ export function VendorListPage() {
               setShowCreateForm(false);
               toast({ variant: 'success', message: 'Vendor created successfully.' });
               notifyGeocodeWarning(toast, created);
+              // Land on the detail page: a new vendor cannot be marked
+              // onboarding-complete at creation (no insurance certificate can
+              // exist yet), and the detail page is where that upload lives.
+              // Toasts outlive the navigation, so both still show.
+              if (created?.id) navigate(ROUTES.VENDOR_DETAIL.replace(':id', created.id));
             },
             onError: (error) => {
               toast({ variant: 'danger', message: (error as { message?: string }).message || 'Failed to create vendor.' });
