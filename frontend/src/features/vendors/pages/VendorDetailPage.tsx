@@ -27,9 +27,11 @@ import { TradeMultiSelect } from '@/features/vendors/components/TradeMultiSelect
 import { VendorDocumentUpload } from '@/features/vendors/components/VendorDocumentUpload';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
+import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import type { StatusVariant } from '@/components/ui/types';
 import type { ApiError } from '@/lib/api';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 /**
  * Prefer the server's message over a generic one.
@@ -348,7 +350,19 @@ export function VendorDetailPage() {
               <div>
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <Field label="Address" value={vendor.address} />
+                  <Field
+                    label="Address"
+                    value={
+                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                        {vendor.address}
+                        <AddressNotLocatableBadge
+                          address={vendor.address}
+                          latitude={vendor.latitude}
+                          entity="vendor"
+                        />
+                      </span>
+                    }
+                  />
                   <Field label="City" value={vendor.city} />
                   <Field label="State" value={vendor.state} />
                   <Field label="ZIP Code" value={vendor.zip_code} />
@@ -614,7 +628,11 @@ export function VendorDetailPage() {
             updateVendorMutation.mutate(
               { id: id!, ...formData } as Parameters<typeof updateVendorMutation.mutate>[0],
               {
-                onSuccess: () => { setShowEditForm(false); toast({ variant: 'success', message: 'Vendor updated.' }); },
+                onSuccess: (updated) => {
+                  setShowEditForm(false);
+                  toast({ variant: 'success', message: 'Vendor updated.' });
+                  notifyGeocodeWarning(toast, updated);
+                },
                 onError: (err) => toast({
                   variant: 'danger',
                   message: errorMessage(err, 'Failed to update vendor.'),

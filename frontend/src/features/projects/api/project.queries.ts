@@ -30,6 +30,12 @@ export interface Project {
   deleted_at: string | null;
   archived_at: string | null;
   archived_by: string | null;
+  /**
+   * Present only on a create/update response when geocoding could not refresh
+   * this record's coordinates. Non-fatal: the write succeeded. Surfaced as a
+   * warning toast so the user learns at save time rather than never.
+   */
+  geocode_warning?: string | null;
 }
 
 export interface ProjectListFilters {

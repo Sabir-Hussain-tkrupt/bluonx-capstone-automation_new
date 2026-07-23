@@ -12,7 +12,11 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
-from app.services.geocoding import geocode_address
+from app.services.geocoding import (
+    ADDRESS_FIELDS,
+    address_fields_changed,
+    resolve_coordinates,
+)
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
@@ -165,18 +169,16 @@ async def create_project(
         if project_data.get(key) is not None:
             project_data[key] = project_data[key].isoformat()
 
-    # Auto-geocode if address fields are provided
-    address_fields = (project.address, project.city, project.state, project.zip_code)
-    if any(f for f in address_fields):
-        try:
-            lat, lng = await geocode_address(
-                project.address, project.city, project.state, project.zip_code,
-            )
-            if lat is not None and lng is not None:
-                project_data["latitude"] = str(lat)
-                project_data["longitude"] = str(lng)
-        except Exception as exc:
-            logger.warning("Geocoding failed for project %s: %s", project.name, exc)
+    # Auto-geocode if address fields are provided. Never fatal: a project we
+    # cannot locate is still a project, but note that without coordinates the
+    # vendor distance filter has no origin to measure from.
+    geocode_warning: str | None = None
+    if any((project.address, project.city, project.state, project.zip_code)):
+        coord_updates, geocode_warning = await resolve_coordinates(
+            project.address, project.city, project.state, project.zip_code,
+        )
+        for key, value in coord_updates.items():
+            project_data[key] = str(value) if value is not None else None
 
     try:
         response = db.table("projects").insert(project_data).execute()
@@ -193,7 +195,7 @@ async def create_project(
             detail="Failed to create project",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -225,20 +227,18 @@ async def update_project(
             detail="estimated_end_date must be on or after start_date",
         )
 
-    # Re-geocode if any address field changed
-    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
-    if _ADDRESS_FIELDS & set(update_data.keys()):
-        try:
-            merged_address = update_data.get("address", existing.get("address"))
-            merged_city = update_data.get("city", existing.get("city"))
-            merged_state = update_data.get("state", existing.get("state"))
-            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
-            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
-            if lat is not None and lng is not None:
-                update_data["latitude"] = lat
-                update_data["longitude"] = lng
-        except Exception as exc:
-            logger.warning("Geocoding failed for project %s: %s", project_id, exc)
+    # Re-geocode if any address field changed. Same rules as vendors: a
+    # not-locatable address clears the stored coordinates rather than leaving
+    # the project pinned to where it used to be, while a failed lookup leaves
+    # them alone.
+    geocode_warning: str | None = None
+    if address_fields_changed(update_data):
+        merged = {
+            field: update_data.get(field, existing.get(field))
+            for field in ADDRESS_FIELDS
+        }
+        coord_updates, geocode_warning = await resolve_coordinates(**merged)
+        update_data.update(coord_updates)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("budget", "latitude", "longitude"):
@@ -270,7 +270,7 @@ async def update_project(
             detail="Project not found",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

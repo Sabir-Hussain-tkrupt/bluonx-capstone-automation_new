@@ -18,6 +18,7 @@ import type { Vendor, VendorListFilters } from '@/features/vendors/api/vendor.qu
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
 import type { ApiError } from '@/lib/api';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   active: 'success',
@@ -279,9 +280,10 @@ export function VendorListPage() {
         isLoading={createVendorMutation.isPending}
         onSubmit={(formData) => {
           createVendorMutation.mutate(formData as Parameters<typeof createVendorMutation.mutate>[0], {
-            onSuccess: () => {
+            onSuccess: (created) => {
               setShowCreateForm(false);
               toast({ variant: 'success', message: 'Vendor created successfully.' });
+              notifyGeocodeWarning(toast, created);
             },
             onError: (error) => {
               toast({ variant: 'danger', message: (error as { message?: string }).message || 'Failed to create vendor.' });

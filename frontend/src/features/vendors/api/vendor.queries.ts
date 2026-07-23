@@ -25,6 +25,12 @@ export interface Vendor {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /**
+   * Present only on a create/update response when geocoding could not refresh
+   * this record's coordinates. Non-fatal: the write succeeded. Surfaced as a
+   * warning toast so the user learns at save time rather than never.
+   */
+  geocode_warning?: string | null;
 }
 
 export interface VendorContact {

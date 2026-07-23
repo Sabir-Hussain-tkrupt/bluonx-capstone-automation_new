@@ -13,6 +13,7 @@ import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
+import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { MilestoneTimeline } from '@/features/milestones/components/MilestoneTimeline';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -30,6 +31,7 @@ import { ProjectDocumentUpload } from '@/features/projects/components/ProjectDoc
 import type { StatusVariant } from '@/components/ui/types';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
 import { errorMessage, type ApiError } from '@/lib/api';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -298,7 +300,19 @@ export function ProjectDetailPage() {
               <div>
                 <h3 className="mb-4 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">Location</h3>
                 <dl className="divide-y divide-secondary-100">
-                  <Field label="Address" value={project.address} />
+                  <Field
+                    label="Address"
+                    value={
+                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                        {project.address}
+                        <AddressNotLocatableBadge
+                          address={project.address}
+                          latitude={project.latitude}
+                          entity="project"
+                        />
+                      </span>
+                    }
+                  />
                   <Field label="City" value={project.city} />
                   <Field label="State" value={project.state} />
                   <Field label="ZIP Code" value={project.zip_code} />
@@ -376,7 +390,11 @@ export function ProjectDetailPage() {
             updateProjectMutation.mutate(
               { id: id!, ...formData } as Parameters<typeof updateProjectMutation.mutate>[0],
               {
-                onSuccess: () => { setShowEditForm(false); toast({ variant: 'success', message: 'Project updated.' }); },
+                onSuccess: (updated) => {
+                  setShowEditForm(false);
+                  toast({ variant: 'success', message: 'Project updated.' });
+                  notifyGeocodeWarning(toast, updated);
+                },
                 onError: (err) => toast({ variant: 'danger', message: errorMessage(err, 'Failed to update project.') }),
               },
             );

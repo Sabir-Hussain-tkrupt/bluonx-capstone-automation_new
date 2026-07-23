@@ -13,7 +13,11 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user, require_admin
-from app.services.geocoding import geocode_address
+from app.services.geocoding import (
+    ADDRESS_FIELDS,
+    address_fields_changed,
+    resolve_coordinates,
+)
 from app.services.vendor_service import recompute_vendor_insurance_expiration
 from app.core.file_validation import sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
@@ -373,19 +377,16 @@ async def _create_vendor_with_contacts(
     if vendor_data.get("insurance_expiration_date") is not None:
         vendor_data["insurance_expiration_date"] = vendor_data["insurance_expiration_date"].isoformat()
 
-    # Auto-geocode if address fields are provided
-    if geocode:
-        address_fields = (vendor.address, vendor.city, vendor.state, vendor.zip_code)
-        if any(f for f in address_fields):
-            try:
-                lat, lng = await geocode_address(
-                    vendor.address, vendor.city, vendor.state, vendor.zip_code,
-                )
-                if lat is not None and lng is not None:
-                    vendor_data["latitude"] = str(lat)
-                    vendor_data["longitude"] = str(lng)
-            except Exception as exc:
-                logger.warning("Geocoding failed for vendor %s: %s", vendor.company_name, exc)
+    # Auto-geocode if address fields are provided. Never fatal: a vendor with
+    # an address we cannot locate is still a vendor, it just sits out distance
+    # filtering until the address is corrected.
+    geocode_warning: str | None = None
+    if geocode and any((vendor.address, vendor.city, vendor.state, vendor.zip_code)):
+        coord_updates, geocode_warning = await resolve_coordinates(
+            vendor.address, vendor.city, vendor.state, vendor.zip_code,
+        )
+        for key, value in coord_updates.items():
+            vendor_data[key] = str(value) if value is not None else None
 
     try:
         response = db.table("vendors").insert(vendor_data).execute()
@@ -441,6 +442,7 @@ async def _create_vendor_with_contacts(
 
     return {
         **new_vendor,
+        "geocode_warning": geocode_warning,
         "contacts": created_contacts,
         "trades": trades_with_names,
         "documents": [],
@@ -478,23 +480,21 @@ async def update_vendor(
             detail="No fields to update",
         )
 
-    # Re-geocode if any address field changed
-    _ADDRESS_FIELDS = {"address", "city", "state", "zip_code"}
-    if _ADDRESS_FIELDS & set(update_data.keys()):
-        try:
-            merged_address = update_data.get("address", existing.get("address"))
-            merged_city = update_data.get("city", existing.get("city"))
-            merged_state = update_data.get("state", existing.get("state"))
-            merged_zip = update_data.get("zip_code", existing.get("zip_code"))
-            logger.info("Re-geocoding vendor %s: address=%s, city=%s, state=%s, zip=%s",
-                        vendor_id, merged_address, merged_city, merged_state, merged_zip)
-            lat, lng = await geocode_address(merged_address, merged_city, merged_state, merged_zip)
-            logger.info("Geocode result for vendor %s: lat=%s, lng=%s", vendor_id, lat, lng)
-            if lat is not None and lng is not None:
-                update_data["latitude"] = lat
-                update_data["longitude"] = lng
-        except Exception as exc:
-            logger.warning("Geocoding failed for vendor %s: %s", vendor_id, exc)
+    # Re-geocode if any address field changed. Coordinates are derived data:
+    # the client cannot send them (they are not on VendorUpdate), so this is
+    # the only writer.
+    geocode_warning: str | None = None
+    if address_fields_changed(update_data):
+        merged = {
+            field: update_data.get(field, existing.get(field))
+            for field in ADDRESS_FIELDS
+        }
+        coord_updates, geocode_warning = await resolve_coordinates(**merged)
+        # An empty patch means the lookup failed and the stored coordinates
+        # stand. A patch of Nones means the address is not locatable and the
+        # old coordinates must go, or the vendor keeps matching projects near
+        # wherever it used to be.
+        update_data.update(coord_updates)
 
     # Convert Decimal fields to string for JSON serialization
     for key in ("insurance_coverage_amount", "bonding_capacity", "latitude", "longitude"):
@@ -525,7 +525,7 @@ async def update_vendor(
             detail="Vendor not found",
         )
 
-    return response.data[0]
+    return {**response.data[0], "geocode_warning": geocode_warning}
 
 
 @router.delete("/vendors/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)

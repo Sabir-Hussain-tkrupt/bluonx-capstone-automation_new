@@ -49,8 +49,6 @@ class ProjectCreate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
     budget: Decimal | None = Field(default=None, ge=0)
     status: Literal["planning", "active", "on_hold", "completed", "cancelled"] = "planning"
     start_date: date | None = None
@@ -71,8 +69,6 @@ class ProjectUpdate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
     budget: Decimal | None = Field(default=None, ge=0)
     status: Literal["planning", "active", "on_hold", "completed", "cancelled"] | None = None
     start_date: date | None = None
@@ -107,6 +103,11 @@ class ProjectResponse(BluOnXBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    #: Set only on create/update when geocoding could not refresh this row's
+    #: coordinates. Null on reads. Non-fatal: the write succeeded, but the
+    #: record will not take part in distance filtering until the address is
+    #: fixed. Surfaced to the user as a warning toast.
+    geocode_warning: str | None = None
     archived_at: datetime | None = None
     archived_by: UUID | None = None
 

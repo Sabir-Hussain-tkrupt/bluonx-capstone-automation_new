@@ -30,8 +30,6 @@ class VendorCreate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
     insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
@@ -52,8 +50,6 @@ class VendorUpdate(BluOnXBase):
     city: str | None = Field(default=None, max_length=100)
     state: str | None = Field(default=None, max_length=50)
     zip_code: str | None = Field(default=None, max_length=20)
-    latitude: Decimal | None = None
-    longitude: Decimal | None = None
     insurance_expiration_date: date | None = None
     insurance_coverage_amount: Decimal | None = Field(default=None, ge=0)
     bonding_capacity: Decimal | None = Field(default=None, ge=0)
@@ -83,6 +79,11 @@ class VendorResponse(BluOnXBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    #: Set only on create/update when geocoding could not refresh this row's
+    #: coordinates. Null on reads. Non-fatal: the write succeeded, but the
+    #: record will not take part in distance filtering until the address is
+    #: fixed. Surfaced to the user as a warning toast.
+    geocode_warning: str | None = None
 
     @field_serializer(
         "latitude",

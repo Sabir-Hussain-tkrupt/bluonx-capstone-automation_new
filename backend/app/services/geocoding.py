@@ -151,6 +151,79 @@ async def geocode_address(
         raise GeocodingError(f"Geocoding HTTP error: {exc}") from exc
 
 
+# ── Coordinate resolution for writes ────────────────────────────────────────
+
+#: Address columns whose change invalidates stored coordinates.
+ADDRESS_FIELDS = ("address", "city", "state", "zip_code")
+
+_NOT_LOCATABLE_WARNING = (
+    "We couldn't locate this address on the map, so this record won't appear "
+    "in distance-based vendor searches."
+)
+_LOOKUP_FAILED_WARNING = (
+    "We couldn't reach the mapping service, so the coordinates for this "
+    "address were not updated."
+)
+
+
+def address_fields_changed(update_data: dict) -> bool:
+    """True if a partial update touches any address column."""
+    return bool(set(ADDRESS_FIELDS) & set(update_data.keys()))
+
+
+async def resolve_coordinates(
+    address: str | None,
+    city: str | None,
+    state: str | None,
+    zip_code: str | None,
+) -> tuple[dict, str | None]:
+    """Resolve an address to a coordinate patch plus an optional warning.
+
+    Returns (coord_updates, warning). Apply coord_updates over the row being
+    written; an empty dict means leave whatever is stored alone.
+
+    The three outcomes are deliberately different, because collapsing them is
+    what let stale coordinates survive an address change:
+
+    - Success              -> {"latitude": lat, "longitude": lng}, no warning.
+    - Address not locatable -> {"latitude": None, "longitude": None} + warning.
+      Covers ZERO_RESULTS and a cleared address. Nulling is the point: a
+      vendor that moved from Missouri to Texas must not keep its Missouri
+      coordinates behind a Texas address, silently matching the wrong
+      projects. Dropping out of distance filtering is the safe failure.
+    - Lookup failed         -> {} + warning, logged at error level. A transient
+      Google outage must not strip coordinates off every record edited during
+      it, so the stored values stand until the next successful save.
+
+    With no API key configured, returns ({}, None): geocoding is switched off,
+    which is not a failure worth warning about on every save.
+
+    Note geocode_address collapses "no key", "empty address" and ZERO_RESULTS
+    into the same (None, None), so the key is re-checked here first.
+    """
+    if not settings.GOOGLE_MAPS_API_KEY:
+        return {}, None
+
+    try:
+        lat, lng = await geocode_address(address, city, state, zip_code)
+    except GeocodingError as exc:
+        # Includes the rate-limit and auth subclasses. Loud, because a
+        # persistent failure here silently degrades vendor distance filtering
+        # across the whole system.
+        logger.error(
+            "Geocoding lookup failed for '%s': [%s] %s",
+            normalize_address(address, city, state, zip_code),
+            type(exc).__name__,
+            exc,
+        )
+        return {}, _LOOKUP_FAILED_WARNING
+
+    if lat is None or lng is None:
+        return {"latitude": None, "longitude": None}, _NOT_LOCATABLE_WARNING
+
+    return {"latitude": lat, "longitude": lng}, None
+
+
 def clear_geocode_cache() -> None:
     """Clear the geocoding cache. Useful for testing."""
     _geocode_cache.clear()

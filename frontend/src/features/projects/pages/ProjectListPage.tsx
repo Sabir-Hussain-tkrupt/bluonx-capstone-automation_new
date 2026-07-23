@@ -16,6 +16,7 @@ import { errorMessage } from '@/lib/api';
 import type { Project, ProjectListFilters } from '@/features/projects/api/project.queries';
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
+import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -241,9 +242,10 @@ export function ProjectListPage() {
           isLoading={createProjectMutation.isPending}
           onSubmit={(formData) => {
             createProjectMutation.mutate(formData as unknown as Parameters<typeof createProjectMutation.mutate>[0], {
-              onSuccess: () => {
+              onSuccess: (created) => {
                 setShowCreateForm(false);
                 toast({ variant: 'success', message: 'Project created successfully.' });
+                notifyGeocodeWarning(toast, created);
               },
               onError: (err) => {
                 toast({ variant: 'danger', message: errorMessage(err, 'Failed to create project.') });
