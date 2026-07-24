@@ -1,8 +1,18 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import {
+  ArrowLeft,
+  CalendarClock,
+  CheckCircle2,
+  MoreHorizontal,
+  Pencil,
+  PlayCircle,
+  XCircle,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Card } from '@/components/ui/Card';
+import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
@@ -182,80 +192,113 @@ export function MilestoneDetailPage() {
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button variant="outline" onClick={() => setShowEdit(true)}>
+        <div className="flex shrink-0 items-center gap-2">
+          {canStart && (
+            <Button
+              variant="success"
+              leftIcon={<PlayCircle className="h-4 w-4" />}
+              onClick={handleStart}
+              isLoading={startMutation.isPending}
+            >
+              Mark Started
+            </Button>
+          )}
+          {canComplete && (
+            <Button
+              variant="success"
+              leftIcon={<CheckCircle2 className="h-4 w-4" />}
+              onClick={openComplete}
+            >
+              Mark Completed
+            </Button>
+          )}
+          {canReschedule && (
+            <Button
+              variant="outline"
+              leftIcon={<CalendarClock className="h-4 w-4" />}
+              onClick={() => setShowReschedule(true)}
+            >
+              Reschedule
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            leftIcon={<Pencil className="h-4 w-4" />}
+            onClick={() => setShowEdit(true)}
+          >
             Edit
           </Button>
+          {canCancel && (
+            <DropdownMenu
+              trigger={
+                <IconButton
+                  variant="outline"
+                  size="md"
+                  icon={<MoreHorizontal className="h-4 w-4" />}
+                  aria-label="More actions"
+                />
+              }
+            >
+              <DropdownMenuItem
+                icon={<XCircle className="h-4 w-4" />}
+                destructive
+                onClick={() => setShowCancel(true)}
+              >
+                Cancel Milestone
+              </DropdownMenuItem>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
       {/* Timeline + Notes */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <Card>
-          <div className="p-6">
-            <h3 className="mb-3 text-sm font-semibold text-secondary-900">Timeline</h3>
-            <dl className="divide-y divide-secondary-100">
-              <InfoRow label="Planned Start" value={formatMilestoneDate(milestone.start_date)} />
-              <InfoRow
-                label="Planned End"
-                value={
-                  endDrifted ? (
-                    <span>
-                      {formatMilestoneDate(milestone.end_date)}{' '}
-                      <span className="text-warning-600">
-                        (committed: {formatMilestoneDate(milestone.baseline_end_date)})
+      <Card>
+        <div className="p-6">
+          <div className="space-y-6">
+            <section>
+              <h3 className="mb-3 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">
+                Timeline
+              </h3>
+              <dl className="divide-y divide-secondary-100">
+                <InfoRow label="Planned Start" value={formatMilestoneDate(milestone.start_date)} />
+                <InfoRow
+                  label="Planned End"
+                  value={
+                    endDrifted ? (
+                      <span>
+                        {formatMilestoneDate(milestone.end_date)}{' '}
+                        <span className="text-warning-600">
+                          (committed: {formatMilestoneDate(milestone.baseline_end_date)})
+                        </span>
                       </span>
-                    </span>
-                  ) : (
-                    formatMilestoneDate(milestone.end_date)
-                  )
-                }
-              />
-              <InfoRow label="Actual Start" value={formatMilestoneDate(milestone.actual_start_date)} />
-              <InfoRow label="Actual End" value={formatMilestoneDate(milestone.actual_end_date)} />
-            </dl>
-          </div>
-        </Card>
+                    ) : (
+                      formatMilestoneDate(milestone.end_date)
+                    )
+                  }
+                />
+                <InfoRow
+                  label="Actual Start"
+                  value={formatMilestoneDate(milestone.actual_start_date)}
+                />
+                <InfoRow label="Actual End" value={formatMilestoneDate(milestone.actual_end_date)} />
+              </dl>
+            </section>
 
-        <Card>
-          <div className="p-6">
-            <h3 className="mb-3 text-sm font-semibold text-secondary-900">Notes</h3>
-            {milestone.notes ? (
-              <p className="whitespace-pre-wrap text-sm text-secondary-700">{milestone.notes}</p>
-            ) : (
-              <p className="text-sm text-secondary-500">No notes.</p>
-            )}
+            <section>
+              <h3 className="mb-3 border-b border-secondary-100 pb-2 text-base font-semibold text-secondary-900">
+                Notes
+              </h3>
+              {milestone.notes ? (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap text-secondary-700">
+                  {milestone.notes}
+                </p>
+              ) : (
+                <p className="text-sm text-secondary-500 italic">No notes.</p>
+              )}
+            </section>
           </div>
-        </Card>
-      </div>
-
-      {/* Actions */}
-      {(canStart || canComplete || canReschedule || canCancel) && (
-        <Card>
-          <div className="flex flex-wrap items-center gap-2 p-6">
-            {canStart && (
-              <Button onClick={handleStart} isLoading={startMutation.isPending}>
-                Mark Started
-              </Button>
-            )}
-            {canComplete && (
-              <Button variant="success" onClick={openComplete}>
-                Mark Completed
-              </Button>
-            )}
-            {canReschedule && (
-              <Button variant="outline" onClick={() => setShowReschedule(true)}>
-                Reschedule
-              </Button>
-            )}
-            {canCancel && (
-              <Button variant="ghost" onClick={() => setShowCancel(true)}>
-                Cancel Milestone
-              </Button>
-            )}
-          </div>
-        </Card>
-      )}
+        </div>
+      </Card>
 
       {/* Activity timeline (the unified ledger narrative) */}
       <MilestoneActivityTimeline milestoneId={milestone.id} />
