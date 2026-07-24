@@ -33,6 +33,7 @@ import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateF
 import { NotificationsPage } from '@/features/notifications/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TradesSettingsPage } from '@/features/trades';
+import { HolidayCalendarPage } from '@/features/holidays';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
@@ -121,6 +122,14 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        {/*
+          Not admin-gated, unlike its siblings: the calendar has a read-only
+          view for non-admins (write affordances are gated in-page on role),
+          and it is the only place the working-day / responsiveness rule is
+          documented for a PM. Reachable at the base ProtectedRoute (any
+          authenticated user).
+        */}
+        <Route path={ROUTES.SETTINGS_CALENDAR} element={<HolidayCalendarPage />} />
       </Route>
 
       {/* Vendor Portal — public, isolated from admin layout/auth */}

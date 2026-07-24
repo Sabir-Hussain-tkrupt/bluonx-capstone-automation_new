@@ -191,6 +191,12 @@ export const queryKeys = {
     unreadCount: () => [...queryKeys.notifications.all, 'unreadCount'] as const,
   },
 
+  holidays: {
+    all: ['holidays'] as const,
+    lists: () => [...queryKeys.holidays.all, 'list'] as const,
+    list: (year: number) => [...queryKeys.holidays.lists(), { year }] as const,
+  },
+
   dashboard: {
     all: ['dashboard'] as const,
     openTaskCount: () => [...queryKeys.dashboard.all, 'openTaskCount'] as const,

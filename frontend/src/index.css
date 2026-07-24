@@ -53,6 +53,16 @@
   --color-info-600: #0284c7;
   --color-info-700: #0369a1;
 
+  /* ─── Accent (Clay / terracotta) ─────────────────────────── */
+  /* Operator Hybrid earth-tone. Warms the primary actions against the
+     navy sidebar and off-white canvas without leaning on the blue primary. */
+  --color-accent-50: #faf5f0;
+  --color-accent-100: #f2e4d7;
+  --color-accent-200: #e6c8ac;
+  --color-accent-500: #b0693c;
+  --color-accent-600: #9a5733;
+  --color-accent-700: #7d452a;
+
   /* ─── Animations ───────────────────────────────────────── */
   --animate-slideIn: slideIn 0.2s ease-out;
 }
