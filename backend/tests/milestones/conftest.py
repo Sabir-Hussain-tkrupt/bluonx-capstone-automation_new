@@ -10,7 +10,7 @@ Auth + db are injected via FastAPI dependency overrides.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -20,6 +20,12 @@ from postgrest.exceptions import APIError
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
 from app.main import app
+from app.services import milestone_service
+
+# Pinned "today" for the whole milestone endpoint suite (see _pin_today). Every
+# fixture date (2026-08-xx / 2026-09-xx) sits after this, so the past-date guards
+# on create/update/reschedule treat them as future regardless of the wall clock.
+PINNED_TODAY = date(2026, 7, 1)
 
 # ── Deterministic IDs ──────────────────────────────────────────────────────
 
@@ -155,7 +161,6 @@ class FakeDB:
         existing_orders: list[int] | None = None,
         current_milestone: dict | None = None,
         milestone_missing: bool = False,
-        delete_fk_violation: bool = False,
         insert_error: APIError | None = None,
         has_alerts: bool = False,
         has_responses: bool = False,
@@ -165,7 +170,6 @@ class FakeDB:
         self.existing_orders = existing_orders or []
         self.current_milestone = current_milestone
         self.milestone_missing = milestone_missing
-        self.delete_fk_violation = delete_fk_violation
         self.insert_error = insert_error
         self.has_alerts = has_alerts
         self.has_responses = has_responses
@@ -173,7 +177,6 @@ class FakeDB:
         self.last_insert: dict | None = None
         self.last_update: dict | None = None
         self.last_rpc: dict | None = None
-        self.deleted = False
 
     def table(self, name: str) -> _Query:
         return _Query(name, self)
@@ -183,8 +186,12 @@ class FakeDB:
 
     def _dispatch(self, table, op, select, single, payload):
         if table == "contracts":
-            data = [self.contract_row] if self.contract_row else []
-            return _Result(data)
+            # _resolve_active_contract_id selects "id, status"; default a live
+            # status when a test only supplies an id (its focus is elsewhere).
+            row = self.contract_row
+            if row and "status" not in row:
+                row = {**row, "status": "active"}
+            return _Result([row] if row else [])
 
         if table in ("milestone_alerts", "milestone_responses"):
             if op == "select":
@@ -215,11 +222,6 @@ class FakeDB:
                 self.last_update = dict(payload)
                 merged = {**(self.current_milestone or milestone_row()), **payload}
                 return _Result([merged])
-            if op == "delete":
-                if self.delete_fk_violation:
-                    raise APIError({"code": "23503", "message": "violates foreign key constraint"})
-                self.deleted = True
-                return _Result([])
 
         return _Result([])
 
@@ -310,6 +312,13 @@ def make_client(db: FakeDB, authed_user: dict) -> TestClient:
     app.dependency_overrides[get_current_active_user] = lambda: authed_user
     app.dependency_overrides[get_supabase] = lambda: db
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    """Freeze business_today() so the create/update/reschedule past-date guards are
+    deterministic and every fixture date reads as future."""
+    monkeypatch.setattr(milestone_service, "business_today", lambda: PINNED_TODAY)
 
 
 @pytest.fixture(autouse=True)

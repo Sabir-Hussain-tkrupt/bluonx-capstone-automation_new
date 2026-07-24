@@ -33,10 +33,6 @@ export async function updateMilestone({ id, ...input }: UpdateMilestoneInput): P
   return data;
 }
 
-export async function deleteMilestone(id: string): Promise<void> {
-  await api.delete(API_ENDPOINTS.MILESTONE(id));
-}
-
 export async function markMilestoneStarted(
   id: string,
   actualStartDate?: string | null,

@@ -1,10 +1,11 @@
 """Mocked-Supabase endpoint tests for milestone writes (Phase 10 foundation).
 
-Exercises the contract gate, sort_order/contract_id resolution, the RPC-backed
-transitions (via a faithful FakeDB mirror of transition_milestone), the PATCH
-date-lock, the delete activity guard, and PT-SQLSTATE → HTTP mapping through the
-FastAPI router. The RPC's own invariants (cycle bump, immutable ledger row,
-baseline untouched) are covered in the integration suite.
+Exercises the contract gate (incl. completed/terminated rejection), sort_order/
+contract_id resolution, the RPC-backed transitions (via a faithful FakeDB mirror
+of transition_milestone), the PATCH date-lock, the create/update/reschedule
+past-date guards, and PT-SQLSTATE → HTTP mapping through the FastAPI router. The
+RPC's own invariants (cycle bump, immutable ledger row, baseline untouched) are
+covered in the integration suite.
 """
 
 from __future__ import annotations
@@ -264,37 +265,53 @@ def test_transition_pt422_maps_to_422(authed_user):
     assert resp.status_code == 422
 
 
-# ── delete ────────────────────────────────────────────────────────────────
+# ── contract-status gate: completed / terminated (item 1) ──────────────────
 
 
-def test_delete_ok(authed_user):
-    db = FakeDB(current_milestone=milestone_row())
+def test_create_blocked_when_contract_completed(authed_user):
+    db = FakeDB(contract_row={"id": str(CONTRACT_ID), "status": "completed"})
     client = make_client(db, authed_user)
-    resp = client.delete(f"{BASE}/{MILESTONE_ID}")
-    assert resp.status_code == 204
-    assert db.deleted is True
-
-
-def test_delete_blocked_when_responses_exist(authed_user):
-    db = FakeDB(current_milestone=milestone_row(), has_responses=True)
-    client = make_client(db, authed_user)
-    resp = client.delete(f"{BASE}/{MILESTONE_ID}")
+    resp = client.post(BASE, json=_create_body())
     assert resp.status_code == 409
-    assert "cancel it instead" in resp.json()["detail"].lower()
-    assert db.deleted is False
+    assert "completed" in resp.json()["detail"].lower()
+    assert db.last_rpc is None
 
 
-def test_delete_blocked_when_alerts_exist(authed_user):
-    db = FakeDB(current_milestone=milestone_row(), has_alerts=True)
+def test_create_blocked_when_contract_terminated(authed_user):
+    db = FakeDB(contract_row={"id": str(CONTRACT_ID), "status": "terminated"})
     client = make_client(db, authed_user)
-    resp = client.delete(f"{BASE}/{MILESTONE_ID}")
+    resp = client.post(BASE, json=_create_body())
     assert resp.status_code == 409
-    assert db.deleted is False
+    assert "terminated" in resp.json()["detail"].lower()
+    assert db.last_rpc is None
 
 
-def test_delete_409_on_fk_violation(authed_user):
-    db = FakeDB(current_milestone=milestone_row(), delete_fk_violation=True)
+# ── past-date guards: create / update / reschedule (items 3 & 5) ───────────
+# PINNED_TODAY is 2026-07-01 (conftest), so 2026-06-xx is in the past.
+
+
+def test_create_rejects_past_start_date(authed_user):
+    db = FakeDB(contract_row={"id": str(CONTRACT_ID)})
     client = make_client(db, authed_user)
-    resp = client.delete(f"{BASE}/{MILESTONE_ID}")
-    assert resp.status_code == 409
-    assert "cancel it instead" in resp.json()["detail"].lower()
+    resp = client.post(BASE, json=_create_body(start_date="2026-06-01", end_date="2026-06-30"))
+    assert resp.status_code == 422
+    assert "past" in resp.json()["detail"].lower()
+    assert db.last_rpc is None
+
+
+def test_update_rejects_moving_start_into_past(authed_user):
+    db = FakeDB(current_milestone=milestone_row(status="scheduled"))
+    client = make_client(db, authed_user)
+    resp = client.patch(f"{BASE}/{MILESTONE_ID}", json={"start_date": "2026-06-01"})
+    assert resp.status_code == 422
+    assert "past" in resp.json()["detail"].lower()
+    assert db.last_update is None
+
+
+def test_reschedule_rejects_past_end_date(authed_user):
+    db = FakeDB(current_milestone=milestone_row(status="in_progress"))
+    client = make_client(db, authed_user)
+    resp = client.post(f"{BASE}/{MILESTONE_ID}/reschedule", json={"end_date": "2026-06-01"})
+    assert resp.status_code == 422
+    assert "past" in resp.json()["detail"].lower()
+    assert db.last_rpc is None

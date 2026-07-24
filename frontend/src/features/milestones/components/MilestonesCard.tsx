@@ -14,14 +14,19 @@ import { MilestoneStatusBadge } from './MilestoneStatusBadge';
 interface MilestonesCardProps {
   taskId: string;
   projectId: string;
+  /** The task's active contract status. A completed contract has already passed
+   *  the mark-complete gate (all milestones closed), so no new milestone may be
+   *  added — the backend also rejects it with 409. */
+  contractStatus?: string;
 }
 
-export function MilestonesCard({ taskId, projectId }: MilestonesCardProps) {
+export function MilestonesCard({ taskId, projectId, contractStatus }: MilestonesCardProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { data: milestones = [], isLoading } = useMilestonesForTask(taskId);
   const createMutation = useCreateMilestone();
   const [showForm, setShowForm] = useState(false);
+  const canAddMilestone = contractStatus !== 'completed';
 
   const handleCreate = (data: MilestoneFormValues) => {
     createMutation.mutate(
@@ -52,9 +57,11 @@ export function MilestonesCard({ taskId, projectId }: MilestonesCardProps) {
       <div className="p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-secondary-900">Milestones</h3>
-          <Button size="sm" onClick={() => setShowForm(true)}>
-            Add Milestone
-          </Button>
+          {canAddMilestone && (
+            <Button size="sm" onClick={() => setShowForm(true)}>
+              Add Milestone
+            </Button>
+          )}
         </div>
 
         {isLoading ? (
@@ -71,7 +78,7 @@ export function MilestonesCard({ taskId, projectId }: MilestonesCardProps) {
                 <button
                   type="button"
                   onClick={() => navigate(buildMilestonePath(projectId, taskId, m.id))}
-                  className="flex w-full items-center justify-between gap-4 py-3 text-left hover:bg-secondary-50"
+                  className="flex w-full cursor-pointer items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-secondary-50"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-secondary-900">{m.name}</p>

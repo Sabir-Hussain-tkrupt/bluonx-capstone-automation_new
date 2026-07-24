@@ -79,17 +79,9 @@ async def update_milestone(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.delete("/milestones/{milestone_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_milestone(
-    milestone_id: UUID,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """Delete a milestone (blocked once it has recorded activity)."""
-    try:
-        milestone_service.delete_milestone(str(milestone_id), db=db)
-    except MilestoneError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+# No DELETE endpoint: the milestone_events ledger is append-only, so a milestone
+# can never be hard-deleted (the cascade into its immutable creation event is
+# blocked). A mistaken milestone is retired via POST /cancel instead.
 
 
 @router.post("/milestones/{milestone_id}/mark-started", response_model=MilestoneResponse)

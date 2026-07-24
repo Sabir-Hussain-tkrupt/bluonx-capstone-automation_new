@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
+import { todayStr } from '@/features/milestones/utils/today';
 import type { Milestone } from '@/features/milestones/api/milestone.queries';
 
 const milestoneSchema = z
@@ -111,6 +112,7 @@ export function MilestoneFormModal({
           <FormField label="Start Date" required error={errors.start_date?.message}>
             <TextInput
               type="date"
+              min={todayStr()}
               {...register('start_date')}
               error={errors.start_date?.message}
               disabled={datesLocked}
@@ -119,6 +121,7 @@ export function MilestoneFormModal({
           <FormField label="End Date" required error={errors.end_date?.message}>
             <TextInput
               type="date"
+              min={todayStr()}
               {...register('end_date')}
               error={errors.end_date?.message}
               disabled={datesLocked}

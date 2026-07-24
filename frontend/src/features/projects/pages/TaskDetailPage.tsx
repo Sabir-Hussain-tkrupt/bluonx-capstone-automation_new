@@ -242,7 +242,13 @@ export function TaskDetailPage() {
       {activeContract && <ContractPanel taskId={taskId!} contract={activeContract} />}
 
       {/* Milestones Section — only once the task has an active contract */}
-      {activeContract && <MilestonesCard taskId={taskId!} projectId={projectId!} />}
+      {activeContract && (
+        <MilestonesCard
+          taskId={taskId!}
+          projectId={projectId!}
+          contractStatus={activeContract.status}
+        />
+      )}
 
       {/* Edit Task Modal */}
       <TaskForm
