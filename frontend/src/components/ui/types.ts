@@ -4,6 +4,7 @@ export type ComponentSize = 'sm' | 'md' | 'lg';
 /** Button/Badge visual variants. */
 export type ComponentVariant =
   | 'primary'
+  | 'accent'
   | 'secondary'
   | 'danger'
   | 'success'

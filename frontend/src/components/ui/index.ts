@@ -26,6 +26,8 @@ export type { FormFieldProps } from './FormField';
 // Layout components
 export { Card } from './Card';
 export type { CardProps } from './Card';
+export { SettingsCard } from './SettingsCard';
+export type { SettingsCardProps } from './SettingsCard';
 export { Modal } from './Modal';
 export type { ModalProps } from './Modal';
 export { ConfirmDialog } from './ConfirmDialog';

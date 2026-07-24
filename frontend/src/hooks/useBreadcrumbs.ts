@@ -12,6 +12,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   bids: 'Bid Management',
   award: 'Award',
   settings: 'Settings',
+  calendar: 'Holiday Calendar',
 };
 
 /** Detects dynamic route segments (UUIDs or numeric IDs). */
