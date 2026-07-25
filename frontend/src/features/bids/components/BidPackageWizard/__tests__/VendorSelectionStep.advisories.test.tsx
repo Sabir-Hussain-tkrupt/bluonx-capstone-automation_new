@@ -117,6 +117,64 @@ describe('VendorSelectionStep advisories', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('disables the qualified checkbox and explains why when there is no contact', () => {
+    mockResponse([
+      makeVendor({ vendor_id: 'q-1', company_name: 'No Contact Qualified', primary_contact: null }),
+    ]);
+
+    renderWithRouter(<VendorSelectionStep {...props} />);
+
+    // Same treatment as the disqualified row: disabled with a hover note, not a
+    // silently-inert clickable box.
+    const checkbox = screen.getByRole('checkbox', { name: /no contact on file/i });
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).toHaveAttribute('title', expect.stringMatching(/no contact on file/i));
+  });
+
+  it('disables the disqualified checkbox when the vendor has no contact', async () => {
+    const user = userEvent.setup();
+    mockResponse(
+      [],
+      [
+        makeVendor({
+          vendor_id: 'v-3',
+          company_name: 'No Contact Co',
+          primary_contact: null,
+          qualification_status: 'disqualified',
+          disqualification_reasons: ['insurance_expired'],
+        }),
+      ],
+    );
+
+    renderWithRouter(<VendorSelectionStep {...props} />);
+    await user.click(screen.getByRole('button', { name: /disqualified vendor/i }));
+
+    // No contact = no email to invite, so the box must be blocked at source
+    // (not open the override modal only to silently no-op on confirm).
+    // Qualified list is empty, so the only checkbox is the disqualified row's.
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+  });
+
+  it('leaves the disqualified checkbox enabled when the vendor has a contact', async () => {
+    const user = userEvent.setup();
+    mockResponse(
+      [],
+      [
+        makeVendor({
+          vendor_id: 'v-4',
+          company_name: 'Has Contact Co',
+          qualification_status: 'disqualified',
+          disqualification_reasons: ['over_capacity'],
+        }),
+      ],
+    );
+
+    renderWithRouter(<VendorSelectionStep {...props} />);
+    await user.click(screen.getByRole('button', { name: /disqualified vendor/i }));
+
+    expect(screen.getByRole('checkbox')).toBeEnabled();
+  });
+
   it('keeps an expired vendor in the disqualified list, not as an advisory', async () => {
     const user = userEvent.setup();
     mockResponse(

@@ -25,6 +25,11 @@ function formatDate(value: string | null): string {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// A vendor with no contact has no email to invite, so its checkbox is disabled
+// in BOTH the qualified and disqualified lists. One string so the two never
+// explain it differently.
+const NO_CONTACT_TITLE = 'No contact on file, add one before inviting this vendor.';
+
 export function VendorSelectionStep({
   taskId,
   data,
@@ -320,8 +325,14 @@ export function VendorSelectionStep({
                         <td className="py-3 pr-2">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 rounded border-secondary-300 accent-primary-600"
+                            className="h-4 w-4 rounded border-secondary-300 accent-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
                             checked={selected.has(vendor.vendor_id)}
+                            // Mirror the qualified row: a vendor with no contact
+                            // can never be selected (no email to invite), so
+                            // block it at the checkbox instead of opening the
+                            // override modal only to silently no-op on confirm.
+                            disabled={!vendor.primary_contact}
+                            title={!vendor.primary_contact ? NO_CONTACT_TITLE : undefined}
                             onChange={() => {
                               if (selected.has(vendor.vendor_id)) {
                                 setSelected((prev) => {
@@ -437,10 +448,11 @@ function VendorRow({
         <td className="py-3 pr-2" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-secondary-300 accent-primary-600"
+            className="h-4 w-4 rounded border-secondary-300 accent-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
             checked={isSelected}
             onChange={onToggle}
             disabled={!contact}
+            title={!contact ? NO_CONTACT_TITLE : undefined}
           />
         </td>
         <td className="py-3 pr-4">
