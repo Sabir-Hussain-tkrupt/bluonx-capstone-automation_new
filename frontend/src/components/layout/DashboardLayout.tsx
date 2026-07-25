@@ -16,6 +16,7 @@ import { TopHeader } from '@/components/ui/TopHeader';
 import { UserMenuPanel, getInitials } from '@/components/ui/UserMenu';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { NotificationBell } from '@/features/notifications/components/NotificationBell';
+import { mainScrollRef } from '@/components/layout/mainScrollRef';
 import { useBreadcrumbs } from '@/hooks/useBreadcrumbs';
 import { usePausedMilestonesCount } from '@/features/dashboard/hooks/usePausedMilestones';
 import type { SidebarSection } from '@/components/ui/Sidebar';
@@ -133,7 +134,7 @@ export function DashboardLayout() {
   const userRole = profile?.role === 'admin' ? 'Admin' : 'Project Manager';
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Mobile sidebar overlay */}
       {mobileMenuOpen && (
         <div
@@ -179,15 +180,15 @@ export function DashboardLayout() {
       </div>
 
       {/* Main content area */}
-      <main className="flex-1 bg-secondary-100">
+      <main className="flex flex-1 flex-col overflow-hidden bg-secondary-100">
         <TopHeader
           onMenuToggle={() => setMobileMenuOpen((o) => !o)}
           breadcrumbs={<Breadcrumbs items={breadcrumbItems} />}
           notificationBell={<NotificationBell />}
         />
 
-        {/* Page content rendered by child routes */}
-        <div className="p-6">
+        {/* Page content rendered by child routes — the app's only scroll region */}
+        <div ref={mainScrollRef} className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </div>
       </main>
