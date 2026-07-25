@@ -30,6 +30,8 @@ from uuid import UUID
 from fastapi.concurrency import run_in_threadpool
 from supabase import Client
 
+from app.services.insurance_rules import classify_insurance
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -173,19 +175,23 @@ def check_insurance_validity(
         "estimated_end_date": _iso(estimated_end_date),
         "today": _iso(today),
     }
-    if insurance_expiration_date is None:
+    # Classification is shared with the vendor filter (services/insurance_rules)
+    # so the two stages can never drift; this function only maps the result to
+    # pre-award's severity + message shape.
+    status = classify_insurance(insurance_expiration_date, estimated_end_date, today)
+    if status == "missing":
         return _check(
             "insurance_validity", "warn",
             "Vendor has no insurance expiration on file; verify the certificate.",
             inputs,
         )
-    if insurance_expiration_date < today:
+    if status == "expired":
         return _check(
             "insurance_validity", "block",
             "Vendor insurance is expired; awarding is uninsurable liability.",
             inputs,
         )
-    if estimated_end_date is not None and insurance_expiration_date < estimated_end_date:
+    if status == "lapses_before_end":
         return _check(
             "insurance_validity", "warn",
             "Vendor insurance lapses before the project's estimated end date.",

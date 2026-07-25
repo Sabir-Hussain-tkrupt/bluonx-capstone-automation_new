@@ -25,6 +25,12 @@ export interface QualifiedVendor {
   flag_reasons: string[];
   qualification_status: 'qualified' | 'disqualified';
   disqualification_reasons: string[];
+  /**
+   * Non-blocking cautions. Unlike disqualification_reasons these do NOT
+   * exclude the vendor — a qualified vendor can carry advisories the PM
+   * should read before selecting (e.g. insurance lapses before project end).
+   */
+  advisories: string[];
 }
 
 export interface FilterCriteria {
