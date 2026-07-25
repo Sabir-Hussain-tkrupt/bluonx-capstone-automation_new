@@ -21,6 +21,7 @@ from app.models.vendor_filtering import (
     VendorPrimaryContact,
 )
 from app.services.distance import haversine_distance, routes_api_distance
+from app.services.insurance_rules import classify_insurance
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +87,20 @@ async def filter_qualified_vendors(
     if not has_project_coords:
         warnings.append("Project has no coordinates; distance filter skipped")
 
-    # Insurance cutoff: use project estimated_end_date if available, else today
-    if project.get("estimated_end_date"):
-        insurance_cutoff = date.fromisoformat(project["estimated_end_date"])
-    else:
-        insurance_cutoff = date.today()
+    # Insurance horizon: the project end date if known, else no horizon.
+    # The hard "expired" check is against today (below); project_end drives
+    # only the softer "lapses before the project ends" advisory. Keeping these
+    # separate is the fix for the old single-cutoff bug, where an overdue
+    # project (past estimated_end_date) pushed the cutoff into the past and let
+    # a vendor whose insurance had already lapsed still qualify.
+    today = date.today()
+    project_end = (
+        date.fromisoformat(project["estimated_end_date"])
+        if project.get("estimated_end_date")
+        else None
+    )
+    # Reported in filter_criteria as the coverage horizon (informational).
+    insurance_cutoff = project_end if project_end is not None else today
 
     # ── 3. Load trade name ──────────────────────────────────────────────
     try:
@@ -142,6 +152,7 @@ async def filter_qualified_vendors(
 
     for v in vendors:
         reasons: list[str] = []
+        advisories: list[str] = []
 
         # 5a. Status check
         if v.get("status") != "active":
@@ -151,14 +162,20 @@ async def filter_qualified_vendors(
         if v.get("onboarding_status") != "complete":
             reasons.append("onboarding_incomplete")
 
-        # 5c. Insurance check
+        # 5c. Insurance check. Two severities, one classifier (shared with
+        #     pre-award so the stages never disagree): a lapsed certificate
+        #     disqualifies, but one that is valid today and merely ends before
+        #     the project's estimated end is a non-blocking advisory — the
+        #     vendor stays selectable.
         ins_date_str = v.get("insurance_expiration_date")
-        if not ins_date_str:
+        ins_date = date.fromisoformat(str(ins_date_str)) if ins_date_str else None
+        ins_status = classify_insurance(ins_date, project_end, today)
+        if ins_status == "missing":
             reasons.append("insurance_missing")
-        else:
-            ins_date = date.fromisoformat(str(ins_date_str))
-            if ins_date <= insurance_cutoff:
-                reasons.append("insurance_expired")
+        elif ins_status == "expired":
+            reasons.append("insurance_expired")
+        elif ins_status == "lapses_before_end":
+            advisories.append("insurance_lapses_before_project_end")
 
         # 5d. Bonding check
         if budget_estimate is not None and v.get("bonding_capacity") is not None:
@@ -171,10 +188,14 @@ async def filter_qualified_vendors(
         if max_jobs is not None and current_jobs >= max_jobs:
             reasons.append("over_capacity")
 
+        # Advisories are orthogonal to qualification: a vendor can be qualified
+        # with an advisory, or disqualified for another reason yet still carry
+        # one. Both buckets keep the advisories list.
+        entry = {"vendor": v, "reasons": reasons, "advisories": advisories}
         if reasons:
-            disqualified_raw.append({"vendor": v, "reasons": reasons})
+            disqualified_raw.append(entry)
         else:
-            qualified_raw.append({"vendor": v, "reasons": []})
+            qualified_raw.append(entry)
 
     # ── 6. Distance filter (only on qualified set) ──────────────────────
     if has_project_coords and qualified_raw:
@@ -359,6 +380,7 @@ async def filter_qualified_vendors(
             flag_reasons=vendor_flags,
             qualification_status=status,
             disqualification_reasons=reasons,
+            advisories=entry.get("advisories", []),
         )
 
     qualified = [_build_vendor(e, "qualified") for e in qualified_raw]

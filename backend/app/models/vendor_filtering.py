@@ -40,6 +40,10 @@ class FilteredVendor(BluOnXBase):
     flag_reasons: list[str] = Field(default_factory=list)
     qualification_status: str  # "qualified" or "disqualified"
     disqualification_reasons: list[str] = Field(default_factory=list)
+    # Non-blocking cautions. Unlike disqualification_reasons, these do NOT
+    # exclude the vendor — a qualified vendor can carry advisories the PM
+    # should read before selecting (e.g. insurance lapses before project end).
+    advisories: list[str] = Field(default_factory=list)
 
 
 class FilterCriteria(BluOnXBase):

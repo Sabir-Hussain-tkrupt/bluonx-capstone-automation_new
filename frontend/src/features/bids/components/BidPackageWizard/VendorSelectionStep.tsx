@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -24,6 +24,11 @@ function formatDate(value: string | null): string {
   if (!value) return '\u2014';
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+// A vendor with no contact has no email to invite, so its checkbox is disabled
+// in BOTH the qualified and disqualified lists. One string so the two never
+// explain it differently.
+const NO_CONTACT_TITLE = 'No contact on file, add one before inviting this vendor.';
 
 export function VendorSelectionStep({
   taskId,
@@ -320,8 +325,14 @@ export function VendorSelectionStep({
                         <td className="py-3 pr-2">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 rounded border-secondary-300 accent-primary-600"
+                            className="h-4 w-4 rounded border-secondary-300 accent-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
                             checked={selected.has(vendor.vendor_id)}
+                            // Mirror the qualified row: a vendor with no contact
+                            // can never be selected (no email to invite), so
+                            // block it at the checkbox instead of opening the
+                            // override modal only to silently no-op on confirm.
+                            disabled={!vendor.primary_contact}
+                            title={!vendor.primary_contact ? NO_CONTACT_TITLE : undefined}
                             onChange={() => {
                               if (selected.has(vendor.vendor_id)) {
                                 setSelected((prev) => {
@@ -437,21 +448,38 @@ function VendorRow({
         <td className="py-3 pr-2" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-secondary-300 accent-primary-600"
+            className="h-4 w-4 rounded border-secondary-300 accent-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
             checked={isSelected}
             onChange={onToggle}
             disabled={!contact}
+            title={!contact ? NO_CONTACT_TITLE : undefined}
           />
         </td>
         <td className="py-3 pr-4">
-          <div className="font-medium text-secondary-900">{vendor.company_name}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium text-secondary-900">{vendor.company_name}</span>
+            {/* Advisory indicator — a non-blocking caution on a still-selectable
+                vendor. Distinct icon (Info) from the flags AlertTriangle so the
+                two are not confused; details live in the expanded row. */}
+            {vendor.advisories.length > 0 && (
+              <span
+                className="inline-flex cursor-help items-center text-warning-600"
+                title={vendor.advisories.map((a) => a.replace(/_/g, ' ')).join(', ')}
+              >
+                <Info className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">
+                  Has {vendor.advisories.length} advisory note(s)
+                </span>
+              </span>
+            )}
+          </div>
           {/* Mobile-only contact info */}
           <div className="mt-0.5 text-xs text-secondary-400 md:hidden">
             {contact?.full_name ?? 'No contact'}
           </div>
         </td>
         <td className="hidden py-3 pr-4 md:table-cell">
-          {contact?.full_name ?? <span className="text-secondary-400">\u2014</span>}
+          {contact?.full_name ?? <span className="text-secondary-400">{'\u2014'}</span>}
         </td>
         <td className="hidden py-3 pr-4 text-secondary-600 lg:table-cell">
           {contact?.email ?? '\u2014'}
@@ -472,7 +500,7 @@ function VendorRow({
               {formatDate(vendor.insurance_expiration_date)}
             </span>
           ) : (
-            <span className="text-secondary-400">\u2014</span>
+            <span className="text-secondary-400">{'\u2014'}</span>
           )}
         </td>
         <td className="hidden py-3 pr-4 text-center lg:table-cell">
@@ -490,7 +518,7 @@ function VendorRow({
               <span className="text-xs">{vendor.unresolved_flag_count}</span>
             </span>
           ) : (
-            <span className="text-secondary-300">\u2014</span>
+            <span className="text-secondary-300">{'\u2014'}</span>
           )}
         </td>
       </tr>
@@ -535,6 +563,21 @@ function VendorRow({
                   <div className="mt-1 flex flex-wrap gap-1">
                     {vendor.flag_reasons.map((reason, i) => (
                       <StatusBadge key={i} status={reason} variant="warning" size="sm" />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Advisories — cautions that do NOT disqualify. Kept visually
+                  separate from PM-created Flags above and from the exclusion
+                  reasons shown in the disqualified list. */}
+              {vendor.advisories.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">
+                    Advisories
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {vendor.advisories.map((advisory, i) => (
+                      <StatusBadge key={i} status={advisory} variant="warning" size="sm" />
                     ))}
                   </div>
                 </div>
