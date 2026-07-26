@@ -119,7 +119,7 @@ export function VendorListPage() {
       id: 'status',
       header: 'Status',
       accessor: (row: Vendor) => (
-        <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} />
+        <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} minWidth />
       ),
       sortable: true,
     },
@@ -127,7 +127,7 @@ export function VendorListPage() {
       id: 'onboarding_status',
       header: 'Onboarding',
       accessor: (row: Vendor) => (
-        <StatusBadge status={row.onboarding_status} variant={onboardingVariantMap[row.onboarding_status] ?? 'neutral'} />
+        <StatusBadge status={row.onboarding_status} variant={onboardingVariantMap[row.onboarding_status] ?? 'neutral'} minWidth />
       ),
       sortable: true,
     },
@@ -138,7 +138,7 @@ export function VendorListPage() {
         const max = row.max_active_jobs;
         return max ? `${row.current_active_jobs} / ${max}` : `${row.current_active_jobs}`;
       },
-      align: 'center' as const,
+      align: 'right' as const,
     },
   ], []);
 
@@ -235,6 +235,10 @@ export function VendorListPage() {
 
       {/* Table */}
       <Table
+        // Darker outer edge than the shared default so the list card reads as
+        // a distinct surface against the page background. Scoped to list pages;
+        // the embedded InvitationsTable keeps the lighter secondary-200 edge.
+        className="border-secondary-400"
         columns={columns}
         data={vendors}
         keyExtractor={(row) => row.id}

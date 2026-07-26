@@ -110,9 +110,9 @@ export function ProjectListPage() {
       header: 'Status',
       accessor: (row: Project) =>
         row.archived_at ? (
-          <StatusBadge status="archived" variant="neutral" />
+          <StatusBadge status="archived" variant="neutral" minWidth />
         ) : (
-          <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} />
+          <StatusBadge status={row.status} variant={statusVariantMap[row.status] ?? 'neutral'} minWidth />
         ),
       sortable: true,
     },
@@ -197,6 +197,8 @@ export function ProjectListPage() {
 
       {/* Table */}
       <Table
+        // Darker list-card edge (see VendorListPage); scoped to list pages.
+        className="border-secondary-400"
         columns={columns}
         data={projects}
         keyExtractor={(row) => row.id}

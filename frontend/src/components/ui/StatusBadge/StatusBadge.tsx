@@ -6,6 +6,13 @@ export interface StatusBadgeProps {
   size?: ComponentSize;
   variant?: StatusVariant;
   dot?: boolean;
+  /**
+   * Pad short labels to a uniform minimum width and center their content.
+   * Opt-in for table columns, where content-sized pills read as ragged
+   * ("Active" vs "Suspended"). Off by default so inline usages (detail-page
+   * header pills, badges inside text/Fields) keep their natural width.
+   */
+  minWidth?: boolean;
 }
 
 const STATUS_MAP: Record<string, StatusVariant> = {
@@ -93,6 +100,7 @@ export function StatusBadge({
   size = 'md',
   variant,
   dot = true,
+  minWidth = false,
 }: StatusBadgeProps) {
   const resolved = variant ?? STATUS_MAP[status] ?? 'neutral';
   const label = formatStatus(status);
@@ -103,6 +111,7 @@ export function StatusBadge({
         'inline-flex items-center gap-1.5 rounded-full font-medium',
         variantStyles[resolved],
         sizeStyles[size],
+        minWidth && 'min-w-[90px] justify-center',
       )}
       aria-label={label}
     >

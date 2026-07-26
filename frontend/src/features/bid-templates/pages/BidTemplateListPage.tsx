@@ -161,6 +161,7 @@ export function BidTemplateListPage() {
             status={row.is_lump_sum ? 'lump_sum' : 'line_items'}
             variant={row.is_lump_sum ? 'info' : 'success'}
             dot={false}
+            minWidth
           />
         ),
         sortable: true,
@@ -170,7 +171,7 @@ export function BidTemplateListPage() {
         header: 'Items',
         accessor: (row: BidTemplate) =>
           row.is_lump_sum ? '-' : String(row.item_count),
-        align: 'center' as const,
+        align: 'right' as const,
       },
       {
         id: 'created_at',
@@ -281,6 +282,8 @@ export function BidTemplateListPage() {
 
       {/* Table */}
       <Table
+        // Darker list-card edge (see VendorListPage); scoped to list pages.
+        className="border-secondary-400"
         columns={columns}
         data={templates}
         keyExtractor={(row) => row.id}

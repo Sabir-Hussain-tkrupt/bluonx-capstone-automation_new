@@ -1,21 +1,22 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Table } from '@/components/ui/Table';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ROUTES } from '@/constants/routes';
 import { useProjects } from '@/features/projects/hooks/useProjects';
 import { useBidPackagesList } from '@/features/bids/hooks/useBidPackagesList';
-import {
-  BidPackagesListTable,
-  BidPackagesListSkeleton,
-} from '@/features/bids/components/BidPackagesListTable';
+import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import type {
   BidPackageListFilters,
   BidPackageListSortBy,
   BidPackageListSortOrder,
   BidPackageListStatus,
+  BidPackagesListRow,
 } from '@/features/bids/api/bid-packages-list.queries';
+import type { Column } from '@/components/ui/Table';
 import { cn } from '@/utils/cn';
 
 type StatusChip = 'all' | BidPackageListStatus;
@@ -37,7 +38,74 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'project_name:desc', label: 'Project (Z–A)' },
 ];
 
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
+function formatDate(value: string): string {
+  return dateFormatter.format(new Date(value));
+}
+
+function bidPackageHref(row: BidPackagesListRow): string {
+  return ROUTES.BID_PACKAGE_DETAIL
+    .replace(':id', row.project_id)
+    .replace(':taskId', row.task_id)
+    .replace(':bidPackageId', row.id);
+}
+
+function DeadlineCell({ deadline }: { deadline: string }) {
+  const { remaining, isPassed, passedLabel } = useCountdown(deadline);
+  const label = isPassed ? (passedLabel ?? 'Deadline passed') : remaining;
+  return (
+    <span
+      className={cn(
+        'text-xs',
+        isPassed ? 'font-medium text-danger-600' : 'text-secondary-700',
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ProgressCell({
+  submitted,
+  total,
+}: {
+  submitted: number;
+  total: number;
+}) {
+  if (total === 0) {
+    return <span className="text-secondary-400">&mdash;</span>;
+  }
+  const pct = Math.min(100, Math.round((submitted / total) * 100));
+  return (
+    <div className="space-y-1">
+      <span className="text-xs text-secondary-700">
+        {submitted} / {total}
+      </span>
+      <div
+        className="h-1 w-24 overflow-hidden rounded-full bg-secondary-200"
+        aria-hidden="true"
+      >
+        <div className="h-full bg-info-500" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RoundBadge({ round }: { round: number }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-secondary-100 px-2 py-0.5 text-xs font-medium text-secondary-700">
+      R{round}
+    </span>
+  );
+}
+
 export function BidPackageListPage() {
+  const navigate = useNavigate();
   const [statusChip, setStatusChip] = useState<StatusChip>('open');
   const [projectId, setProjectId] = useState<string>('');
   const [sortValue, setSortValue] = useState<string>('deadline:asc');
@@ -79,6 +147,80 @@ export function BidPackageListPage() {
     setStatusChip('all');
     setProjectId('');
   };
+
+  // Sort is driven by the Select dropdown above, not clickable headers, so the
+  // shared Table's sort props are intentionally left unset (static headers).
+  const columns: Column<BidPackagesListRow>[] = useMemo(
+    () => [
+      {
+        id: 'project_task',
+        header: 'Project / Task',
+        // Inline spans (not block elements) so the same cell is valid markup
+        // whether it renders in a <td>, a mobile-card title <p>, or a <dd>.
+        accessor: (row) => (
+          <span className="block min-w-0">
+            <span className="block truncate font-medium text-secondary-900">
+              {row.project_name}
+            </span>
+            <span className="block truncate text-xs font-normal text-secondary-500">
+              {row.task_name}
+            </span>
+          </span>
+        ),
+      },
+      {
+        id: 'round',
+        header: 'Round',
+        accessor: (row) => <RoundBadge round={row.round_number} />,
+      },
+      {
+        id: 'deadline',
+        header: 'Deadline',
+        accessor: (row) => <DeadlineCell deadline={row.deadline} />,
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessor: (row) => <StatusBadge status={row.status} size="sm" minWidth />,
+      },
+      {
+        id: 'progress',
+        header: 'Progress',
+        accessor: (row) => (
+          <ProgressCell submitted={row.submitted_count} total={row.total_invitations} />
+        ),
+      },
+      {
+        id: 'created_at',
+        header: 'Created',
+        accessor: (row) => (
+          <span className="text-sm text-secondary-700">{formatDate(row.created_at)}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const emptyState = hasActiveFilters ? (
+    <EmptyState
+      title="No bid packages match these filters."
+      action={
+        <Button variant="outline" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      title="No bid packages yet."
+      description="Start bidding on a task to create one."
+      action={
+        <Link to={ROUTES.PROJECTS}>
+          <Button>Go to Projects</Button>
+        </Link>
+      }
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -132,32 +274,17 @@ export function BidPackageListPage() {
       </div>
 
       {/* Body */}
-      {isLoading ? (
-        <BidPackagesListSkeleton />
-      ) : !items || items.length === 0 ? (
-        hasActiveFilters ? (
-          <EmptyState
-            title="No bid packages match these filters."
-            action={
-              <Button variant="outline" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            }
-          />
-        ) : (
-          <EmptyState
-            title="No bid packages yet."
-            description="Start bidding on a task to create one."
-            action={
-              <Link to={ROUTES.PROJECTS}>
-                <Button>Go to Projects</Button>
-              </Link>
-            }
-          />
-        )
-      ) : (
-        <BidPackagesListTable items={items} />
-      )}
+      <Table
+        // Darker list-card edge (see VendorListPage); scoped to list pages.
+        className="border-secondary-400"
+        columns={columns}
+        data={items ?? []}
+        keyExtractor={(row) => row.id}
+        onRowClick={(row) => navigate(bidPackageHref(row))}
+        isLoading={isLoading}
+        mobileTitle="project_task"
+        emptyState={emptyState}
+      />
     </div>
   );
 }
