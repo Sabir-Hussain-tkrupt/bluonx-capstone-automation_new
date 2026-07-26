@@ -210,6 +210,8 @@ export function MilestoneListPage() {
 
       {/* Table */}
       <Table
+        // Darker list-card edge (see VendorListPage); scoped to list pages.
+        className="border-secondary-400"
         columns={columns}
         data={milestones}
         keyExtractor={(row) => row.milestone_id}

@@ -209,7 +209,7 @@ export function Table<T>({
           <thead>
             <tr className="border-b border-secondary-200 bg-secondary-50">
               {columns.map((col) => (
-                <th key={col.id} className="px-6 py-3">
+                <th key={col.id} className="px-4 py-3">
                   <Skeleton width="60%" height="16px" />
                 </th>
               ))}
@@ -219,7 +219,7 @@ export function Table<T>({
             {Array.from({ length: 5 }).map((_, i) => (
               <tr key={i} className="border-b border-secondary-100">
                 {columns.map((col) => (
-                  <td key={col.id} className="px-6 py-4">
+                  <td key={col.id} className="px-4 py-2.5">
                     <Skeleton height="16px" />
                   </td>
                 ))}
@@ -259,7 +259,7 @@ export function Table<T>({
                 <th
                   key={col.id}
                   className={cn(
-                    'px-6 py-3 text-xs font-medium uppercase tracking-wider text-secondary-500',
+                    'px-4 py-3 text-xs font-medium uppercase tracking-wider text-secondary-500',
                     alignStyles[col.align ?? 'left'],
                   )}
                 >
@@ -335,7 +335,7 @@ export function Table<T>({
                   <th
                     key={col.id}
                     className={cn(
-                      'px-6 py-3 text-xs font-medium uppercase tracking-wider text-secondary-500',
+                      'px-4 py-3 text-xs font-medium uppercase tracking-wider text-secondary-500',
                       alignStyles[col.align ?? 'left'],
                     )}
                     style={col.width ? { width: col.width } : undefined}
@@ -358,7 +358,7 @@ export function Table<T>({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-secondary-100 bg-white">
+          <tbody className="bg-white">
             {data.map((row) => (
               <tr
                 key={keyExtractor(row)}
@@ -378,7 +378,7 @@ export function Table<T>({
                     : undefined
                 }
                 className={cn(
-                  'transition-colors hover:bg-secondary-50',
+                  'transition-colors even:bg-secondary-100 hover:bg-secondary-200',
                   onRowClick && 'cursor-pointer focus-visible:bg-secondary-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500',
                 )}
               >
@@ -386,7 +386,7 @@ export function Table<T>({
                   <td
                     key={col.id}
                     className={cn(
-                      'px-6 py-4 text-sm text-secondary-900',
+                      'px-4 py-2.5 text-sm text-secondary-900',
                       alignStyles[col.align ?? 'left'],
                     )}
                   >
