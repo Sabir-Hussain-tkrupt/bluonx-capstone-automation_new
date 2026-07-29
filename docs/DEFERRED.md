@@ -65,3 +65,15 @@ If a manual-adjustment write path is ever added, the orchestrator at `backend/ap
 3. If terms should vary per contract rather than being firm-wide boilerplate, populate `contracts.payment_terms` at envelope-send in `contract_envelope_service.send_contract_envelope` (currently left NULL, which is why the default fires).
 
 Related: the same swappable template also carries the schedule/validity clauses and the dormant "Date of signed scope of work" seam — see Task 9.8.
+
+## User Management — invite rate limiter is per-process (Phase 3 / user management)
+
+`POST /api/v1/users/invite` reuses the in-memory sliding-window limiter in `backend/app/core/rate_limit.py` (`validate_token_rate_limit`, 10 req / 60s / IP). State is per worker process, not cluster-wide. This is acceptable today because production runs a single Fargate task (desiredCount=1), so per-process is effectively cluster-wide. Before scaling horizontally past one instance, move the limiter to a shared store (Redis or a DB-backed counter) so the bound holds across workers. Touchpoint: `backend/app/core/rate_limit.py` (swap the module-level `_buckets` dict for a shared backend); the invite endpoint dependency wiring stays the same.
+
+## User Management — per-service APIError/PT-code mapping un-refactored
+
+`user_service.py` follows the existing convention of each service catching `postgrest.exceptions.APIError` (and, elsewhere, PT4xx SQLSTATE codes) and mapping to HTTP status locally, rather than a shared exception handler. The copy-paste `_is_unique_violation` / `_has_pt_code` helper pattern remains duplicated across services (contract_service, award_service, bid_package_service, bid_revision_service, vendor_portal, and now the 23505 backstop in user_service). A single shared APIError -> HTTP translator (or a FastAPI exception handler) is deferred; consolidate when touching the error layer next.
+
+## User Management — no request-logging / correlation-id middleware
+
+The app registers only CORS middleware (`backend/app/main.py`); there is no request-logging or correlation-id middleware. User management mutates accounts (invite / role change / deactivate / soft-delete), so an audit trail of **who changed whom** is desirable and currently absent. `public.users.invited_by` captures invite attribution, but role changes, deactivations, and soft-deletes are not recorded anywhere. Add structured request logging (correlation IDs, actor id, target id, action) during production hardening; a dedicated `user_audit_log` table or append-only event stream would be the durable option.
