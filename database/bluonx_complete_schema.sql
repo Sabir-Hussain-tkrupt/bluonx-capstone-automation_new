@@ -70,6 +70,7 @@ CREATE TABLE users (
   full_name     VARCHAR(255)  NOT NULL,
   role          VARCHAR(20)   NOT NULL CHECK (role IN ('admin', 'project_manager')),
   is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
+  invited_by    UUID          REFERENCES users(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   deleted_at    TIMESTAMPTZ
@@ -77,6 +78,7 @@ CREATE TABLE users (
 
 COMMENT ON TABLE  users           IS 'Internal user profiles extending Supabase auth.users.';
 COMMENT ON COLUMN users.id        IS 'Matches auth.users.id — set on insert, not auto-generated.';
+COMMENT ON COLUMN users.invited_by IS 'Admin who sent the invite. NULL for the bootstrap admin and any dashboard-seeded user.';
 COMMENT ON COLUMN users.deleted_at IS 'Soft delete. NULL = active record.';
 
 
@@ -1477,7 +1479,7 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- NOTE: This trigger is on auth.users (Supabase managed schema).
 -- Run this AFTER the public schema is deployed.
