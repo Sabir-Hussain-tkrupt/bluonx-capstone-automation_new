@@ -1,0 +1,32 @@
+# Keep the build context small and free of host-only / secret files.
+# The Dockerfile only needs requirements.txt and app/.
+
+# Local virtualenv (huge; never belongs in the image)
+.venv/
+venv/
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local env (mounted/provided at runtime, not baked in)
+.env
+.env.*
+secrets/
+
+# Tests and dev-only scratch files
+tests/
+_manual_test_*.py
+tmp_rendered/
+sample_contract.pdf
+scripts/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
