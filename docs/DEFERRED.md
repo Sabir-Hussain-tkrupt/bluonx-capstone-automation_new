@@ -77,3 +77,15 @@ Related: the same swappable template also carries the schedule/validity clauses 
 ## User Management — no request-logging / correlation-id middleware
 
 The app registers only CORS middleware (`backend/app/main.py`); there is no request-logging or correlation-id middleware. User management mutates accounts (invite / role change / deactivate / soft-delete), so an audit trail of **who changed whom** is desirable and currently absent. `public.users.invited_by` captures invite attribution, but role changes, deactivations, and soft-deletes are not recorded anywhere. Add structured request logging (correlation IDs, actor id, target id, action) during production hardening; a dedicated `user_audit_log` table or append-only event stream would be the durable option.
+
+## User Management UI — accept-invite "already-onboarded" detection (Phase 3 frontend)
+
+`frontend/src/features/auth/pages/AcceptInvitePage.tsx` takes the idempotent path: whenever a live session exists it shows the set-password form, because the Supabase client `Session`/`User` exposes no reliable "has a password" signal (`user_metadata` / `app_metadata` / `identities` do not carry it). Setting a password again via `supabase.auth.updateUser` is harmless, so a user who returns to the link just re-sets it. A dedicated "you're already set up" state is deferred until a trustworthy client signal is available (e.g. a `public.users` onboarding flag surfaced through the profile, or a server endpoint that reports password status). Only the two reliably-detectable states are handled today: no session -> "invite link invalid or expired", session -> set-password form.
+
+## User Management UI — role shown as plain text, no role-badge token convention (Phase 3 frontend)
+
+The roster (`frontend/src/features/user-management/components/UserRosterTable.tsx`) renders `role` as plain text ("Admin" / "Project Manager") because no design-token convention exists for role pills (unlike `StatusBadge`, which owns account status). If a visual role treatment is later wanted, define a role-token mapping and a small badge, then swap the plain-text column. Kept as text for now to avoid inventing an ad hoc palette.
+
+## User Management UI — soft-deleted users cannot be restored via the app (Phase 3 frontend / Part 2 backend)
+
+Soft-delete is terminal in the UI: the backend `change_user` / `soft_delete_user` (`backend/app/services/user_service.py`) both call `_get_active_user_row`, which 404s when `deleted_at` is set, so no `PATCH`/`DELETE` can act on a soft-deleted row. The roster therefore only offers "Reactivate" for a deactivated row where `deleted_at IS NULL`, and hides delete/deactivate once deleted. A restore/undelete flow (a backend endpoint that clears `deleted_at` + re-activates, plus a UI action) is deferred; until then, un-deleting a user is a manual DB/dashboard operation.

@@ -19,6 +19,8 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   // Project statuses
   active: 'success',
   completed: 'success',
+  // User-management account statuses (active -> success above; pending -> warning below)
+  deactivated: 'danger',
   planning: 'info',
   on_hold: 'warning',
   cancelled: 'danger',

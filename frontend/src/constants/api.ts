@@ -6,6 +6,12 @@
  *
  */
 export const API_ENDPOINTS = {
+  // Users (admin-only management; all reads AND writes go through FastAPI)
+  USERS: '/users',
+  USER: (id: string) => `/users/${id}`,
+  USER_INVITE: '/users/invite',
+  USER_RESEND_INVITE: (id: string) => `/users/${id}/resend-invite`,
+
   // Vendors
   VENDORS: '/vendors',
   VENDOR: (id: string) => `/vendors/${id}`,

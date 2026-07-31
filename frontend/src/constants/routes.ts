@@ -10,6 +10,8 @@ export const ROUTES = {
   // Auth callback routes (Supabase redirects here)
   AUTH_CALLBACK: '/auth/callback',
   AUTH_RESET_PASSWORD: '/auth/reset-password',
+  // Invited user sets their password (bare route — arrives authenticated, passwordless)
+  ACCEPT_INVITE: '/accept-invite',
 
   // Protected routes
   DASHBOARD: '/dashboard',
@@ -34,6 +36,7 @@ export const ROUTES = {
   NOTIFICATIONS: '/notifications',
   SETTINGS: '/settings',
   SETTINGS_TRADES: '/settings/trades',
+  SETTINGS_USERS: '/settings/users',
   SETTINGS_CALENDAR: '/settings/calendar',
 
   // Error pages
