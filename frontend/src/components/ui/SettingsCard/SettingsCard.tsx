@@ -21,10 +21,10 @@ export function SettingsCard({ to, title, description, icon, comingSoon }: Setti
   const content = (
     <div
       className={cn(
-        'group flex items-start gap-4 rounded-lg border border-secondary-200 bg-white p-5 shadow-sm transition',
+        'group flex items-start gap-4 rounded-lg border border-secondary-300 bg-white p-5 shadow-md ring-1 ring-secondary-900/5 transition',
         comingSoon
           ? 'cursor-not-allowed opacity-60'
-          : 'hover:border-primary-400 hover:shadow-md',
+          : 'hover:-translate-y-0.5 hover:border-primary-400 hover:shadow-lg',
       )}
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600">

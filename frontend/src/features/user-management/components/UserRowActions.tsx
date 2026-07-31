@@ -22,6 +22,12 @@ interface UserRowActionsProps {
   user: UserAdminResponse;
   /** The signed-in admin's id — used to disable self-affecting actions (G1). */
   currentUserId: string | undefined;
+  /**
+   * Open the menu above the trigger instead of below. Set for the last rows so
+   * the panel is not clipped by the Table's overflow container (the menu has no
+   * collision-flip of its own). Scoped to this feature only.
+   */
+  openUpward?: boolean;
 }
 
 /**
@@ -33,7 +39,7 @@ interface UserRowActionsProps {
  * is intentionally NOT replicated client-side (the client can't know the live
  * active-admin count) — those attempts hit the API and surface its 409 `detail`.
  */
-export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
+export function UserRowActions({ user, currentUserId, openUpward = false }: UserRowActionsProps) {
   const { toast } = useToast();
   const updateUser = useUpdateUser();
   const resendInvite = useResendInvite();
@@ -117,6 +123,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
   return (
     <>
       <DropdownMenu
+        side={openUpward ? 'top' : 'bottom'}
         trigger={<IconButton icon={<MoreHorizontal className="h-4 w-4" />} aria-label={`Actions for ${user.full_name}`} />}
       >
         <DropdownMenuItem

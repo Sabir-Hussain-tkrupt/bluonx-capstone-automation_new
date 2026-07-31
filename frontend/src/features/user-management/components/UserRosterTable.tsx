@@ -29,6 +29,14 @@ export function UserRosterTable({
     return map;
   }, [users]);
 
+  // The row-action menu opens downward and has no collision-flip, so on the last
+  // rows it would be clipped by the Table's overflow container. Flip those rows'
+  // menus upward (they have empty space above). Scoped to this table only.
+  const flipUpIds = useMemo(() => {
+    const FLIP_LAST_N = 2;
+    return new Set(users.slice(Math.max(0, users.length - FLIP_LAST_N)).map((u) => u.id));
+  }, [users]);
+
   const columns: Column<UserAdminResponse>[] = useMemo(
     () => [
       { id: 'full_name', header: 'Name', accessor: 'full_name' },
@@ -53,14 +61,23 @@ export function UserRosterTable({
         id: 'actions',
         header: '',
         align: 'right',
-        accessor: (row) => <UserRowActions user={row} currentUserId={currentUserId} />,
+        accessor: (row) => (
+          <UserRowActions
+            user={row}
+            currentUserId={currentUserId}
+            openUpward={flipUpIds.has(row.id)}
+          />
+        ),
       },
     ],
-    [nameById, currentUserId],
+    [nameById, currentUserId, flipUpIds],
   );
 
   return (
     <Table
+      // Darker outer edge than the shared default so the list reads as a distinct
+      // surface against the page background (matches the vendors/list pages).
+      className="border-secondary-400"
       columns={columns}
       data={users}
       keyExtractor={(row) => row.id}
