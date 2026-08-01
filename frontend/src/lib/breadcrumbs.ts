@@ -162,7 +162,9 @@ export function resolveTrail(pathname: string, ctx: TrailContext): CrumbDescript
     // A cycle in the config would otherwise hang the render.
     if (chain.includes(current)) break;
     chain.unshift(current);
-    const parent = CRUMB_CONFIG[current]?.parent;
+    // Annotated: without it the inference of `parent` runs through `current`,
+    // which is assigned from `parent`, and tsc reports a circular initializer.
+    const parent: CrumbConfig['parent'] = CRUMB_CONFIG[current]?.parent;
     current = typeof parent === 'function' ? parent(ctx) : parent;
   }
 
