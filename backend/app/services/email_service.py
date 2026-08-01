@@ -215,7 +215,19 @@ class EmailService:
         self,
         emails: list[EmailPayload],
     ) -> list[EmailSendResult]:
-        """Send multiple emails respecting rate limits."""
+        """DEPRECATED / UNUSED — do not call in new code.
+
+        This path sends each email straight through the provider and therefore
+        bypasses email_log entirely: no queued/sent/failed row, no
+        provider_message_id, so SNS delivery/bounce/complaint events can never be
+        correlated back. It also has no retry and only a crude fixed inter-send
+        sleep instead of the job-level concurrency limiter.
+
+        Every real caller sends per-recipient via send_email() (see
+        app/jobs/README.md rule 8), which owns the audit log, retry, and SNS
+        correlation. Retained only for its existing unit tests; slated for
+        removal. Kept until then to avoid churn.
+        """
         results: list[EmailSendResult] = []
 
         for i, email in enumerate(emails):
