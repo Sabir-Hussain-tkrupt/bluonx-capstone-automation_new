@@ -20,6 +20,17 @@
  *   // ^ invalidates all vendor lists but not details
  */
 export const queryKeys = {
+  users: {
+    all: ['users'] as const,
+    lists: () => [...queryKeys.users.all, 'list'] as const,
+    list: (filters?: Record<string, unknown>) =>
+      filters
+        ? ([...queryKeys.users.lists(), filters] as const)
+        : queryKeys.users.lists(),
+    details: () => [...queryKeys.users.all, 'detail'] as const,
+    detail: (id: string) => [...queryKeys.users.details(), id] as const,
+  },
+
   vendors: {
     all: ['vendors'] as const,
     lists: () => [...queryKeys.vendors.all, 'list'] as const,

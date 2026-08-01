@@ -204,23 +204,16 @@ CREATE POLICY users_select_authenticated
     AND deleted_at IS NULL
   );
 
--- Admin can update any user (e.g., change role, deactivate)
--- PM can ONLY update their own profile (full_name, etc.)
-CREATE POLICY users_update_admin_or_self
-  ON users FOR UPDATE
-  TO authenticated
-  USING (
-    (SELECT private.is_admin())
-    OR id = (SELECT auth.uid())
-  )
-  WITH CHECK (
-    (SELECT private.is_admin())
-    OR id = (SELECT auth.uid())
-  );
 
--- NOTE: No INSERT policy. User creation is handled by the auth trigger
--- (fn_handle_new_auth_user) which runs as SECURITY DEFINER.
--- NOTE: No DELETE policy. We soft-delete via UPDATE (set deleted_at).
+-- NO UPDATE policy: UPDATE is revoked from authenticated (writes go through FastAPI).
+-- NO INSERT policy: user creation is via the auth trigger (fn_handle_new_auth_user).
+-- NO DELETE policy: soft-delete via service_role UPDATE (deleted_at).
+
+
+-- All users-table writes go through FastAPI (service_role, which bypasses RLS).
+-- REVOKE UPDATE from authenticated so a PM cannot self-escalate role/is_active
+-- via the anon key on their own row (RLS gates rows, not columns).
+REVOKE UPDATE ON TABLE users FROM authenticated;
 
 
 -- ════════════════════════════════════════════════════════════════════════════

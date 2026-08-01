@@ -34,13 +34,20 @@ class TestGetCurrentUser:
 
 
 class TestListUsers:
-    """Tests for GET /api/v1/users (admin-only stub)."""
+    """Tests for GET /api/v1/users (admin-only)."""
 
-    def test_admin_gets_empty_list_stub(self, client, auth_headers):
-        """Admin should get an empty list (stub implementation)."""
+    def test_admin_gets_a_list_with_status(self, client, auth_headers):
+        """Admin should get a list of users, each carrying a derived status.
+        Isolated behavior (merge/status derivation) is covered under
+        tests/user_management; here we just confirm the live endpoint answers."""
         resp = client.get("/api/v1/users", headers=auth_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        data = resp.json()
+        assert isinstance(data, list)
+        # The signed-in admin must appear, with a status field.
+        me = next((u for u in data if u["email"] == "admin@bluonx.dev"), None)
+        assert me is not None
+        assert me["status"] in ("active", "pending", "deactivated")
 
     def test_unauthenticated_returns_403(self, client):
         """Should return 403 without auth."""
@@ -49,29 +56,30 @@ class TestListUsers:
 
 
 class TestUserCRUDStubs:
-    """Tests for stub endpoints — should return 501."""
+    """GET /users/{id} remains an out-of-scope 501 stub; PATCH/DELETE are now
+    implemented (behavior covered in tests/user_management)."""
 
     def test_get_user_by_id_returns_501(self, client, auth_headers):
-        """GET /users/{id} should return 501 (not implemented)."""
+        """GET /users/{id} should return 501 (single-user read is out of scope)."""
         resp = client.get(
             "/api/v1/users/00000000-0000-0000-0000-000000000000",
             headers=auth_headers,
         )
         assert resp.status_code == 501
 
-    def test_update_user_returns_501(self, client, auth_headers):
-        """PATCH /users/{id} should return 501 (not implemented)."""
+    def test_update_missing_user_returns_404(self, client, auth_headers):
+        """PATCH on a nonexistent user should 404 (no longer a 501 stub)."""
         resp = client.patch(
             "/api/v1/users/00000000-0000-0000-0000-000000000000",
             json={"full_name": "Test"},
             headers=auth_headers,
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 404
 
-    def test_delete_user_returns_501(self, client, auth_headers):
-        """DELETE /users/{id} should return 501 (not implemented)."""
+    def test_delete_missing_user_returns_404(self, client, auth_headers):
+        """DELETE on a nonexistent user should 404 (no longer a 501 stub)."""
         resp = client.delete(
             "/api/v1/users/00000000-0000-0000-0000-000000000000",
             headers=auth_headers,
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 404

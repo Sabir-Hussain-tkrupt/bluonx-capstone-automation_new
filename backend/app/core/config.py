@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # Portal (vendor-facing URL for magic links)
     PORTAL_BASE_URL: str = "http://localhost:5173"
 
+    # Staff/admin frontend base URL. Used to build the Supabase invite email
+    # redirect (`{FRONTEND_BASE_URL}/accept-invite`) so an invited admin/PM lands
+    # on our set-password page. Distinct from PORTAL_BASE_URL (vendor portal).
+    # Production must set a non-localhost https URL (enforced below) and the same
+    # URL must be on Supabase Auth's redirect allow list.
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
+
     # Vendor portal auth (Phase 5) — MUST differ from SUPABASE_JWT_SECRET.
     # Custom HS256 JWT signed server-side after magic link validation.
     VENDOR_JWT_SECRET: str
@@ -128,6 +135,25 @@ class Settings(BaseSettings):
                 "EMAIL_PROVIDER=ses requires AWS_ACCESS_KEY_ID and "
                 "AWS_SECRET_ACCESS_KEY to be set."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_frontend_base_url(self) -> "Settings":
+        """Fail fast on an unsafe staff-frontend URL in production.
+
+        Invite emails redirect to `{FRONTEND_BASE_URL}/accept-invite`. In
+        production the localhost dev default would send invited users to a page
+        that does not exist, so require a real https origin. Also mirrors the
+        Supabase redirect allow list, which rejects non-https/localhost origins.
+        """
+        if self.APP_ENV.lower() == "production":
+            url = self.FRONTEND_BASE_URL.strip()
+            if not url.startswith("https://") or "localhost" in url or "127.0.0.1" in url:
+                raise ValueError(
+                    "FRONTEND_BASE_URL must be a non-localhost https URL when "
+                    f"APP_ENV=production (got '{self.FRONTEND_BASE_URL}'); refusing "
+                    "to start so invite links do not point at a dev host."
+                )
         return self
 
 

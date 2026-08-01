@@ -26,7 +26,7 @@ export function SettingsPage() {
           icon={<CalendarDays className="h-5 w-5" aria-hidden="true" />}
         />
         <SettingsCard
-          comingSoon
+          to={ROUTES.SETTINGS_USERS}
           title="User Management"
           description="Invite team members and manage admin / project manager roles."
           icon={<Users className="h-5 w-5" aria-hidden="true" />}

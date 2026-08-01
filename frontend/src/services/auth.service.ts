@@ -111,12 +111,14 @@ export async function updatePassword(newPassword: string) {
  * Update the user's metadata in auth.users.
  *
  * NOTE: This updates auth.users.raw_user_meta_data, NOT public.users.
- * To update public.users (full_name, etc.), use a FastAPI endpoint
- * (Task 2.6) or direct Supabase update:
  *
- *   supabase.from('users').update({ full_name: 'New Name' }).eq('id', userId)
- *
- * The RLS policy users_update_admin_or_self allows users to update their own row.
+ * Do NOT write to public.users from the client. UPDATE on public.users was
+ * revoked from the `authenticated` role, so a direct
+ * `supabase.from('users').update(...)` now fails. All public.users writes
+ * (full_name, role, is_active, etc.) go through the FastAPI user-management
+ * endpoints (e.g. PATCH /api/v1/users/{id}), which use the service_role key and
+ * enforce admin authorization. This function only touches auth.users metadata via
+ * supabase.auth.updateUser, never public.users.
  */
 export async function updateUserMetadata(metadata: { full_name?: string }) {
   const { error } = await supabase.auth.updateUser({

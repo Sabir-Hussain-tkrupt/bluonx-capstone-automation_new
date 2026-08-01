@@ -14,7 +14,13 @@ export function AuthCallbackPage() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') {
-        navigate(ROUTES.DASHBOARD, { replace: true });
+        // Defense-in-depth: an invite verify emits SIGNED_IN. Invites normally
+        // redirect straight to /accept-invite, but if one ever lands here, route
+        // a passwordless invite session to set-password instead of the dashboard.
+        const isInvite =
+          window.location.hash.includes('type=invite') ||
+          window.location.search.includes('type=invite');
+        navigate(isInvite ? ROUTES.ACCEPT_INVITE : ROUTES.DASHBOARD, { replace: true });
       } else if (event === 'PASSWORD_RECOVERY') {
         navigate(ROUTES.AUTH_RESET_PASSWORD, { replace: true });
       }

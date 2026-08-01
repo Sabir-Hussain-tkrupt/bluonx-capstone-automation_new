@@ -10,6 +10,7 @@ import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { AuthCallbackPage } from '@/features/auth/pages/AuthCallbackPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
+import { AcceptInvitePage } from '@/features/auth/pages/AcceptInvitePage';
 
 // Protected pages
 import { DashboardPage } from '@/features/dashboard/pages/DashboardPage';
@@ -33,6 +34,7 @@ import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateF
 import { NotificationsPage } from '@/features/notifications/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TradesSettingsPage } from '@/features/trades';
+import { UserManagementPage } from '@/features/user-management';
 import { HolidayCalendarPage } from '@/features/holidays';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
@@ -77,6 +79,13 @@ export function AppRoutes() {
       {/* Auth callback routes — no layout wrapper */}
       <Route path={ROUTES.AUTH_CALLBACK} element={<AuthCallbackPage />} />
       <Route path={ROUTES.AUTH_RESET_PASSWORD} element={<ResetPasswordPage />} />
+      {/*
+        Accept-invite is a BARE route (C2): the invited user arrives already
+        authenticated but passwordless (Supabase /auth/v1/verify created the
+        session on click). It must NOT sit under PublicRoute (which would bounce
+        an authenticated user to the dashboard) or ProtectedRoute.
+      */}
+      <Route path={ROUTES.ACCEPT_INVITE} element={<AcceptInvitePage />} />
 
       {/* Protected routes — dashboard layout with sidebar/header */}
       <Route
@@ -119,6 +128,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute requiredRole="admin">
               <TradesSettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.SETTINGS_USERS}
+          element={
+            <ProtectedRoute requiredRole="admin">
+              <UserManagementPage />
             </ProtectedRoute>
           }
         />

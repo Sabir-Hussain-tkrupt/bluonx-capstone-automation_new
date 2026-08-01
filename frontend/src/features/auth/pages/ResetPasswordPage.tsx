@@ -1,44 +1,39 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { updatePassword } from '@/services/auth.service';
-import { Button, TextInput, FormField, Alert, useToast } from '@/components/ui';
+import { useToast } from '@/components/ui';
+import { SetPasswordForm } from '@/components/auth/SetPasswordForm';
 import { ROUTES } from '@/constants/routes';
+
+/**
+ * Password-reset landing page (bare route). The recovery email link lands here
+ * and Supabase establishes a session from the URL asynchronously.
+ *
+ * We gate on that session (via AuthContext) before allowing submit. Without the
+ * gate, submitting before the async URL->session exchange finishes calls
+ * updateUser with no session and fails with "Auth session missing!". Gating also
+ * gives us a clear "link invalid/expired" state for the cases where no session
+ * ever forms (one-time token consumed by an email scanner, or an expired link),
+ * instead of a cryptic error. Gate on `session` (not `isAuthenticated`): a
+ * PASSWORD_RECOVERY session has no public.users profile loaded.
+ *
+ * Security: this only makes submission stricter. updateUser still requires a
+ * server-verified session; nothing here bypasses or weakens a check.
+ */
+const SESSION_MISSING_MESSAGE =
+  'Your reset link is invalid or has expired. Please request a new password reset.';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { session, isLoading } = useAuth();
 
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function validate(): boolean {
-    const newErrors: Record<string, string> = {};
-
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    }
-
-    if (!confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password';
-    } else if (password && confirmPassword !== password) {
-      newErrors.confirmPassword = 'Passwords do not match';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(password: string) {
     setServerError(null);
-
-    if (!validate()) return;
-
     try {
       setIsSubmitting(true);
       await updatePassword(password);
@@ -49,99 +44,74 @@ export function ResetPasswordPage() {
       });
       navigate(ROUTES.LOGIN, { replace: true });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'An unexpected error occurred';
-      setServerError(message);
+      const raw = err instanceof Error ? err.message : 'An unexpected error occurred';
+      // Map the cryptic "Auth session missing!" (session expired between load and
+      // submit) to actionable guidance; surface any other error as-is.
+      setServerError(/session missing/i.test(raw) ? SESSION_MISSING_MESSAGE : raw);
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  function clearFieldError(field: string) {
-    if (errors[field]) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      });
-    }
-  }
-
-  return (
+  const shell = (children: React.ReactNode) => (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-md p-6">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-primary-700">BluOnX</h1>
           <p className="text-xs text-gray-400">Development Operations Platform</p>
         </div>
-
-        <div className="mb-8 text-center">
-          <h2 className="text-2xl font-semibold text-gray-900">Set new password</h2>
-          <p className="mt-2 text-sm text-gray-500">
-            Choose a strong password with at least 8 characters
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          {serverError && (
-            <div className="mb-4">
-              <Alert variant="danger">{serverError}</Alert>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="space-y-4">
-              <FormField
-                label="New password"
-                htmlFor="new-password"
-                required
-                error={errors.password}
-                hint="Minimum 8 characters"
-              >
-                <TextInput
-                  id="new-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    clearFieldError('password');
-                  }}
-                  error={!!errors.password}
-                  placeholder="Enter new password"
-                  disabled={isSubmitting}
-                  autoComplete="new-password"
-                  autoFocus
-                />
-              </FormField>
-
-              <FormField
-                label="Confirm password"
-                htmlFor="confirm-password"
-                required
-                error={errors.confirmPassword}
-              >
-                <TextInput
-                  id="confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    clearFieldError('confirmPassword');
-                  }}
-                  error={!!errors.confirmPassword}
-                  placeholder="Confirm new password"
-                  disabled={isSubmitting}
-                  autoComplete="new-password"
-                />
-              </FormField>
-
-              <Button type="submit" fullWidth isLoading={isSubmitting}>
-                Update password
-              </Button>
-            </div>
-          </form>
-        </div>
+        {children}
       </div>
     </div>
+  );
+
+  // Still resolving the recovery session from the URL — don't flash the form or
+  // the invalid state before we know whether a session materialized.
+  if (isLoading) {
+    return shell(
+      <div className="text-center">
+        <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        <p className="text-sm text-gray-500">Verifying your reset link...</p>
+      </div>,
+    );
+  }
+
+  // No recovery session — the link was never valid here, was already consumed, or
+  // has expired. Send the user back to request a fresh one instead of erroring.
+  if (!session) {
+    return shell(
+      <div className="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
+        <h2 className="text-xl font-semibold text-gray-900">Reset link invalid or expired</h2>
+        <p className="mt-2 text-sm text-gray-500">
+          This password reset link is no longer valid. Request a new one to continue.
+        </p>
+        <Link
+          to={ROUTES.FORGOT_PASSWORD}
+          className="mt-6 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+        >
+          Request a new reset link
+        </Link>
+      </div>,
+    );
+  }
+
+  return shell(
+    <>
+      <div className="mb-8 text-center">
+        <h2 className="text-2xl font-semibold text-gray-900">Set new password</h2>
+        <p className="mt-2 text-sm text-gray-500">
+          Choose a strong password with at least 8 characters
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <SetPasswordForm
+          onSubmit={handleSubmit}
+          isSubmitting={isSubmitting}
+          submitLabel="Update password"
+          serverError={serverError}
+        />
+      </div>
+    </>,
   );
 }
