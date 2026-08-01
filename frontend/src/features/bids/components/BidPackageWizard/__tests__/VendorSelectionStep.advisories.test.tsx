@@ -155,7 +155,49 @@ describe('VendorSelectionStep advisories', () => {
     expect(screen.getByRole('checkbox')).toBeDisabled();
   });
 
-  it('leaves the disqualified checkbox enabled when the vendor has a contact', async () => {
+  it('disables the disqualified checkbox for an inactive vendor (send would reject it)', async () => {
+    const user = userEvent.setup();
+    mockResponse(
+      [],
+      [
+        makeVendor({
+          vendor_id: 'v-inactive',
+          company_name: 'Inactive Co',
+          qualification_status: 'disqualified',
+          disqualification_reasons: ['inactive_status'],
+        }),
+      ],
+    );
+
+    renderWithRouter(<VendorSelectionStep {...props} />);
+    await user.click(screen.getByRole('button', { name: /disqualified vendor/i }));
+
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).toHaveAttribute('title', expect.stringMatching(/inactive or suspended/i));
+  });
+
+  it('disables the disqualified checkbox when inactive_status is one of several reasons', async () => {
+    const user = userEvent.setup();
+    mockResponse(
+      [],
+      [
+        makeVendor({
+          vendor_id: 'v-multi',
+          company_name: 'Multi Reason Co',
+          qualification_status: 'disqualified',
+          disqualification_reasons: ['over_capacity', 'inactive_status', 'outside_radius'],
+        }),
+      ],
+    );
+
+    renderWithRouter(<VendorSelectionStep {...props} />);
+    await user.click(screen.getByRole('button', { name: /disqualified vendor/i }));
+
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+  });
+
+  it('leaves the disqualified checkbox enabled for a tolerable reason with a contact', async () => {
     const user = userEvent.setup();
     mockResponse(
       [],

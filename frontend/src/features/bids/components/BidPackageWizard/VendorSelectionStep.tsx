@@ -30,6 +30,15 @@ function formatDate(value: string | null): string {
 // explain it differently.
 const NO_CONTACT_TITLE = 'No contact on file, add one before inviting this vendor.';
 
+// The one disqualification reason that hard-fails at invitation send: the
+// send path rejects any vendor whose status is not "active" (bid_package_service
+// enforces it). Selecting such a vendor would only fail at "Send", so its
+// checkbox is disabled here too — the override modal cannot rescue it. Match
+// the exact reason string emitted by the filter (vendor_filtering).
+const INACTIVE_STATUS_REASON = 'inactive_status';
+const INACTIVE_TITLE =
+  'This vendor is inactive or suspended and can’t be invited. Reactivate it first.';
+
 export function VendorSelectionStep({
   taskId,
   data,
@@ -320,19 +329,27 @@ export function VendorSelectionStep({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-secondary-100">
-                    {disqualified.map((vendor) => (
+                    {disqualified.map((vendor) => {
+                      // Reasons the invitation-send step would hard-reject, so
+                      // there is no point letting the PM select the vendor: no
+                      // contact to email, or an inactive/suspended status. Any
+                      // other disqualification is overridable and sends fine.
+                      // includes(), not equality — a row often has several
+                      // reasons and any inactive_status must block.
+                      const blockTitle = !vendor.primary_contact
+                        ? NO_CONTACT_TITLE
+                        : vendor.disqualification_reasons.includes(INACTIVE_STATUS_REASON)
+                          ? INACTIVE_TITLE
+                          : undefined;
+                      return (
                       <tr key={vendor.vendor_id}>
                         <td className="py-3 pr-2">
                           <input
                             type="checkbox"
                             className="h-4 w-4 rounded border-secondary-300 accent-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
                             checked={selected.has(vendor.vendor_id)}
-                            // Mirror the qualified row: a vendor with no contact
-                            // can never be selected (no email to invite), so
-                            // block it at the checkbox instead of opening the
-                            // override modal only to silently no-op on confirm.
-                            disabled={!vendor.primary_contact}
-                            title={!vendor.primary_contact ? NO_CONTACT_TITLE : undefined}
+                            disabled={!!blockTitle}
+                            title={blockTitle}
                             onChange={() => {
                               if (selected.has(vendor.vendor_id)) {
                                 setSelected((prev) => {
@@ -365,7 +382,8 @@ export function VendorSelectionStep({
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
