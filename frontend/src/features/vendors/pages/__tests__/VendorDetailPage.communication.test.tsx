@@ -27,8 +27,9 @@ vi.mock('@/features/vendors/hooks/useVendor', () => ({
   useVendor: () => useVendorMock(),
 }));
 vi.mock('@/features/vendors/hooks/useVendorEmailLog', () => ({
-  useVendorEmailLog: (id: string, enabled: boolean) =>
-    useVendorEmailLogMock(id, enabled),
+  EMAIL_LOG_PAGE_SIZE: 25,
+  useVendorEmailLog: (id: string, enabled: boolean, page: number) =>
+    useVendorEmailLogMock(id, enabled, page),
 }));
 vi.mock('@/features/vendors/hooks/useUpdateVendor', () => ({
   useUpdateVendor: () => ({ mutate: noop, isPending: false }),
@@ -102,7 +103,9 @@ describe('VendorDetailPage — Communication tab', () => {
     });
   });
 
-  it('renders the Communication tab with the email-log count in the label', () => {
+  it('shows the server-side total in the tab label, not the page length', () => {
+    // The badge must read `total`. Reading items.length would just report the
+    // page size once a vendor has more emails than fit on one page.
     useVendorEmailLogMock.mockReturnValue({
       data: {
         items: [
@@ -125,13 +128,16 @@ describe('VendorDetailPage — Communication tab', () => {
             error_message: null,
           },
         ],
+        total: 87,
+        page: 1,
+        page_size: 25,
       },
       isLoading: false,
     });
 
     renderPage();
 
-    expect(screen.getByRole('tab', { name: /Communication\s*2/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Communication\s*87/ })).toBeInTheDocument();
   });
 
   it('does not fetch the email log until the Communication tab is active', () => {
@@ -140,7 +146,7 @@ describe('VendorDetailPage — Communication tab', () => {
     renderPage();
 
     // First mount: tab is "overview" so the hook receives enabled=false.
-    expect(useVendorEmailLogMock).toHaveBeenCalledWith('v-1', false);
+    expect(useVendorEmailLogMock).toHaveBeenCalledWith('v-1', false, 1);
     expect(
       useVendorEmailLogMock.mock.calls.every(([, enabled]) => enabled === false),
     ).toBe(true);
@@ -153,7 +159,7 @@ describe('VendorDetailPage — Communication tab', () => {
 
     // The tab lives in the URL now, so a shared link can land here directly and
     // the gated fetch fires on first paint rather than waiting for a click.
-    expect(useVendorEmailLogMock).toHaveBeenCalledWith('v-1', true);
+    expect(useVendorEmailLogMock).toHaveBeenCalledWith('v-1', true, 1);
   });
 
   it('renders EmailLogTable rows when the Communication tab is activated', () => {
@@ -170,6 +176,9 @@ describe('VendorDetailPage — Communication tab', () => {
             error_message: null,
           },
         ],
+        total: 1,
+        page: 1,
+        page_size: 25,
       },
       isLoading: false,
     });
@@ -184,5 +193,39 @@ describe('VendorDetailPage — Communication tab', () => {
     expect(
       screen.getAllByText('Bid Invitation: Rough Grading').length,
     ).toBeGreaterThan(0);
+  });
+
+  it('pages the log server-side rather than fetching every row', () => {
+    // The whole point of the change: a vendor with thousands of emails must
+    // never have them all pulled into one response.
+    useVendorEmailLogMock.mockReturnValue({
+      data: {
+        items: [
+          {
+            id: 'e1',
+            recipient_email: 'vendor@example.com',
+            email_type: 'bid_invitation',
+            subject: 'page one',
+            status: 'sent',
+            sent_at: '2026-05-30T10:00:00Z',
+            error_message: null,
+          },
+        ],
+        total: 60,
+        page: 1,
+        page_size: 25,
+      },
+      isLoading: false,
+    });
+
+    renderPage('?tab=communication');
+
+    // One row rendered, but the footer knows there are 60 across 3 pages.
+    expect(screen.getByLabelText('Pagination')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(useVendorEmailLogMock).toHaveBeenLastCalledWith('v-1', true, 2);
   });
 });

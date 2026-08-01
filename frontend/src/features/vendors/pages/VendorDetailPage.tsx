@@ -20,7 +20,10 @@ import { useDeleteVendor } from '@/features/vendors/hooks/useDeleteVendor';
 import { useCreateContact, useUpdateContact, useDeleteContact } from '@/features/vendors/hooks/useVendorContacts';
 import { useAddVendorTrades, useRemoveVendorTrade } from '@/features/vendors/hooks/useVendorTrades';
 import { useDeleteVendorDocument, useVendorDocumentDownload } from '@/features/vendors/hooks/useVendorDocuments';
-import { useVendorEmailLog } from '@/features/vendors/hooks/useVendorEmailLog';
+import {
+  EMAIL_LOG_PAGE_SIZE,
+  useVendorEmailLog,
+} from '@/features/vendors/hooks/useVendorEmailLog';
 import { EmailLogTable } from '@/features/bids/components/EmailLogTable';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
 import { ContactForm } from '@/features/vendors/components/ContactForm';
@@ -98,9 +101,11 @@ export function VendorDetailPage() {
   const { download: downloadDoc, downloadingId } = useVendorDocumentDownload();
 
   const [activeTab, setActiveTab] = useTabParam(TAB_IDS);
+  const [emailLogPage, setEmailLogPage] = useState(1);
   const { data: emailLog, isLoading: emailLogLoading } = useVendorEmailLog(
     id!,
     activeTab === 'communication',
+    emailLogPage,
   );
   const [showEditForm, setShowEditForm] = useState(false);
   const [confirming, setConfirming] = useState<PendingAction>(null);
@@ -289,8 +294,9 @@ export function VendorDetailPage() {
     flags: flags.length,
     // The email log is only fetched once its tab is opened, so before that a
     // count would always read 0 and look like "no messages" rather than
-    // "not loaded yet". Show it only when we actually know.
-    communication: emailLog?.items.length,
+    // "not loaded yet". Show it only when we actually know. The badge is the
+    // server-side total, not the page length, which would just read 25.
+    communication: emailLog?.total,
   };
   const tabDefs = TABS.map((t) => ({ ...t, count: tabCounts[t.id] }));
 
@@ -613,7 +619,16 @@ export function VendorDetailPage() {
         )}
 
         {activeTab === 'communication' && (
-          <EmailLogTable items={emailLog?.items ?? []} isLoading={emailLogLoading} />
+          <EmailLogTable
+            items={emailLog?.items ?? []}
+            isLoading={emailLogLoading}
+            pagination={{
+              page: emailLogPage,
+              pageSize: EMAIL_LOG_PAGE_SIZE,
+              total: emailLog?.total ?? 0,
+              onPageChange: setEmailLogPage,
+            }}
+          />
         )}
       </Tabs>
 

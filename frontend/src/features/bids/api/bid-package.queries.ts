@@ -30,9 +30,13 @@ export async function fetchBidSubmissionDetail(id: string): Promise<BidSubmissio
   return data;
 }
 
-export async function fetchBidPackageEmailLog(bidPackageId: string): Promise<EmailLogResponse> {
+export async function fetchBidPackageEmailLog(
+  bidPackageId: string,
+  params: { page: number; pageSize: number },
+): Promise<EmailLogResponse> {
   const { data } = await api.get<EmailLogResponse>(
     API_ENDPOINTS.BID_PACKAGE_EMAIL_LOG(bidPackageId),
+    { params: { page: params.page, page_size: params.pageSize } },
   );
   return data;
 }

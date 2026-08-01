@@ -37,15 +37,27 @@ describe('useVendorEmailLog', () => {
         error_message: null,
       },
     ];
-    mockFetch.mockResolvedValueOnce({ items });
+    mockFetch.mockResolvedValueOnce({ items, total: 1, page: 1, page_size: 25 });
 
     const { result } = renderHook(() => useVendorEmailLog('v-1', true), {
       wrapper: createWrapper(),
     });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(mockFetch).toHaveBeenCalledWith('v-1');
+    expect(mockFetch).toHaveBeenCalledWith('v-1', { page: 1, pageSize: 25 });
     expect(result.current.data?.items).toEqual(items);
+    expect(result.current.data?.total).toBe(1);
+  });
+
+  it('requests the page it is given', async () => {
+    mockFetch.mockResolvedValue({ items: [], total: 60, page: 3, page_size: 25 });
+
+    const { result } = renderHook(() => useVendorEmailLog('v-1', true, 3), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(mockFetch).toHaveBeenCalledWith('v-1', { page: 3, pageSize: 25 });
   });
 
   it('does not fetch when enabled is false', () => {

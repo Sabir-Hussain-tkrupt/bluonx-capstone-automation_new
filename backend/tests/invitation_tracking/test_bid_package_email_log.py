@@ -1,191 +1,43 @@
-"""
-Tests for GET /v1/bid-packages/{bid_package_id}/email-log.
+"""Tests for GET /v1/bid-packages/{bid_package_id}/email-log.
 
-Returns all email_log rows where reference_type='bid_invitations' and
-reference_id matches an invitation in this bid package.
+The service reads v_vendor_email_log filtered on bid_package_id. The view
+carries that column only for the three invitation-linked flows
+(bid_invitations, bid_revision_requests, bid_submissions); award and milestone
+rows have a NULL bid_package_id and so are scoped out here by construction,
+leaving the package log's contents exactly as they were before pagination.
+
+The union and the sort now happen in Postgres, so these tests seed view rows
+and assert the service's contract: the (items, total) pair, correct slicing,
+newest-first ordering, package scoping, and the 404 guard.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 import pytest
 
-# Import will fail until implementation lands — expected for test-first.
 from app.services.invitation_tracking_service import (
     BidPackageNotFoundError,
     get_bid_package_email_log,
 )
-
-from .conftest import (
-    BID_PACKAGE_ID,
-    NONEXISTENT_BID_PACKAGE_ID,
-    build_chain,
-)
+from tests._fakes import FakeRowsSupabase
 
 
-class TestReturnsRowsForInvitations:
-    """Service returns every email_log row whose reference_id matches an
-    invitation in the package."""
-
-    @pytest.mark.asyncio
-    async def test_returns_all_logged_emails(self, mock_supabase):
-        result = await get_bid_package_email_log(
-            bid_package_id=BID_PACKAGE_ID,
-            db=mock_supabase,
-        )
-
-        assert isinstance(result, list)
-        assert len(result) == 3
+VIEW = "v_vendor_email_log"
+BASE = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 
 
-class TestRowShape:
-    """Each row exposes the fields the PM UI needs."""
-
-    @pytest.mark.asyncio
-    async def test_row_has_expected_fields(self, mock_supabase):
-        result = await get_bid_package_email_log(
-            bid_package_id=BID_PACKAGE_ID,
-            db=mock_supabase,
-        )
-
-        for row in result:
-            assert "recipient_email" in row
-            assert "email_type" in row
-            assert "subject" in row
-            assert "status" in row
-            assert "sent_at" in row
-            assert "error_message" in row
-
-    @pytest.mark.asyncio
-    async def test_failed_row_contains_error_message(self, mock_supabase):
-        result = await get_bid_package_email_log(
-            bid_package_id=BID_PACKAGE_ID,
-            db=mock_supabase,
-        )
-
-        failed = [r for r in result if r["status"] == "failed"]
-        assert len(failed) == 1
-        assert failed[0]["error_message"] == "SMTP 550: mailbox not found"
-        assert failed[0]["sent_at"] is None
+def _db() -> FakeRowsSupabase:
+    return FakeRowsSupabase({"bid_packages": [], VIEW: []})
 
 
-class TestEmptyEmailLog:
-    """When no emails have been logged, returns []."""
-
-    @pytest.mark.asyncio
-    async def test_empty_array(
-        self,
-        sample_bid_package_open,
-        sample_invitations_mixed_statuses,
-    ):
-        client = MagicMock()
-
-        def table_side_effect(name):
-            if name == "bid_packages":
-                return build_chain(data=[sample_bid_package_open])
-            if name == "bid_invitations":
-                return build_chain(data=sample_invitations_mixed_statuses)
-            if name == "email_log":
-                return build_chain(data=[])
-            return build_chain(data=[])
-
-        client.table.side_effect = table_side_effect
-
-        result = await get_bid_package_email_log(
-            bid_package_id=BID_PACKAGE_ID,
-            db=client,
-        )
-
-        assert result == []
-
-
-class TestNonexistentBidPackage:
-    """404 when bid_package_id doesn't exist."""
-
-    @pytest.mark.asyncio
-    async def test_raises_not_found(self):
-        client = MagicMock()
-
-        def table_side_effect(name):
-            return build_chain(data=[])
-
-        client.table.side_effect = table_side_effect
-
-        with pytest.raises(BidPackageNotFoundError):
-            await get_bid_package_email_log(
-                bid_package_id=NONEXISTENT_BID_PACKAGE_ID,
-                db=client,
-            )
-
-
-# ── Filter-aware fake (for broadened-filter regression) ────────────────────
-#
-# The shared mock_supabase in conftest ignores .eq() / .in_() entirely, so
-# every email_log query would return the same seeded rows — useless for
-# verifying the new union-by-reference_type behavior. This local fake
-# captures .eq(col, val) and .in_(col, vals) and applies them to the
-# table's data on .execute(), so seeded rows route to the right branch.
-
-
-from datetime import datetime, timedelta, timezone
-from uuid import uuid4
-
-
-class _Chain:
-    def __init__(self, rows: list[dict]):
-        self._rows = list(rows)
-        self._filters: list[tuple] = []
-
-    def select(self, *_a, **_k):
-        return self
-
-    def eq(self, col, val):
-        self._filters.append(("eq", col, val))
-        return self
-
-    def in_(self, col, vals):
-        self._filters.append(("in", col, list(vals)))
-        return self
-
-    def single(self):
-        self._single = True
-        return self
-
-    def execute(self):
-        out = self._rows
-        for kind, col, val in self._filters:
-            if kind == "eq":
-                out = [r for r in out if str(r.get(col)) == str(val)]
-            elif kind == "in":
-                wanted = {str(v) for v in val}
-                out = [r for r in out if str(r.get(col)) in wanted]
-        result = type("R", (), {})()
-        result.data = out[0] if getattr(self, "_single", False) else out
-        return result
-
-
-class _FilterAwareDB:
-    """Per-table row store + per-call _Chain. Respects .eq / .in_."""
-
-    def __init__(self):
-        self.tables: dict[str, list[dict]] = {
-            "bid_packages": [],
-            "bid_invitations": [],
-            "bid_revision_requests": [],
-            "bid_submissions": [],
-            "email_log": [],
-        }
-
-    def table(self, name: str) -> _Chain:
-        return _Chain(self.tables.get(name, []))
-
-
-def _seed_package(db: _FilterAwareDB, package_id, task_id):
+def _seed_package(db: FakeRowsSupabase, package_id: UUID) -> None:
     db.tables["bid_packages"].append(
         {
             "id": str(package_id),
-            "task_id": str(task_id),
+            "task_id": str(uuid4()),
             "round_number": 1,
             "status": "open",
             "tasks": {"name": "T"},
@@ -194,171 +46,198 @@ def _seed_package(db: _FilterAwareDB, package_id, task_id):
     )
 
 
-def _seed_invitation(db: _FilterAwareDB, invitation_id, package_id):
-    db.tables["bid_invitations"].append(
-        {"id": str(invitation_id), "bid_package_id": str(package_id)}
-    )
-
-
 def _seed_email(
-    db: _FilterAwareDB,
+    db: FakeRowsSupabase,
+    package_id: UUID | None,
     *,
-    email_id,
-    reference_type: str,
-    reference_id,
+    email_id: UUID | None = None,
+    reference_type: str = "bid_invitations",
     email_type: str = "general",
-    created_at: datetime | None = None,
-    subject: str = "subj",
-):
-    if created_at is None:
-        created_at = datetime.now(timezone.utc)
-    db.tables["email_log"].append(
+    status: str = "sent",
+    error_message: str | None = None,
+    minutes_ago: int = 0,
+) -> UUID:
+    """Append one v_vendor_email_log row. Larger minutes_ago = older."""
+    email_id = email_id or uuid4()
+    created = BASE - timedelta(minutes=minutes_ago)
+    db.tables.setdefault(VIEW, []).append(
         {
             "id": str(email_id),
             "recipient_email": "v@example.com",
             "recipient_type": "vendor_contact",
             "email_type": email_type,
-            "subject": subject,
+            "subject": "subj",
             "reference_type": reference_type,
-            "reference_id": str(reference_id),
-            "status": "sent",
-            "sent_at": created_at.isoformat(),
-            "error_message": None,
-            "created_at": created_at.isoformat(),
+            "reference_id": str(uuid4()),
+            "status": status,
+            "sent_at": None if status == "failed" else created.isoformat(),
+            "opened_at": None,
+            "clicked_at": None,
+            "error_message": error_message,
+            "retry_count": 0,
+            "created_at": created.isoformat(),
+            "vendor_id": str(uuid4()),
+            "bid_invitation_id": str(uuid4()),
+            "bid_package_id": None if package_id is None else str(package_id),
         }
     )
+    return email_id
 
 
-class TestBroadenedFilter:
-    """The endpoint must return email_log rows for ALL three reference_types
-    that downstream flows write today, not just bid_invitations."""
+class TestReturnsRowsForThePackage:
+    @pytest.mark.asyncio
+    async def test_returns_items_and_total(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        for i in range(3):
+            _seed_email(db, pkg_id, minutes_ago=i)
+
+        items, total = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        assert total == 3
+        assert len(items) == 3
 
     @pytest.mark.asyncio
-    async def test_includes_revision_request_emails(self):
-        db = _FilterAwareDB()
-        pkg_id, task_id, inv_id, rr_id, email_id = (uuid4() for _ in range(5))
-        _seed_package(db, pkg_id, task_id)
-        _seed_invitation(db, inv_id, pkg_id)
-        db.tables["bid_revision_requests"].append(
-            {"id": str(rr_id), "bid_invitation_id": str(inv_id)}
-        )
-        _seed_email(
-            db,
-            email_id=email_id,
-            reference_type="bid_revision_requests",
-            reference_id=rr_id,
-        )
+    async def test_unions_the_three_invitation_linked_flows(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        _seed_email(db, pkg_id, reference_type="bid_invitations",
+                    email_type="bid_invitation", minutes_ago=4)
+        _seed_email(db, pkg_id, reference_type="bid_invitations",
+                    email_type="bid_reminder", minutes_ago=3)
+        _seed_email(db, pkg_id, reference_type="bid_revision_requests", minutes_ago=2)
+        _seed_email(db, pkg_id, reference_type="bid_submissions", minutes_ago=1)
+        _seed_email(db, pkg_id, reference_type="bid_submissions", minutes_ago=0)
 
-        result = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+        items, total = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
 
-        assert len(result) == 1
-        assert result[0]["id"] == str(email_id)
-        assert result[0]["reference_type"] == "bid_revision_requests"
-
-    @pytest.mark.asyncio
-    async def test_includes_initial_submission_emails(self):
-        db = _FilterAwareDB()
-        pkg_id, task_id, inv_id, sub_id, email_id = (uuid4() for _ in range(5))
-        _seed_package(db, pkg_id, task_id)
-        _seed_invitation(db, inv_id, pkg_id)
-        db.tables["bid_submissions"].append(
-            {"id": str(sub_id), "bid_invitation_id": str(inv_id)}
-        )
-        _seed_email(
-            db,
-            email_id=email_id,
-            reference_type="bid_submissions",
-            reference_id=sub_id,
-        )
-
-        result = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
-
-        assert len(result) == 1
-        assert result[0]["id"] == str(email_id)
-
-    @pytest.mark.asyncio
-    async def test_includes_all_four_flows_unioned(self):
-        """Initial invitation + reminder + revision request + initial bid
-        receipt + revision receipt = 5 rows."""
-        db = _FilterAwareDB()
-        pkg_id, task_id, inv_id = uuid4(), uuid4(), uuid4()
-        rr_id, sub1_id, sub2_id = uuid4(), uuid4(), uuid4()
-        ids = [uuid4() for _ in range(5)]
-        _seed_package(db, pkg_id, task_id)
-        _seed_invitation(db, inv_id, pkg_id)
-        db.tables["bid_revision_requests"].append(
-            {"id": str(rr_id), "bid_invitation_id": str(inv_id)}
-        )
-        db.tables["bid_submissions"].extend(
-            [
-                {"id": str(sub1_id), "bid_invitation_id": str(inv_id)},
-                {"id": str(sub2_id), "bid_invitation_id": str(inv_id)},
-            ]
-        )
-        _seed_email(db, email_id=ids[0], reference_type="bid_invitations",
-                    reference_id=inv_id, email_type="bid_invitation")
-        _seed_email(db, email_id=ids[1], reference_type="bid_invitations",
-                    reference_id=inv_id, email_type="bid_reminder")
-        _seed_email(db, email_id=ids[2], reference_type="bid_revision_requests",
-                    reference_id=rr_id)
-        _seed_email(db, email_id=ids[3], reference_type="bid_submissions",
-                    reference_id=sub1_id)
-        _seed_email(db, email_id=ids[4], reference_type="bid_submissions",
-                    reference_id=sub2_id)
-
-        result = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
-
-        assert len(result) == 5
-        returned_ids = {r["id"] for r in result}
-        assert returned_ids == {str(i) for i in ids}
-
-    @pytest.mark.asyncio
-    async def test_sorted_by_created_at_desc(self):
-        db = _FilterAwareDB()
-        pkg_id, task_id, inv_id = uuid4(), uuid4(), uuid4()
-        rr_id, sub_id = uuid4(), uuid4()
-        _seed_package(db, pkg_id, task_id)
-        _seed_invitation(db, inv_id, pkg_id)
-        db.tables["bid_revision_requests"].append(
-            {"id": str(rr_id), "bid_invitation_id": str(inv_id)}
-        )
-        db.tables["bid_submissions"].append(
-            {"id": str(sub_id), "bid_invitation_id": str(inv_id)}
-        )
-        base = datetime.now(timezone.utc)
-        oldest = uuid4()
-        middle = uuid4()
-        newest = uuid4()
-        _seed_email(db, email_id=oldest, reference_type="bid_invitations",
-                    reference_id=inv_id, created_at=base - timedelta(hours=3))
-        _seed_email(db, email_id=newest, reference_type="bid_submissions",
-                    reference_id=sub_id, created_at=base)
-        _seed_email(db, email_id=middle, reference_type="bid_revision_requests",
-                    reference_id=rr_id, created_at=base - timedelta(hours=1))
-
-        result = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
-
-        assert [r["id"] for r in result] == [str(newest), str(middle), str(oldest)]
+        assert total == 5
+        assert {i["reference_type"] for i in items} == {
+            "bid_invitations",
+            "bid_revision_requests",
+            "bid_submissions",
+        }
 
     @pytest.mark.asyncio
     async def test_excludes_emails_from_other_packages(self):
-        """An email tied to a different bid_package's invitation must not leak."""
-        db = _FilterAwareDB()
-        pkg_id, task_id, our_inv = uuid4(), uuid4(), uuid4()
-        other_inv = uuid4()
-        ours_email, other_email = uuid4(), uuid4()
-        _seed_package(db, pkg_id, task_id)
-        _seed_invitation(db, our_inv, pkg_id)
-        # other_inv belongs to a different package — NOT seeded into bid_packages
-        db.tables["bid_invitations"].append(
-            {"id": str(other_inv), "bid_package_id": str(uuid4())}
+        db = _db()
+        pkg_id, other_pkg = uuid4(), uuid4()
+        _seed_package(db, pkg_id)
+        ours = _seed_email(db, pkg_id)
+        _seed_email(db, other_pkg)
+
+        items, total = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        assert total == 1
+        assert [i["id"] for i in items] == [str(ours)]
+
+    @pytest.mark.asyncio
+    async def test_excludes_rows_with_no_package(self):
+        # Award and milestone rows carry a NULL bid_package_id, which is what
+        # keeps the package log unchanged now that the vendor log is wider.
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        _seed_email(db, None, reference_type="awards")
+        _seed_email(db, None, reference_type="milestones")
+
+        items, total = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        assert (items, total) == ([], 0)
+
+
+class TestRowShape:
+    @pytest.mark.asyncio
+    async def test_row_has_the_fields_the_ui_needs(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        _seed_email(db, pkg_id)
+
+        items, _ = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        for field in (
+            "recipient_email", "email_type", "subject",
+            "status", "sent_at", "error_message",
+        ):
+            assert field in items[0]
+
+    @pytest.mark.asyncio
+    async def test_failed_row_carries_its_error(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        _seed_email(db, pkg_id, status="failed",
+                    error_message="SMTP 550: mailbox not found")
+
+        items, _ = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        assert items[0]["error_message"] == "SMTP 550: mailbox not found"
+        assert items[0]["sent_at"] is None
+
+
+class TestOrderingAndPaging:
+    @pytest.mark.asyncio
+    async def test_sorted_newest_first(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        oldest = _seed_email(db, pkg_id, minutes_ago=180)
+        newest = _seed_email(db, pkg_id, minutes_ago=0)
+        middle = _seed_email(db, pkg_id, minutes_ago=60)
+
+        items, _ = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+
+        assert [i["id"] for i in items] == [str(newest), str(middle), str(oldest)]
+
+    @pytest.mark.asyncio
+    async def test_pages_through_without_repeating_rows(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        for i in range(5):
+            _seed_email(db, pkg_id, minutes_ago=i)
+
+        first, total = await get_bid_package_email_log(
+            bid_package_id=pkg_id, db=db, page=1, page_size=2
         )
-        _seed_email(db, email_id=ours_email, reference_type="bid_invitations",
-                    reference_id=our_inv)
-        _seed_email(db, email_id=other_email, reference_type="bid_invitations",
-                    reference_id=other_inv)
+        second, _ = await get_bid_package_email_log(
+            bid_package_id=pkg_id, db=db, page=2, page_size=2
+        )
 
-        result = await get_bid_package_email_log(bid_package_id=pkg_id, db=db)
+        assert total == 5
+        assert len(first) == len(second) == 2
+        assert {i["id"] for i in first}.isdisjoint({i["id"] for i in second})
 
-        returned_ids = {r["id"] for r in result}
-        assert returned_ids == {str(ours_email)}
+    @pytest.mark.asyncio
+    async def test_page_past_the_end_is_empty_with_the_true_total(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+        _seed_email(db, pkg_id)
+
+        items, total = await get_bid_package_email_log(
+            bid_package_id=pkg_id, db=db, page=9, page_size=25
+        )
+
+        assert items == []
+        assert total == 1
+
+
+class TestEmptyEmailLog:
+    @pytest.mark.asyncio
+    async def test_empty_pair(self):
+        db = _db()
+        pkg_id = uuid4()
+        _seed_package(db, pkg_id)
+
+        assert await get_bid_package_email_log(bid_package_id=pkg_id, db=db) == ([], 0)
+
+
+class TestNonexistentBidPackage:
+    @pytest.mark.asyncio
+    async def test_raises_not_found(self):
+        with pytest.raises(BidPackageNotFoundError):
+            await get_bid_package_email_log(bid_package_id=uuid4(), db=_db())

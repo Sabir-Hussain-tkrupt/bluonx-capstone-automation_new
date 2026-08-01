@@ -3,7 +3,7 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
@@ -192,15 +192,19 @@ async def list_bid_package_invitations(
 )
 async def get_bid_package_email_log_endpoint(
     bid_package_id: UUID,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=25, ge=1, le=100, description="Items per page"),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Return all email_log rows referencing invitations in this bid package."""
+    """Return one page of email_log rows referencing invitations in this package."""
     try:
-        items = await get_bid_package_email_log(bid_package_id=bid_package_id, db=db)
+        items, total = await get_bid_package_email_log(
+            bid_package_id=bid_package_id, db=db, page=page, page_size=page_size
+        )
     except InvitationTrackingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.post(

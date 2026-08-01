@@ -12,7 +12,10 @@ import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useRevisionRequests } from '@/features/bids/hooks/useRevisionRequests';
-import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
+import {
+  EMAIL_LOG_PAGE_SIZE,
+  useBidPackageEmailLog,
+} from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
 import { useCloseBidding } from '@/features/bids/hooks/useCloseBidding';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
@@ -57,11 +60,13 @@ export function BidPackageDetailPage() {
     return map;
   }, [revisionRequests]);
 
-  // Email log — lazy loaded
+  // Email log — lazy loaded, paginated
   const [showEmailLog, setShowEmailLog] = useState(false);
+  const [emailLogPage, setEmailLogPage] = useState(1);
   const { data: emailLog, isLoading: emailLogLoading } = useBidPackageEmailLog(
     bidPackageId!,
     showEmailLog,
+    emailLogPage,
   );
 
   // Mutations
@@ -357,6 +362,12 @@ export function BidPackageDetailPage() {
               <EmailLogTable
                 items={emailLog?.items ?? []}
                 isLoading={emailLogLoading}
+                pagination={{
+                  page: emailLogPage,
+                  pageSize: EMAIL_LOG_PAGE_SIZE,
+                  total: emailLog?.total ?? 0,
+                  onPageChange: setEmailLogPage,
+                }}
               />
             </div>
           )}

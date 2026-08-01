@@ -108,3 +108,100 @@ class FakeSupabase:
 
     def table(self, name: str) -> _FakeQuery:
         return _FakeQuery(name, self._resolver)
+
+
+# ── Row-backed fake (for paginated read paths) ─────────────────────────────
+#
+# The resolver-driven fake above answers "what did the router ask for"; this one
+# answers "what would Postgres have returned". Seed rows per table (or view),
+# and filters / ordering / range actually apply, so a test can assert that page
+# 2 really is the second slice rather than trusting the router's arithmetic.
+
+
+class _FakeRowsQuery:
+    """Applies eq / is_ / in_ / order / range over seeded rows."""
+
+    def __init__(self, rows: list[dict]):
+        self._rows = list(rows)
+        self._eq: list[tuple[str, str]] = []
+        self._in: list[tuple[str, set]] = []
+        self._is_null: list[str] = []
+        self._order: list[tuple[str, bool]] = []
+        self._range: tuple[int, int] | None = None
+        self._limit: int | None = None
+        self._single = False
+        self._want_count = False
+
+    def select(self, *_a, **kwargs) -> "_FakeRowsQuery":
+        self._want_count = kwargs.get("count") == "exact"
+        return self
+
+    def eq(self, col, val) -> "_FakeRowsQuery":
+        self._eq.append((col, str(val)))
+        return self
+
+    def in_(self, col, vals) -> "_FakeRowsQuery":
+        self._in.append((col, {str(v) for v in vals}))
+        return self
+
+    def is_(self, col, val) -> "_FakeRowsQuery":
+        if val == "null":
+            self._is_null.append(col)
+        return self
+
+    def order(self, col, desc: bool = False, **_k) -> "_FakeRowsQuery":
+        self._order.append((col, desc))
+        return self
+
+    def range(self, start: int, end: int) -> "_FakeRowsQuery":
+        self._range = (start, end)
+        return self
+
+    def limit(self, n: int) -> "_FakeRowsQuery":
+        self._limit = n
+        return self
+
+    def single(self) -> "_FakeRowsQuery":
+        self._single = True
+        return self
+
+    def maybe_single(self) -> "_FakeRowsQuery":
+        self._single = True
+        return self
+
+    def execute(self) -> FakeResponse:
+        rows = self._rows
+        for col, val in self._eq:
+            rows = [r for r in rows if str(r.get(col)) == val]
+        for col, vals in self._in:
+            rows = [r for r in rows if str(r.get(col)) in vals]
+        for col in self._is_null:
+            rows = [r for r in rows if r.get(col) is None]
+
+        # count is the filtered total, before range/limit — same as PostgREST,
+        # which is why the service can ask for it with .limit(1).
+        total = len(rows) if self._want_count else None
+
+        # Applied last-key-first so the first .order() call is the primary sort.
+        for col, desc in reversed(self._order):
+            rows = sorted(rows, key=lambda r: (r.get(col) is None, r.get(col)), reverse=desc)
+
+        if self._range is not None:
+            start, end = self._range
+            rows = rows[start : end + 1]
+        elif self._limit is not None:
+            rows = rows[: self._limit]
+
+        if self._single:
+            return FakeResponse(rows[0] if rows else None, total)
+        return FakeResponse(rows, total)
+
+
+class FakeRowsSupabase:
+    """Supabase stand-in backed by seeded rows keyed by table (or view) name."""
+
+    def __init__(self, tables: dict[str, list[dict]] | None = None):
+        self.tables: dict[str, list[dict]] = tables if tables is not None else {}
+
+    def table(self, name: str) -> _FakeRowsQuery:
+        return _FakeRowsQuery(self.tables.get(name, []))

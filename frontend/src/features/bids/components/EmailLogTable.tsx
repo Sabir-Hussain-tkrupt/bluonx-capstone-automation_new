@@ -1,6 +1,6 @@
 import { Table } from '@/components/ui/Table';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import type { Column } from '@/components/ui/Table';
+import type { Column, TablePagination } from '@/components/ui/Table';
 import type { EmailLogItem } from '@/features/bids/types';
 
 function formatDateTime(value: string | null): string {
@@ -62,9 +62,15 @@ const columns: Column<EmailLogItem>[] = [
 interface EmailLogTableProps {
   items: EmailLogItem[];
   isLoading: boolean;
+  /**
+   * Server-side pagination. Both email logs are unbounded in principle — a
+   * long-standing vendor accumulates thousands of rows — so callers page
+   * through them rather than fetching the lot.
+   */
+  pagination?: TablePagination;
 }
 
-export function EmailLogTable({ items, isLoading }: EmailLogTableProps) {
+export function EmailLogTable({ items, isLoading, pagination }: EmailLogTableProps) {
   return (
     <Table<EmailLogItem>
       columns={columns}
@@ -72,6 +78,7 @@ export function EmailLogTable({ items, isLoading }: EmailLogTableProps) {
       keyExtractor={(row) => row.id ?? `${row.recipient_email}-${row.sent_at}`}
       isLoading={isLoading}
       mobileTitle="recipient_email"
+      pagination={pagination}
       emptyState={
         <p className="py-6 text-center text-sm text-secondary-500">No emails logged yet.</p>
       }

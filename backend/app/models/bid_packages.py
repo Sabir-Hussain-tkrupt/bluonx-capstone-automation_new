@@ -189,9 +189,16 @@ class EmailLogItem(BluOnXBase):
 
 
 class EmailLogResponse(BluOnXBase):
-    """Response for GET /v1/bid-packages/{bid_package_id}/email-log."""
+    """Paginated response for both email-log endpoints.
+
+    Shared by GET /v1/bid-packages/{id}/email-log and
+    GET /v1/vendors/{id}/email-log. Envelope matches VendorListResponse.
+    """
 
     items: list[EmailLogItem]
+    total: int
+    page: int
+    page_size: int
 
 
 # ── Task 6.2: Cross-project bid package list ─────────────────────────────
