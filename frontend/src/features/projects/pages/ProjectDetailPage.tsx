@@ -15,7 +15,6 @@ import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
 import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import { TaskList } from '@/features/tasks/components/TaskList';
-import { MilestoneTimeline } from '@/features/milestones/components/MilestoneTimeline';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
 import { useDeleteProject } from '@/features/projects/hooks/useDeleteProject';
@@ -206,7 +205,6 @@ export function ProjectDetailPage() {
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
     { id: 'tasks', label: 'Tasks' },
-    { id: 'milestones', label: 'Milestones' },
     { id: 'documents', label: 'Documents', count: projectDocuments.length },
   ];
 
@@ -339,8 +337,6 @@ export function ProjectDetailPage() {
         {activeTab === 'tasks' && (
           <TaskList projectId={id!} projectBudget={project.budget} readOnly={isArchived} />
         )}
-
-        {activeTab === 'milestones' && <MilestoneTimeline projectId={id!} />}
 
         {activeTab === 'documents' && (
           <div className="space-y-4">

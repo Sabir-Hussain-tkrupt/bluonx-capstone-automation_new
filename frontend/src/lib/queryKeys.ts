@@ -186,8 +186,6 @@ export const queryKeys = {
       filters
         ? ([...queryKeys.milestones.all, 'overview', filters] as const)
         : ([...queryKeys.milestones.all, 'overview'] as const),
-    timeline: (projectId: string) =>
-      [...queryKeys.milestones.all, 'timeline', projectId] as const,
   },
 
   notifications: {

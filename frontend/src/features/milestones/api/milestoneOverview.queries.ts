@@ -138,24 +138,6 @@ export async function fetchMilestoneOverview(
   };
 }
 
-/**
- * Fetch all milestones for one project (no pagination), grouped-ready for the
- * timeline: ordered by task name, then the milestone's sort order within a task.
- */
-export async function fetchProjectTimelineMilestones(
-  projectId: string,
-): Promise<MilestoneOverviewRow[]> {
-  const { data, error } = await supabase
-    .from(VIEW)
-    .select('*')
-    .eq('project_id', projectId)
-    .order('task_name', { ascending: true })
-    .order('sort_order', { ascending: true });
-
-  if (error) throw toApiError(error);
-  return (data ?? []) as unknown as MilestoneOverviewRow[];
-}
-
 export interface PausedMilestonesParams {
   /** Restrict to a single creator (the dashboard "Mine only" toggle). */
   createdBy?: string;
