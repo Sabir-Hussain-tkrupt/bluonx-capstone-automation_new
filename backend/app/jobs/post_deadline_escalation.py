@@ -1,10 +1,13 @@
 """
 Post-deadline admin escalation job (Task 7.6).
 
-Notifies each bid-package creator (the PM) the morning after their packages
-closed with non-responding vendors, then transitions those invitations from
-'sent'/'opened' to 'no_response' so the dashboard reflects the now-
-acknowledged escalation state.
+Converges non-responding invitations to 'no_response' and notifies each
+bid-package creator (the PM) the morning after their packages closed with
+non-responding vendors. The two concerns are decoupled: the status transition
+is a deadline-driven fact applied via the shared
+`invitation_tracking_service._apply_overdue_transition` (the same core the lazy
+read-path calls, so whichever fires first leaves identical state), while the
+escalation notification is deduped and skipped for already-decided packages.
 
 Mirrors the structural pattern of the sibling Task 7.5 insurance-expiration
 job:
@@ -28,13 +31,21 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.core.supabase_client import get_supabase_client
 from app.jobs.scheduler import DEFAULT_JOB_KWARGS, tracked_job
+from app.services.invitation_tracking_service import (
+    _TERMINAL_PACKAGE_STATUSES,
+    _apply_overdue_transition,
+)
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
 JOB_ID = "post_deadline_escalation"
 _NOTIFICATION_TYPE = "post_deadline_non_responders"
-_NON_RESPONDING_STATUSES = ("sent", "opened")
+# Statuses that mean "invited, no bid by the deadline" for the purpose of
+# identifying who to escalate. 'no_response' is included so a package whose rows
+# were already converged by the lazy read-path (a PM opening the detail page
+# first) is still recognized as affected and notified exactly once.
+_NON_RESPONDING_STATUSES = ("sent", "opened", "no_response")
 
 
 def _candidate_packages(db, now_iso: str, cutoff_iso: str) -> list[dict]:
@@ -46,7 +57,7 @@ def _candidate_packages(db, now_iso: str, cutoff_iso: str) -> list[dict]:
     resp = (
         db.table("bid_packages")
         .select(
-            "id, deadline, created_by, "
+            "id, status, deadline, created_by, "
             "tasks(name, project_id, projects(name))"
         )
         .lt("deadline", now_iso)
@@ -185,6 +196,30 @@ async def run_daily_post_deadline_escalation(
 
     for pkg, non_responders in affected:
         pkg_id = str(pkg["id"])
+        pkg_status = pkg.get("status")
+
+        # (1) Converge invitation status via the shared, idempotent transition.
+        # This is a deadline-driven fact and runs independently of whether (or to
+        # whom) we send an escalation, so a deduped re-run or an inactive creator
+        # never leaves the dashboard showing a stale 'sent'/'opened'. The core
+        # no-ops for terminal (closed/cancelled) packages.
+        try:
+            transition = _apply_overdue_transition(bid_package=pkg, db=db)
+            counts["invitations_marked_no_response"] += transition["no_response_count"]
+        except Exception as exc:  # noqa: BLE001 — never crash the scheduler
+            logger.error(
+                "post-deadline escalation: transition failed for package %s: %s",
+                pkg_id,
+                exc,
+                exc_info=True,
+            )
+
+        # (2) Escalation notification — decision-aware + deduped. An already
+        # decided (closed/cancelled) package needs no "vendors did not respond"
+        # nudge, so skip the notification (its status has already converged above).
+        if pkg_status in _TERMINAL_PACKAGE_STATUSES:
+            continue
+
         creator_id_raw = pkg.get("created_by")
         if not creator_id_raw:
             logger.warning(
@@ -211,7 +246,6 @@ async def run_daily_post_deadline_escalation(
             non_responders=non_responders,
         )
 
-        notified = False
         try:
             notification_creator(
                 db,
@@ -224,35 +258,11 @@ async def run_daily_post_deadline_escalation(
                 dedupe=False,
             )
             counts["notifications_created"] += 1
-            notified = True
         except Exception as exc:  # noqa: BLE001 — never crash the scheduler
             logger.error(
                 "post-deadline escalation: failed to notify creator %s about "
                 "package %s: %s",
                 creator_id,
-                pkg_id,
-                exc,
-                exc_info=True,
-            )
-
-        if not notified:
-            # Notification dispatch failed for the only recipient — do NOT
-            # flip invitations. The escalation didn't actually happen.
-            continue
-
-        try:
-            resp = (
-                db.table("bid_invitations")
-                .update({"status": "no_response"})
-                .eq("bid_package_id", pkg_id)
-                .in_("status", list(_NON_RESPONDING_STATUSES))
-                .execute()
-            )
-            counts["invitations_marked_no_response"] += len(resp.data or [])
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "post-deadline escalation: failed to flip invitations for "
-                "package %s after notification dispatch: %s",
                 pkg_id,
                 exc,
                 exc_info=True,

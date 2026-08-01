@@ -67,4 +67,17 @@ describe('SubmissionStatusPie', () => {
     expect(queryByText('Opened')).toBeNull();
     expect(queryByText('Declined')).toBeNull();
   });
+
+  it('renders a No Response slice when present', () => {
+    const { container, queryByText } = render(
+      <SubmissionStatusPie
+        summary={makeSummary({ total: 2, submitted: 1, no_response: 1 })}
+      />,
+    );
+
+    const legendItems = container.querySelectorAll('.recharts-legend-item');
+    expect(legendItems.length).toBe(2);
+    expect(queryByText('Submitted')).toBeInTheDocument();
+    expect(queryByText('No Response')).toBeInTheDocument();
+  });
 });

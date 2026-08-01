@@ -72,8 +72,8 @@ async def update_invitation_status_endpoint(
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """PM-driven status update. Only 'declined', 'expired', and
-    'no_response' are allowed — system-managed statuses return 400."""
+    """PM-driven status update. Only 'declined' and 'no_response' are allowed —
+    system-managed statuses (and retired 'expired') return 400."""
     try:
         return await update_invitation_status(
             invitation_id=invitation_id,

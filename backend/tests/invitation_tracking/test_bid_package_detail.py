@@ -205,8 +205,8 @@ class TestSubmittedBids:
 
 
 class TestLazyExpiration:
-    """When deadline has passed, sent/opened invitations auto-expire
-    and bid_package.status flips from 'open' to 'evaluating'."""
+    """When deadline has passed, sent/opened invitations converge to
+    'no_response' and bid_package.status flips from 'open' to 'evaluating'."""
 
     @pytest.mark.asyncio
     async def test_lazy_expiration_updates_invitations_and_package(
@@ -249,13 +249,13 @@ class TestLazyExpiration:
         # Bid package should be marked evaluating in the returned response
         assert result["status"] == "evaluating"
 
-        # bid_invitations should have been updated with status='expired'
+        # bid_invitations should have been updated with status='no_response'
         invitation_updates = [
             u for u in updates_captured if u["table"] == "bid_invitations"
         ]
         assert len(invitation_updates) >= 1
         assert any(
-            u["payload"].get("status") == "expired" for u in invitation_updates
+            u["payload"].get("status") == "no_response" for u in invitation_updates
         )
 
         # bid_packages should have been updated with status='evaluating'
@@ -275,7 +275,7 @@ class TestLazyExpiration:
         sample_email_log_rows,
         updates_captured,
     ):
-        """submitted and declined invitations must NOT be expired."""
+        """submitted and declined invitations must NOT become no_response."""
         client = MagicMock()
 
         def table_side_effect(name):
@@ -310,16 +310,16 @@ class TestLazyExpiration:
         # carry their original status in the response.
         # (This is enforced by the lazy expiration logic only touching
         # 'sent'/'opened' rows.)
-        submitted_updates = [
+        no_response_updates = [
             u for u in updates_captured
             if u["table"] == "bid_invitations"
-            and u["payload"].get("status") == "expired"
+            and u["payload"].get("status") == "no_response"
         ]
-        # The update payload sets status='expired'; the filter (via .eq
+        # The update payload sets status='no_response'; the filter (via .eq
         # or .in_) is what restricts WHICH rows get updated. We can only
-        # assert that the update *payload* is 'expired' — not 'submitted'
+        # assert that the update *payload* is 'no_response' — not 'submitted'
         # or 'declined'.
-        for u in submitted_updates:
+        for u in no_response_updates:
             assert u["payload"]["status"] != "submitted"
             assert u["payload"]["status"] != "declined"
 

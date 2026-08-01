@@ -4,10 +4,12 @@ Invitation tracking service (Task 4.5).
 Read-side and status-management operations on bid packages and invitations:
 - Bid package detail view with invitation summary
 - Invitation list with optional status filter
-- PM-driven status updates (declined / expired / no_response)
+- PM-driven status updates (declined / no_response)
 - Email log per bid package
-- Lazy expiration utility — flips overdue invitations to 'expired' and
-  closes the bid package when the deadline has passed.
+- Shared deadline transition (_apply_overdue_transition / sweep_overdue_invitations)
+  that flips overdue sent/opened invitations to 'no_response' and moves an open
+  package to 'evaluating'. The same core is called by the lazy read-path here and
+  by the daily post-deadline job, so both converge on identical state.
 """
 
 from __future__ import annotations
@@ -65,19 +67,25 @@ class TerminalStatusError(InvitationTrackingError):
 
 # pending_send / send_failed cover invitations whose email has not (yet) been
 # delivered. They are listed here so the per-status summary counts them, but they
-# are deliberately kept OUT of _EXPIRABLE_STATUSES: an invitation that was never
-# delivered should keep its "never reached" status rather than be relabeled
-# 'expired' when the deadline passes.
+# are deliberately kept OUT of _TIMED_OUT_SOURCE_STATUSES: an invitation that was
+# never delivered should keep its "never reached" status rather than be relabeled
+# when the deadline passes. 'expired' is retained here only so legacy rows still
+# count in the summary; no code path writes it anymore (superseded by
+# 'no_response' — the single terminal "invited, no bid by deadline" status).
 _ALL_STATUSES = (
     "pending_send", "sent", "send_failed", "opened",
     "submitted", "declined", "expired", "no_response",
 )
-_PM_SETTABLE_STATUSES = frozenset({"declined", "expired", "no_response"})
-_EXPIRABLE_STATUSES = ("sent", "opened")
-# Statuses the deadline sweep / lazy-expiry treat as no-ops: it acts ONLY on an
-# 'open' package. 'evaluating' is included so a manually-closed package (open →
-# evaluating) is never re-swept when its deadline later passes.
-_NOOP_PACKAGE_STATUSES = frozenset({"closed", "cancelled", "evaluating"})
+# PMs may manually close out an invitation as declined or no_response. 'expired'
+# is intentionally NOT settable: the timeout terminal is 'no_response', written
+# only by the shared deadline transition.
+_PM_SETTABLE_STATUSES = frozenset({"declined", "no_response"})
+# The two live statuses the deadline transition converts to 'no_response'.
+_TIMED_OUT_SOURCE_STATUSES = ("sent", "opened")
+# Packages the deadline transition never touches (already terminal). An 'open' or
+# 'evaluating' package past its deadline is still converged: sent/opened rows flip
+# to no_response, and an 'open' package additionally moves to 'evaluating'.
+_TERMINAL_PACKAGE_STATUSES = frozenset({"closed", "cancelled"})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -309,54 +317,71 @@ def _transform_document(row: dict) -> dict:
 # ── Service functions ─────────────────────────────────────────────────────
 
 
-async def expire_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
-    """Automatic deadline backstop. If the bid package deadline has passed and the
-    package is still open, flip all sent/opened invitations to 'expired' and move
-    the package open → 'evaluating' (NOT 'closed' — the package only reaches
-    'closed' on award acceptance). Invitation-expiry behavior is unchanged.
+def _apply_overdue_transition(*, bid_package: dict, db) -> dict:
+    """Shared, idempotent deadline transition (the single source of truth).
 
-    Returns {"expired_count": int, "package_closed": bool} (package_closed = True
-    when the package was moved out of 'open'). No-op when the deadline is in the
-    future or the package is not 'open'.
+    Given an already-fetched bid package whose deadline has passed and which is
+    not terminal, flip every 'sent'/'opened' invitation to 'no_response' and move
+    an 'open' package to 'evaluating' (NOT 'closed' — a package only reaches
+    'closed' on award acceptance).
+
+    'no_response' is the one terminal "invited, no bid by the deadline" status:
+    both this core and the daily post-deadline job converge on it, so whichever
+    fires first (a PM opening the detail page, or the cron) leaves the same state.
+
+    Returns {"no_response_count": int, "package_moved": bool}. Writes nothing when
+    the deadline is in the future, the package is closed/cancelled, or there is
+    nothing left to converge (so it is safe to call on every read).
     """
-    bid_package = _fetch_bid_package(db, bid_package_id)
-    if bid_package is None:
-        raise BidPackageNotFoundError()
+    result = {"no_response_count": 0, "package_moved": False}
 
     current_status = bid_package.get("status")
-    if current_status in _NOOP_PACKAGE_STATUSES:
-        return {"expired_count": 0, "package_closed": False}
+    if current_status in _TERMINAL_PACKAGE_STATUSES:
+        return result
 
     deadline = _parse_deadline(bid_package.get("deadline"))
     if deadline is None or deadline >= datetime.now(timezone.utc):
-        return {"expired_count": 0, "package_closed": False}
+        return result
 
-    # Deadline has passed and package is still open (the _NOOP guard above
-    # already excluded evaluating/closed/cancelled) — expire overdue rows.
-    invitations = _fetch_invitations(db, bid_package_id)
-    expired_count = sum(
-        1 for inv in invitations if inv.get("status") in _EXPIRABLE_STATUSES
-    )
-
+    bid_package_id = bid_package.get("id")
     now = _now_iso()
 
-    if expired_count > 0:
+    invitations = _fetch_invitations(db, bid_package_id)
+    no_response_count = sum(
+        1 for inv in invitations if inv.get("status") in _TIMED_OUT_SOURCE_STATUSES
+    )
+    if no_response_count > 0:
         (
             db.table("bid_invitations")
-            .update({"status": "expired", "updated_at": now})
+            .update({"status": "no_response", "updated_at": now})
             .eq("bid_package_id", str(bid_package_id))
-            .in_("status", list(_EXPIRABLE_STATUSES))
+            .in_("status", list(_TIMED_OUT_SOURCE_STATUSES))
             .execute()
         )
+    result["no_response_count"] = no_response_count
 
-    (
-        db.table("bid_packages")
-        .update({"status": "evaluating", "updated_at": now})
-        .eq("id", str(bid_package_id))
-        .execute()
-    )
+    # Only an 'open' package moves; an 'evaluating' one (manually closed early, or
+    # already advanced) keeps its status while its lingering rows still converge.
+    if current_status == "open":
+        (
+            db.table("bid_packages")
+            .update({"status": "evaluating", "updated_at": now})
+            .eq("id", str(bid_package_id))
+            .execute()
+        )
+        result["package_moved"] = True
 
-    return {"expired_count": expired_count, "package_closed": True}
+    return result
+
+
+async def sweep_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
+    """Lazy read-path entry point for the shared deadline transition. Fetches the
+    package, then delegates to _apply_overdue_transition. Raises
+    BidPackageNotFoundError when the package is missing."""
+    bid_package = _fetch_bid_package(db, bid_package_id)
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+    return _apply_overdue_transition(bid_package=bid_package, db=db)
 
 
 async def close_bidding(*, bid_package_id: UUID, db) -> dict:
@@ -396,25 +421,25 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
 
     deadline = _parse_deadline(bid_package.get("deadline"))
     current_status = bid_package.get("status")
-    lazy_expired = False
+    lazy_swept = False
 
     if (
-        current_status not in _NOOP_PACKAGE_STATUSES
+        current_status not in _TERMINAL_PACKAGE_STATUSES
         and deadline is not None
         and deadline < datetime.now(timezone.utc)
     ):
-        await expire_overdue_invitations(bid_package_id=bid_package_id, db=db)
+        await sweep_overdue_invitations(bid_package_id=bid_package_id, db=db)
         bid_package["status"] = "evaluating"
-        lazy_expired = True
+        lazy_swept = True
 
     invitations_rows = _fetch_invitations(db, bid_package_id)
 
-    # Reflect the lazy expiration in the returned rows since the mock
+    # Reflect the lazy transition in the returned rows since the mock
     # doesn't actually apply the DB update in tests.
-    if lazy_expired:
+    if lazy_swept:
         for row in invitations_rows:
-            if row.get("status") in _EXPIRABLE_STATUSES:
-                row["status"] = "expired"
+            if row.get("status") in _TIMED_OUT_SOURCE_STATUSES:
+                row["status"] = "no_response"
 
     documents_rows = _fetch_documents(db, bid_package_id)
 
@@ -471,8 +496,8 @@ async def list_invitations(
 async def update_invitation_status(
     *, invitation_id: UUID, new_status: str, current_user_id: UUID | None = None, db
 ) -> dict:
-    """Update invitation status. Only declined/expired/no_response are
-    PM-settable. Other values → 400.
+    """Update invitation status. Only declined/no_response are PM-settable.
+    Other values (including retired 'expired') → 400.
 
     On a successful transition, all magic_link_tokens for this invitation are
     hard-revoked (is_used=True, revoked_at=NOW(), revoked_by=current_user_id)

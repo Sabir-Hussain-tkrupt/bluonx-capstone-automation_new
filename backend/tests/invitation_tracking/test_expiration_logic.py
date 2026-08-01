@@ -1,11 +1,13 @@
 """
-Tests for the expire_overdue_invitations() utility.
+Tests for the sweep_overdue_invitations() lazy read-path entry point and the
+shared _apply_overdue_transition() core.
 
-Pure service function. Given a bid_package_id, if the deadline has passed
-and the package is still 'open', it flips all 'sent'/'opened' invitations
-to 'expired' and the package status to 'closed'. It does not touch
-'submitted' or 'declined' rows. It is a no-op if the deadline hasn't
-passed or the package is already 'closed' or 'cancelled'.
+Given a bid_package_id, if the deadline has passed and the package is not
+terminal (closed/cancelled), it flips all 'sent'/'opened' invitations to
+'no_response' (the single terminal "invited, no bid by the deadline" status) and
+moves an 'open' package to 'evaluating'. It never touches 'submitted' or
+'declined' rows, and is a no-op (no writes) when the deadline hasn't passed or
+the package is already 'closed'/'cancelled'.
 """
 
 from __future__ import annotations
@@ -14,8 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Import will fail until implementation lands — expected for test-first.
-from app.services.invitation_tracking_service import expire_overdue_invitations
+from app.services.invitation_tracking_service import sweep_overdue_invitations
 
 from .conftest import BID_PACKAGE_ID, build_chain
 
@@ -46,11 +47,11 @@ def _build_client(
     return client
 
 
-class TestExpiresOverdueInvitations:
-    """sent/opened invitations are expired when deadline has passed."""
+class TestOverdueBecomeNoResponse:
+    """sent/opened invitations become no_response when the deadline has passed."""
 
     @pytest.mark.asyncio
-    async def test_sent_and_opened_become_expired(
+    async def test_sent_and_opened_become_no_response(
         self,
         sample_bid_package_past_deadline,
         sample_invitations_mixed_statuses,
@@ -62,19 +63,19 @@ class TestExpiresOverdueInvitations:
             updates_captured,
         )
 
-        result = await expire_overdue_invitations(
+        result = await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
 
-        assert result["expired_count"] == 2  # 'sent' + 'opened'
-        assert result["package_closed"] is True
+        assert result["no_response_count"] == 2  # 'sent' + 'opened'
+        assert result["package_moved"] is True
 
-        # At least one bid_invitations update with status='expired'
+        # At least one bid_invitations update with status='no_response'
         invitation_updates = [
             u for u in updates_captured
             if u["table"] == "bid_invitations"
-            and u["payload"].get("status") == "expired"
+            and u["payload"].get("status") == "no_response"
         ]
         assert len(invitation_updates) >= 1
 
@@ -95,13 +96,13 @@ class TestDoesNotTouchFinalizedRows:
             updates_captured,
         )
 
-        await expire_overdue_invitations(
+        await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
 
         # The update payload for bid_invitations should only ever be
-        # status='expired' — never 'submitted' or 'declined'.
+        # status='no_response' — never 'submitted' or 'declined'.
         invitation_update_payloads = [
             u["payload"] for u in updates_captured
             if u["table"] == "bid_invitations"
@@ -109,11 +110,11 @@ class TestDoesNotTouchFinalizedRows:
         for payload in invitation_update_payloads:
             status = payload.get("status")
             if status is not None:
-                assert status == "expired"
+                assert status == "no_response"
 
 
 class TestUpdatesBidPackageToEvaluating:
-    """bid_packages.status flips from 'open' to 'evaluating' (the sweep no longer
+    """bid_packages.status flips from 'open' to 'evaluating' (the sweep never
     writes 'closed'; that is reserved for award acceptance)."""
 
     @pytest.mark.asyncio
@@ -129,7 +130,7 @@ class TestUpdatesBidPackageToEvaluating:
             updates_captured,
         )
 
-        await expire_overdue_invitations(
+        await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
@@ -162,13 +163,13 @@ class TestNoOpWhenDeadlineFuture:
             updates_captured,
         )
 
-        result = await expire_overdue_invitations(
+        result = await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
 
-        assert result["expired_count"] == 0
-        assert result["package_closed"] is False
+        assert result["no_response_count"] == 0
+        assert result["package_moved"] is False
 
         # No writes at all
         assert updates_captured == []
@@ -190,13 +191,13 @@ class TestNoOpWhenAlreadyClosed:
             updates_captured,
         )
 
-        result = await expire_overdue_invitations(
+        result = await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
 
-        assert result["expired_count"] == 0
-        assert result["package_closed"] is False
+        assert result["no_response_count"] == 0
+        assert result["package_moved"] is False
         assert updates_captured == []
 
 
@@ -216,11 +217,11 @@ class TestNoOpWhenCancelled:
             updates_captured,
         )
 
-        result = await expire_overdue_invitations(
+        result = await sweep_overdue_invitations(
             bid_package_id=BID_PACKAGE_ID,
             db=client,
         )
 
-        assert result["expired_count"] == 0
-        assert result["package_closed"] is False
+        assert result["no_response_count"] == 0
+        assert result["package_moved"] is False
         assert updates_captured == []

@@ -246,8 +246,8 @@ export function BidPackageDetailPage() {
           color="text-info-600"
         />
         <SummaryCard
-          label="Declined / Expired"
-          value={summary.declined + summary.expired}
+          label="Declined / No Response"
+          value={summary.declined + summary.no_response + summary.expired}
           color="text-secondary-500"
         />
         {/* Only shown when sends failed, so the normal flow keeps four cards. */}
@@ -444,8 +444,8 @@ export function BidPackageDetailPage() {
         }
       >
         <p className="text-sm text-secondary-600">
-          Are you sure you want to cancel this bid package? All pending invitations will be marked
-          as expired. This action cannot be undone.
+          Are you sure you want to cancel this bid package? All pending invitations will be closed
+          out. This action cannot be undone.
         </p>
       </Modal>
 
