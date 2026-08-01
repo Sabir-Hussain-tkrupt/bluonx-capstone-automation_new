@@ -87,3 +87,18 @@
     display: none;
   }
 }
+
+/* ─── Base ─────────────────────────────────────────────────── */
+
+/* Tailwind v4's Preflight follows the browser default (arrow cursor) on
+   buttons, so nothing felt clickable unless a component added cursor-pointer
+   by hand. Restore the pointer app-wide for enabled click targets. Disabled
+   controls are excluded so they keep their default/not-allowed cursor, and
+   because this sits in the base layer any per-element utility still wins. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+}

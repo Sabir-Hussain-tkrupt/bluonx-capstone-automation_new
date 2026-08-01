@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { FormField } from '@/components/ui/FormField';
@@ -91,6 +92,25 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
 
     return { recommended: rec, general: gen, other: oth };
   }, [templates, task.trade_id]);
+
+  const moreCount = general.length + other.length;
+
+  // The non-recommended templates start collapsed to keep this page short. The
+  // one case that must NOT start collapsed is when the current selection is a
+  // General/Other template (editing/revisiting a package) — hiding it would look
+  // like nothing is chosen. Seeded once from mount-time props; the selection
+  // only changes afterward via a click inside the already-open region.
+  const [showMoreTemplates, setShowMoreTemplates] = useState(
+    () =>
+      general.some((t) => t.id === data.bidTemplateId) ||
+      other.some((t) => t.id === data.bidTemplateId),
+  );
+
+  // One selection handler for every group so the three renders can't drift.
+  const handleSelectTemplate = (id: string) => {
+    onUpdate({ bidTemplateId: id });
+    if (errors.template) setErrors((prev) => ({ ...prev, template: undefined }));
+  };
 
   const handleDocToggle = (docId: string) => {
     const next = selectedIds.includes(docId)
@@ -265,34 +285,57 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
                   subtitle="Matches this task's trade"
                   templates={recommended}
                   selectedId={data.bidTemplateId}
-                  onSelect={(id) => {
-                    onUpdate({ bidTemplateId: id });
-                    if (errors.template) setErrors((prev) => ({ ...prev, template: undefined }));
-                  }}
+                  onSelect={handleSelectTemplate}
                   showStar
                 />
               )}
-              {general.length > 0 && (
-                <TemplateGroup
-                  title="General Templates"
-                  templates={general}
-                  selectedId={data.bidTemplateId}
-                  onSelect={(id) => {
-                    onUpdate({ bidTemplateId: id });
-                    if (errors.template) setErrors((prev) => ({ ...prev, template: undefined }));
-                  }}
-                />
-              )}
-              {other.length > 0 && (
-                <TemplateGroup
-                  title="Other Templates"
-                  templates={other}
-                  selectedId={data.bidTemplateId}
-                  onSelect={(id) => {
-                    onUpdate({ bidTemplateId: id });
-                    if (errors.template) setErrors((prev) => ({ ...prev, template: undefined }));
-                  }}
-                />
+
+              {/* General + Other collapsed behind one disclosure so the page
+                  leads with the trade-matched picks. Mirrors the "Show N
+                  disqualified vendors" toggle on the Select Vendors step. */}
+              {moreCount > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreTemplates((v) => !v)}
+                    aria-expanded={showMoreTemplates}
+                    className="group flex w-full items-center justify-between rounded-lg border border-secondary-200 px-3 py-2 text-left transition-colors hover:border-secondary-300 hover:bg-secondary-50"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-wide text-secondary-500 transition-colors group-hover:text-secondary-700">
+                      {showMoreTemplates ? 'Hide' : 'Show'} {moreCount}{' '}
+                      {recommended.length > 0 ? 'more ' : ''}template
+                      {moreCount !== 1 ? 's' : ''}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 text-secondary-400 transition-transform group-hover:text-secondary-600',
+                        showMoreTemplates && 'rotate-180',
+                      )}
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  {showMoreTemplates && (
+                    <div className="mt-3 space-y-5">
+                      {general.length > 0 && (
+                        <TemplateGroup
+                          title="General Templates"
+                          templates={general}
+                          selectedId={data.bidTemplateId}
+                          onSelect={handleSelectTemplate}
+                        />
+                      )}
+                      {other.length > 0 && (
+                        <TemplateGroup
+                          title="Other Templates"
+                          templates={other}
+                          selectedId={data.bidTemplateId}
+                          onSelect={handleSelectTemplate}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
