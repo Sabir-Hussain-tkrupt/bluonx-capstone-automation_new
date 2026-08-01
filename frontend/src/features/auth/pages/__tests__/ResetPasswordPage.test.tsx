@@ -15,12 +15,20 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
+// The page now gates on the recovery session from AuthContext.
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
 import { updatePassword } from '@/services/auth.service';
 const mockUpdatePassword = vi.mocked(updatePassword);
 
 describe('ResetPasswordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: a live recovery session is present, so the form renders.
+    mockUseAuth.mockReturnValue({ session: { access_token: 't' }, isLoading: false });
   });
 
   it('renders the reset password form', () => {
@@ -103,5 +111,37 @@ describe('ResetPasswordPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Session expired')).toBeInTheDocument();
     });
+  });
+
+  it('maps "Auth session missing!" to actionable guidance', async () => {
+    mockUpdatePassword.mockRejectedValueOnce(new Error('Auth session missing!'));
+    const user = userEvent.setup();
+    renderWithRouter(<ResetPasswordPage />);
+
+    await user.type(screen.getByLabelText(/new password/i), 'NewPassword123!');
+    await user.type(screen.getByLabelText(/confirm password/i), 'NewPassword123!');
+    await user.click(screen.getByRole('button', { name: /update password/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/reset link is invalid or has expired/i)).toBeInTheDocument();
+    });
+    // The raw Supabase message is never shown to the user.
+    expect(screen.queryByText('Auth session missing!')).not.toBeInTheDocument();
+  });
+
+  it('shows an invalid-link state (not the form) when there is no recovery session', () => {
+    mockUseAuth.mockReturnValue({ session: null, isLoading: false });
+    renderWithRouter(<ResetPasswordPage />);
+
+    expect(screen.getByText(/reset link invalid or expired/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/new password/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a loading state while the recovery session resolves', () => {
+    mockUseAuth.mockReturnValue({ session: null, isLoading: true });
+    renderWithRouter(<ResetPasswordPage />);
+
+    expect(screen.getByText(/verifying your reset link/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/new password/i)).not.toBeInTheDocument();
   });
 });
