@@ -1189,21 +1189,25 @@ async def delete_vendor_document(
 )
 async def get_vendor_email_log_endpoint(
     vendor_id: UUID,
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=25, ge=1, le=100, description="Items per page"),
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Return all email_log rows tied to this vendor's invitations.
+    """Return one page of every email sent to this vendor, newest first.
 
-    Unions email_log rows across bid_invitations, bid_revision_requests,
-    and bid_submissions reference_types — see invitation_tracking_service
-    for filter rationale.
+    Reads v_vendor_email_log, which attributes email_log's polymorphic
+    reference across five flows (invitations, revision requests, submissions,
+    awards, milestone check-ins) — see invitation_tracking_service.
     """
     _get_vendor_or_404(db, vendor_id)
     try:
-        items = await get_vendor_email_log(vendor_id=vendor_id, db=db)
+        items, total = await get_vendor_email_log(
+            vendor_id=vendor_id, db=db, page=page, page_size=page_size
+        )
     except InvitationTrackingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 # ── CSV Import ───────────────────────────────────────────────────────────

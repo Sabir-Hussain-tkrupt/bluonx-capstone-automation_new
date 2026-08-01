@@ -1,9 +1,11 @@
-"""Router tests for GET /api/v1/vendors/{vendor_id}/email-log (Task 7.7).
+"""Router tests for GET /api/v1/vendors/{vendor_id}/email-log.
 
-Verifies the vendor-scoped variant of the broadened email-log filter:
-unions email_log rows across bid_invitations, bid_revision_requests, and
-bid_submissions reference_types for any invitation this vendor has
-received.
+The endpoint reads v_vendor_email_log, which resolves email_log's polymorphic
+reference to a vendor across five flows (bid_invitations, bid_revision_requests,
+bid_submissions, awards, milestones) and keeps only vendor-directed mail. The
+union and the attribution are the view's job now, so these tests seed view rows
+and pin the endpoint's contract instead: the paginated envelope, correct
+slicing, newest-first ordering, and the vendor 404 guard.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from fastapi.testclient import TestClient
 from app.core.auth import get_current_active_user
 from app.core.supabase_client import get_supabase
 from app.main import app
+from tests._fakes import FakeRowsSupabase
 
 
 USER = {
@@ -27,87 +30,15 @@ USER = {
     "is_active": True,
 }
 
-
-# ── Filter-aware fake DB ───────────────────────────────────────────────────
-#
-# Mirrors the helper in tests/invitation_tracking/test_bid_package_email_log.py
-# but kept local to this module so router tests stay self-contained.
-
-
-class _Result:
-    def __init__(self, data):
-        self.data = data
-
-
-class _Chain:
-    def __init__(self, rows: list[dict]):
-        self._rows = list(rows)
-        self._filters: list[tuple] = []
-        self._single = False
-        self._is_null: list[str] = []
-
-    def select(self, *_a, **_k):
-        return self
-
-    def eq(self, col, val):
-        self._filters.append(("eq", col, val))
-        return self
-
-    def in_(self, col, vals):
-        self._filters.append(("in", col, list(vals)))
-        return self
-
-    def is_(self, col, val):
-        # Mirror the supabase-py / postgrest is_("col", "null") behavior
-        # used by _get_vendor_or_404 — kept rows where the column is None.
-        if val == "null":
-            self._is_null.append(col)
-        return self
-
-    def single(self):
-        self._single = True
-        return self
-
-    def maybe_single(self):
-        # Mirrors single() here; execute() already returns data=None when the
-        # filtered set is empty, which is the maybe_single contract.
-        self._single = True
-        return self
-
-    def execute(self):
-        out = self._rows
-        for kind, col, val in self._filters:
-            if kind == "eq":
-                out = [r for r in out if str(r.get(col)) == str(val)]
-            elif kind == "in":
-                wanted = {str(v) for v in val}
-                out = [r for r in out if str(r.get(col)) in wanted]
-        for col in self._is_null:
-            out = [r for r in out if r.get(col) is None]
-        if self._single:
-            return _Result(out[0] if out else None)
-        return _Result(out)
-
-
-class FakeDB:
-    def __init__(self):
-        self.tables: dict[str, list[dict]] = {
-            "vendors": [],
-            "bid_invitations": [],
-            "bid_revision_requests": [],
-            "bid_submissions": [],
-            "email_log": [],
-        }
-
-    def table(self, name: str) -> _Chain:
-        return _Chain(self.tables.get(name, []))
+VIEW = "v_vendor_email_log"
+BASE = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 
 
 # ── Seed helpers ───────────────────────────────────────────────────────────
 
 
-def _seed_vendor(db: FakeDB, vendor_id: UUID, *, deleted: bool = False) -> None:
-    db.tables["vendors"].append(
+def _seed_vendor(db: FakeRowsSupabase, vendor_id: UUID, *, deleted: bool = False) -> None:
+    db.tables.setdefault("vendors", []).append(
         {
             "id": str(vendor_id),
             "company_name": "Acme",
@@ -116,29 +47,20 @@ def _seed_vendor(db: FakeDB, vendor_id: UUID, *, deleted: bool = False) -> None:
     )
 
 
-def _seed_invitation(db: FakeDB, invitation_id: UUID, vendor_id: UUID) -> None:
-    db.tables["bid_invitations"].append(
-        {
-            "id": str(invitation_id),
-            "vendor_id": str(vendor_id),
-            "bid_package_id": str(uuid4()),
-        }
-    )
-
-
 def _seed_email(
-    db: FakeDB,
+    db: FakeRowsSupabase,
+    vendor_id: UUID,
     *,
-    email_id: UUID,
-    reference_type: str,
-    reference_id: UUID,
+    email_id: UUID | None = None,
+    reference_type: str = "bid_invitations",
     email_type: str = "general",
     subject: str = "subj",
-    created_at: datetime | None = None,
-) -> None:
-    if created_at is None:
-        created_at = datetime.now(timezone.utc)
-    db.tables["email_log"].append(
+    minutes_ago: int = 0,
+) -> UUID:
+    """Append one v_vendor_email_log row. Larger minutes_ago = older."""
+    email_id = email_id or uuid4()
+    created = BASE - timedelta(minutes=minutes_ago)
+    db.tables.setdefault(VIEW, []).append(
         {
             "id": str(email_id),
             "recipient_email": "v@example.com",
@@ -146,211 +68,157 @@ def _seed_email(
             "email_type": email_type,
             "subject": subject,
             "reference_type": reference_type,
-            "reference_id": str(reference_id),
+            "reference_id": str(uuid4()),
             "status": "sent",
-            "sent_at": created_at.isoformat(),
+            "sent_at": created.isoformat(),
             "opened_at": None,
             "clicked_at": None,
             "error_message": None,
             "retry_count": 0,
-            "created_at": created_at.isoformat(),
+            "created_at": created.isoformat(),
+            "vendor_id": str(vendor_id),
+            "bid_invitation_id": None,
+            "bid_package_id": None,
         }
     )
+    return email_id
 
 
-# ── Client fixture ─────────────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def db() -> FakeDB:
-    return FakeDB()
+# ── Fixtures ───────────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
-def client(db: FakeDB):
+def db() -> FakeRowsSupabase:
+    return FakeRowsSupabase({"vendors": [], VIEW: []})
+
+
+@pytest.fixture()
+def client(db: FakeRowsSupabase):
     app.dependency_overrides[get_current_active_user] = lambda: USER
     app.dependency_overrides[get_supabase] = lambda: db
     yield TestClient(app)
     app.dependency_overrides.clear()
 
 
-def _get(client: TestClient, vendor_id: UUID):
-    return client.get(f"/api/v1/vendors/{vendor_id}/email-log")
+def _get(client: TestClient, vendor_id: UUID, **params):
+    return client.get(f"/api/v1/vendors/{vendor_id}/email-log", params=params)
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 
 
 class TestVendorEmailLog:
-    def test_empty_when_vendor_has_no_invitations(self, client, db):
+    def test_returns_a_paginated_envelope(self, client, db):
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        _seed_email(db, vendor_id, subject="hello", email_type="bid_invitation")
+
+        resp = _get(client, vendor_id)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["page"] == 1
+        assert body["page_size"] == 25
+        assert [i["subject"] for i in body["items"]] == ["hello"]
+        assert body["items"][0]["email_type"] == "bid_invitation"
+
+    def test_empty_when_vendor_has_no_emails(self, client, db):
         vendor_id = uuid4()
         _seed_vendor(db, vendor_id)
 
         resp = _get(client, vendor_id)
 
         assert resp.status_code == 200
-        assert resp.json() == {"items": []}
+        assert resp.json() == {"items": [], "total": 0, "page": 1, "page_size": 25}
+
+    def test_excludes_other_vendors_emails(self, client, db):
+        mine, theirs = uuid4(), uuid4()
+        _seed_vendor(db, mine)
+        _seed_email(db, mine, subject="mine")
+        _seed_email(db, theirs, subject="theirs")
+
+        body = _get(client, mine).json()
+
+        assert body["total"] == 1
+        assert [i["subject"] for i in body["items"]] == ["mine"]
+
+    def test_orders_newest_first(self, client, db):
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        _seed_email(db, vendor_id, subject="older", minutes_ago=180)
+        _seed_email(db, vendor_id, subject="newest", minutes_ago=0)
+        _seed_email(db, vendor_id, subject="middle", minutes_ago=60)
+
+        body = _get(client, vendor_id).json()
+
+        assert [i["subject"] for i in body["items"]] == ["newest", "middle", "older"]
+
+    def test_page_two_returns_the_next_slice(self, client, db):
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        for i in range(5):
+            _seed_email(db, vendor_id, subject=f"e{i}", minutes_ago=i)
+
+        first = _get(client, vendor_id, page=1, page_size=2).json()
+        second = _get(client, vendor_id, page=2, page_size=2).json()
+
+        assert first["total"] == second["total"] == 5
+        assert [i["subject"] for i in first["items"]] == ["e0", "e1"]
+        assert [i["subject"] for i in second["items"]] == ["e2", "e3"]
+        assert second["page"] == 2
+
+    def test_page_past_the_end_is_empty_but_reports_the_true_total(self, client, db):
+        # Degrade to an empty page rather than erroring, matching list_vendors.
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        _seed_email(db, vendor_id)
+
+        body = _get(client, vendor_id, page=9, page_size=25).json()
+
+        assert body["items"] == []
+        assert body["total"] == 1
+
+    def test_includes_the_three_invitation_linked_flows(self, client, db):
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        _seed_email(db, vendor_id, reference_type="bid_invitations", subject="invite")
+        _seed_email(db, vendor_id, reference_type="bid_revision_requests", subject="revise")
+        _seed_email(db, vendor_id, reference_type="bid_submissions", subject="receipt")
+
+        body = _get(client, vendor_id).json()
+
+        assert body["total"] == 3
+        assert {i["subject"] for i in body["items"]} == {"invite", "revise", "receipt"}
+
+    def test_includes_award_and_milestone_emails(self, client, db):
+        # Both were silently absent before: the old reader unioned only the
+        # three invitation-linked reference_types.
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+        _seed_email(db, vendor_id, reference_type="awards", subject="awarded")
+        _seed_email(db, vendor_id, reference_type="milestones", subject="check-in")
+
+        body = _get(client, vendor_id).json()
+
+        assert body["total"] == 2
+        assert {i["subject"] for i in body["items"]} == {"awarded", "check-in"}
+
+    def test_rejects_an_out_of_range_page_or_page_size(self, client, db):
+        vendor_id = uuid4()
+        _seed_vendor(db, vendor_id)
+
+        assert _get(client, vendor_id, page_size=500).status_code == 422
+        assert _get(client, vendor_id, page=0).status_code == 422
 
     def test_404_when_vendor_missing(self, client):
-        resp = _get(client, uuid4())
-
-        assert resp.status_code == 404
+        assert _get(client, uuid4()).status_code == 404
 
     def test_404_when_vendor_soft_deleted(self, client, db):
         vendor_id = uuid4()
         _seed_vendor(db, vendor_id, deleted=True)
 
-        resp = _get(client, vendor_id)
-
-        assert resp.status_code == 404
-
-    def test_includes_invitation_emails(self, client, db):
-        vendor_id, inv_id, email_id = uuid4(), uuid4(), uuid4()
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        _seed_email(
-            db,
-            email_id=email_id,
-            reference_type="bid_invitations",
-            reference_id=inv_id,
-            email_type="bid_invitation",
-        )
-
-        resp = _get(client, vendor_id)
-
-        assert resp.status_code == 200
-        items = resp.json()["items"]
-        assert [i["id"] for i in items] == [str(email_id)]
-        assert items[0]["email_type"] == "bid_invitation"
-
-    def test_includes_reminder_emails(self, client, db):
-        vendor_id, inv_id, invite_email, reminder_email = (uuid4() for _ in range(4))
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        _seed_email(
-            db,
-            email_id=invite_email,
-            reference_type="bid_invitations",
-            reference_id=inv_id,
-            email_type="bid_invitation",
-        )
-        _seed_email(
-            db,
-            email_id=reminder_email,
-            reference_type="bid_invitations",
-            reference_id=inv_id,
-            email_type="bid_reminder",
-        )
-
-        resp = _get(client, vendor_id)
-
-        assert resp.status_code == 200
-        ids = {i["id"] for i in resp.json()["items"]}
-        assert ids == {str(invite_email), str(reminder_email)}
-
-    def test_includes_revision_request_emails(self, client, db):
-        vendor_id, inv_id, rr_id, email_id = (uuid4() for _ in range(4))
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        db.tables["bid_revision_requests"].append(
-            {"id": str(rr_id), "bid_invitation_id": str(inv_id)}
-        )
-        _seed_email(
-            db,
-            email_id=email_id,
-            reference_type="bid_revision_requests",
-            reference_id=rr_id,
-        )
-
-        resp = _get(client, vendor_id)
-
-        items = resp.json()["items"]
-        assert len(items) == 1
-        assert items[0]["id"] == str(email_id)
-
-    def test_includes_initial_bid_receipt_emails(self, client, db):
-        vendor_id, inv_id, sub_id, email_id = (uuid4() for _ in range(4))
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        db.tables["bid_submissions"].append(
-            {"id": str(sub_id), "bid_invitation_id": str(inv_id)}
-        )
-        _seed_email(
-            db,
-            email_id=email_id,
-            reference_type="bid_submissions",
-            reference_id=sub_id,
-        )
-
-        resp = _get(client, vendor_id)
-
-        items = resp.json()["items"]
-        assert len(items) == 1
-        assert items[0]["id"] == str(email_id)
-
-    def test_includes_revision_receipt_emails(self, client, db):
-        vendor_id, inv_id = uuid4(), uuid4()
-        sub1_id, sub2_id = uuid4(), uuid4()
-        initial_email, revision_email = uuid4(), uuid4()
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        db.tables["bid_submissions"].extend(
-            [
-                {"id": str(sub1_id), "bid_invitation_id": str(inv_id)},
-                {"id": str(sub2_id), "bid_invitation_id": str(inv_id)},
-            ]
-        )
-        _seed_email(db, email_id=initial_email,
-                    reference_type="bid_submissions", reference_id=sub1_id)
-        _seed_email(db, email_id=revision_email,
-                    reference_type="bid_submissions", reference_id=sub2_id)
-
-        resp = _get(client, vendor_id)
-
-        ids = {i["id"] for i in resp.json()["items"]}
-        assert ids == {str(initial_email), str(revision_email)}
-
-    def test_excludes_other_vendors_emails(self, client, db):
-        vendor_a, vendor_b = uuid4(), uuid4()
-        inv_a, inv_b = uuid4(), uuid4()
-        email_a, email_b = uuid4(), uuid4()
-        _seed_vendor(db, vendor_a)
-        _seed_vendor(db, vendor_b)
-        _seed_invitation(db, inv_a, vendor_a)
-        _seed_invitation(db, inv_b, vendor_b)
-        _seed_email(db, email_id=email_a, reference_type="bid_invitations",
-                    reference_id=inv_a)
-        _seed_email(db, email_id=email_b, reference_type="bid_invitations",
-                    reference_id=inv_b)
-
-        resp = _get(client, vendor_a)
-
-        ids = {i["id"] for i in resp.json()["items"]}
-        assert ids == {str(email_a)}
-
-    def test_sorted_by_created_at_desc(self, client, db):
-        vendor_id, inv_id, rr_id, sub_id = (uuid4() for _ in range(4))
-        _seed_vendor(db, vendor_id)
-        _seed_invitation(db, inv_id, vendor_id)
-        db.tables["bid_revision_requests"].append(
-            {"id": str(rr_id), "bid_invitation_id": str(inv_id)}
-        )
-        db.tables["bid_submissions"].append(
-            {"id": str(sub_id), "bid_invitation_id": str(inv_id)}
-        )
-        base = datetime.now(timezone.utc)
-        oldest, middle, newest = uuid4(), uuid4(), uuid4()
-        _seed_email(db, email_id=oldest, reference_type="bid_invitations",
-                    reference_id=inv_id, created_at=base - timedelta(hours=3))
-        _seed_email(db, email_id=newest, reference_type="bid_submissions",
-                    reference_id=sub_id, created_at=base)
-        _seed_email(db, email_id=middle, reference_type="bid_revision_requests",
-                    reference_id=rr_id, created_at=base - timedelta(hours=1))
-
-        resp = _get(client, vendor_id)
-
-        ids = [i["id"] for i in resp.json()["items"]]
-        assert ids == [str(newest), str(middle), str(oldest)]
+        assert _get(client, vendor_id).status_code == 404
 
     def test_unauthenticated_returns_401(self, db):
         """No auth override → FastAPI's get_current_active_user raises 401."""

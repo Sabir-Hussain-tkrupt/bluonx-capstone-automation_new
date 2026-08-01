@@ -42,8 +42,8 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.vendors.details(), id] as const,
     insuranceExpiringCount: () =>
       [...queryKeys.vendors.all, 'insuranceExpiringCount'] as const,
-    emailLog: (id: string) =>
-      [...queryKeys.vendors.all, id, 'email_log'] as const,
+    emailLog: (id: string, page: number, pageSize: number) =>
+      [...queryKeys.vendors.all, id, 'email_log', { page, pageSize }] as const,
   },
 
   projects: {
@@ -121,7 +121,8 @@ export const queryKeys = {
   },
 
   bidInvitations: {
-    emailLog: (bidPackageId: string) => ['bid_packages', bidPackageId, 'email_log'] as const,
+    emailLog: (bidPackageId: string, page: number, pageSize: number) =>
+      ['bid_packages', bidPackageId, 'email_log', { page, pageSize }] as const,
   },
 
   bidSubmissions: {

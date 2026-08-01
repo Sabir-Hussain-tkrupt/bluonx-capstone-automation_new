@@ -271,7 +271,9 @@ export interface UpdateInvitationStatusRequest {
   status: 'declined' | 'no_response';
 }
 
-// ─── Email Log (GET /v1/bid-packages/{id}/email-log) ────────────────
+// ─── Email Log ──────────────────────────────────────────────────────
+// Shared envelope for GET /v1/bid-packages/{id}/email-log and
+// GET /v1/vendors/{id}/email-log. Both paginate server-side.
 
 export interface EmailLogItem {
   id: string | null;
@@ -285,6 +287,9 @@ export interface EmailLogItem {
 
 export interface EmailLogResponse {
   items: EmailLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 // ─── Bid Package List Item (Supabase read for task detail) ──────────

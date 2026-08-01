@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.4
--- Date:     August 1, 2026
+-- Version:  3.5
+-- Date:     August 2, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   31
 -- Engine:   PostgreSQL via Supabase
@@ -929,6 +929,10 @@ CREATE INDEX idx_milestone_checkin_tokens_milestone ON milestone_checkin_tokens 
 CREATE INDEX idx_email_log_type_status              ON email_log (email_type, status);
 CREATE INDEX idx_email_log_reference                ON email_log (reference_type, reference_id);
 CREATE INDEX idx_email_log_sent_at                  ON email_log (sent_at);
+-- Serves the newest-first ordering of the paginated email-log surfaces
+-- (v_vendor_email_log). sent_at is NULL until a send succeeds, so created_at is
+-- the only column that orders every row, including queued and failed ones.
+CREATE INDEX idx_email_log_created_at               ON email_log (created_at DESC);
 CREATE INDEX idx_email_log_provider_message_id      ON email_log (provider_message_id);
 CREATE INDEX idx_vendor_flags_vendor_id             ON vendor_flags (vendor_id);
 CREATE INDEX idx_vendor_flags_unresolved            ON vendor_flags (vendor_id, is_resolved)
@@ -2280,11 +2284,135 @@ REVOKE ALL ON v_vendor_performance FROM PUBLIC, anon;
 GRANT SELECT ON v_vendor_performance TO authenticated, service_role;
 
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- v_vendor_email_log — attributes every outbound email to the vendor that got it
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- WHY A VIEW: email_log has no vendor_id. It is polymorphic
+-- (reference_type + reference_id), and five different flows each pin
+-- reference_id to a different table. Resolving that in Python meant fetching
+-- every invitation id for a vendor, running one unbounded email_log query per
+-- reference_type with a giant IN (...), then deduping and SORTING IN MEMORY.
+-- That shape cannot be paginated (you cannot take page 3 of a merged result
+-- without materialising all of it) and it silently truncated at PostgREST's
+-- 1000-row ceiling, so a busy vendor's log looked complete while quietly
+-- dropping rows. Here the union, the attribution, and the ordering all happen
+-- in Postgres, so the callers can range/count it like any other list.
+--
+-- WHY TOP-LEVEL UNION ALL, NOT A LATERAL OVER email_log: qualifiers push down
+-- into UNION ALL branches. `WHERE vendor_id = X` therefore filters
+-- bid_invitations on its indexed vendor_id and probes email_log through
+-- idx_email_log_reference. A LATERAL would force a full email_log scan per
+-- request, which is exactly the cost being removed.
+--
+-- NO DEDUPE NEEDED: a row carries exactly one (reference_type, reference_id)
+-- pair, so it can satisfy exactly one branch.
+--
+-- recipient_type = 'vendor_contact' on every branch. Milestone emails go to
+-- BOTH vendors (check-ins) and PMs (no-response alerts); only the former is
+-- correspondence with the vendor.
+--
+-- bid_invitation_id / bid_package_id are NULL on the award and milestone
+-- branches: neither hangs off an invitation. The bid-package surface filters on
+-- bid_package_id, so it sees only the three invitation-linked types — the
+-- package view is unchanged, and only the vendor view gains rows.
+--
+-- NOT COVERED: decline notifications (email_type 'decline_notification') pin
+-- reference_id to the BID PACKAGE, not the invitation, so nothing but the
+-- recipient address identifies the vendor. Fixing that means changing
+-- decline_service to reference the invitation; until then they are absent
+-- here rather than attributed by a fragile email match.
+
+CREATE OR REPLACE VIEW v_vendor_email_log
+WITH (security_invoker = true) AS
+
+-- 1. Straight off the invitation: the initial invite and every reminder.
+SELECT
+    el.id, el.recipient_email, el.recipient_type, el.email_type, el.subject,
+    el.status, el.sent_at, el.opened_at, el.clicked_at, el.error_message,
+    el.retry_count, el.created_at, el.reference_type, el.reference_id,
+    bi.vendor_id,
+    bi.id             AS bid_invitation_id,
+    bi.bid_package_id
+  FROM bid_invitations bi
+  JOIN email_log el
+    ON el.reference_type = 'bid_invitations'
+   AND el.reference_id   = bi.id
+ WHERE el.recipient_type = 'vendor_contact'
+
+UNION ALL
+
+-- 2. PM revision requests → the invitation they were raised against.
+SELECT
+    el.id, el.recipient_email, el.recipient_type, el.email_type, el.subject,
+    el.status, el.sent_at, el.opened_at, el.clicked_at, el.error_message,
+    el.retry_count, el.created_at, el.reference_type, el.reference_id,
+    bi.vendor_id, bi.id, bi.bid_package_id
+  FROM bid_revision_requests rr
+  JOIN bid_invitations bi ON bi.id = rr.bid_invitation_id
+  JOIN email_log el
+    ON el.reference_type = 'bid_revision_requests'
+   AND el.reference_id   = rr.id
+ WHERE el.recipient_type = 'vendor_contact'
+
+UNION ALL
+
+-- 3. Submission and revision receipts → the invitation they were filed under.
+SELECT
+    el.id, el.recipient_email, el.recipient_type, el.email_type, el.subject,
+    el.status, el.sent_at, el.opened_at, el.clicked_at, el.error_message,
+    el.retry_count, el.created_at, el.reference_type, el.reference_id,
+    bi.vendor_id, bi.id, bi.bid_package_id
+  FROM bid_submissions bs
+  JOIN bid_invitations bi ON bi.id = bs.bid_invitation_id
+  JOIN email_log el
+    ON el.reference_type = 'bid_submissions'
+   AND el.reference_id   = bs.id
+ WHERE el.recipient_type = 'vendor_contact'
+
+UNION ALL
+
+-- 4. Award notifications. The award names the vendor directly.
+SELECT
+    el.id, el.recipient_email, el.recipient_type, el.email_type, el.subject,
+    el.status, el.sent_at, el.opened_at, el.clicked_at, el.error_message,
+    el.retry_count, el.created_at, el.reference_type, el.reference_id,
+    a.vendor_id, NULL::uuid, NULL::uuid
+  FROM awards a
+  JOIN email_log el
+    ON el.reference_type = 'awards'
+   AND el.reference_id   = a.id
+ WHERE el.recipient_type = 'vendor_contact'
+
+UNION ALL
+
+-- 5. Milestone check-ins → the vendor holding the contract.
+SELECT
+    el.id, el.recipient_email, el.recipient_type, el.email_type, el.subject,
+    el.status, el.sent_at, el.opened_at, el.clicked_at, el.error_message,
+    el.retry_count, el.created_at, el.reference_type, el.reference_id,
+    c.vendor_id, NULL::uuid, NULL::uuid
+  FROM milestones m
+  JOIN contracts c ON c.id = m.contract_id
+  JOIN email_log el
+    ON el.reference_type = 'milestones'
+   AND el.reference_id   = m.id
+ WHERE el.recipient_type = 'vendor_contact';
+
+
+COMMENT ON VIEW v_vendor_email_log IS
+  'Every outbound email attributed to the vendor that received it, resolving email_log''s polymorphic reference across five flows: bid_invitations, bid_revision_requests, bid_submissions, awards, and milestones. Carries bid_invitation_id / bid_package_id for the three invitation-linked flows (NULL on award and milestone rows), so the same object serves the vendor Communication tab and the bid-package email log. Vendor-directed only (recipient_type = vendor_contact), so PM milestone alerts stay out. Order by created_at DESC, id DESC — the id tiebreaker keeps offset pagination stable when a bulk send gives many rows the same created_at. security_invoker = true so caller RLS applies.';
+
+REVOKE ALL ON v_vendor_email_log FROM PUBLIC, anon;
+GRANT SELECT ON v_vendor_email_log TO authenticated, service_role;
+
+
 -- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
 -- Total tables:    30
--- Total indexes:   57 custom (53 regular + 4 partial unique) + auto PK/UNIQUE
+-- Total indexes:   58 custom (54 regular + 4 partial unique) + auto PK/UNIQUE
 -- Total triggers:  31 (30 active + 1 disabled onboarding sync)
 -- Total functions: 20 (15 active + 1 disabled onboarding sync)
+-- Total views:     3 (v_milestone_overview, v_vendor_performance, v_vendor_email_log)
 -- ============================================================================

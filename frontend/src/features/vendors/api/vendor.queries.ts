@@ -207,9 +207,13 @@ export async function fetchInsuranceExpiringCount(): Promise<InsuranceExpiringCo
   return data;
 }
 
-export async function fetchVendorEmailLog(vendorId: string): Promise<EmailLogResponse> {
+export async function fetchVendorEmailLog(
+  vendorId: string,
+  params: { page: number; pageSize: number },
+): Promise<EmailLogResponse> {
   const { data } = await api.get<EmailLogResponse>(
     API_ENDPOINTS.VENDOR_EMAIL_LOG(vendorId),
+    { params: { page: params.page, page_size: params.pageSize } },
   );
   return data;
 }
