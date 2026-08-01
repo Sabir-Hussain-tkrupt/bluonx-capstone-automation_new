@@ -49,6 +49,13 @@ interface CrumbConfig {
    */
   parent?: string | ((ctx: TrailContext) => string | undefined);
   label: string | EntityLabel;
+  /**
+   * Query string identifying the tab of the parent page that contains this
+   * route, e.g. '?tab=tasks'. Appended to the PARENT's crumb href, so clicking
+   * up from a child lands on the tab you came from instead of the parent's
+   * default tab, which is what the browser back button already does.
+   */
+  parentQuery?: string;
 }
 
 export interface TrailContext {
@@ -81,7 +88,11 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
     parent: ROUTES.PROJECTS,
     label: { entity: 'project', param: 'id', fallback: 'Project' },
   },
-  [ROUTES.TASKS]: { parent: ROUTES.PROJECT_DETAIL, label: 'Tasks' },
+  [ROUTES.TASKS]: {
+    parent: ROUTES.PROJECT_DETAIL,
+    label: 'Tasks',
+    parentQuery: '?tab=tasks',
+  },
 
   // Parents to the project, NOT to /projects/:id/tasks: that page renders the
   // same TaskList as the project page's Tasks tab, so it is a rung to nowhere
@@ -89,6 +100,7 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
   [ROUTES.TASK_DETAIL]: {
     parent: ROUTES.PROJECT_DETAIL,
     label: { entity: 'task', param: 'taskId', fallback: 'Task' },
+    parentQuery: '?tab=tasks',
   },
 
   [ROUTES.CREATE_BID_PACKAGE]: { parent: ROUTES.TASK_DETAIL, label: 'New Bid Package' },
@@ -171,6 +183,9 @@ export function resolveTrail(pathname: string, ctx: TrailContext): CrumbDescript
   return chain.map((p, i) => {
     const configured = CRUMB_CONFIG[p].label;
     const id = typeof configured === 'string' ? undefined : params[configured.param];
+    const isLast = i === chain.length - 1;
+    // The rung below this one names the tab it lives in, if its parent has tabs.
+    const query = (!isLast && CRUMB_CONFIG[chain[i + 1]].parentQuery) || '';
 
     return {
       label:
@@ -182,7 +197,7 @@ export function resolveTrail(pathname: string, ctx: TrailContext): CrumbDescript
       // Ancestor patterns always use a subset of the matched route's params
       // (ROUTES consistently names the project param ':id'), so generatePath
       // cannot come up short.
-      href: i === chain.length - 1 ? undefined : generatePath(p, params),
+      href: isLast ? undefined : generatePath(p, params) + query,
     };
   });
 }

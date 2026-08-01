@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { useTabParam } from '@/hooks/useTabParam';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
 import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
@@ -31,6 +32,15 @@ import type { StatusVariant } from '@/components/ui/types';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
 import { errorMessage, type ApiError } from '@/lib/api';
 import { notifyGeocodeWarning } from '@/utils/geocodeToast';
+
+// Module level, and the single source for both the tab ids the URL accepts and
+// the rendered tab bar: a separate id list would drift from the labels.
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'documents', label: 'Documents' },
+];
+const TAB_IDS = TABS.map((t) => t.id);
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -64,7 +74,7 @@ export function ProjectDetailPage() {
   const deleteDocMutation = useDeleteProjectDocument();
   const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useTabParam(TAB_IDS);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
   // One dialog for all three destructive actions, so their confirmations
@@ -202,11 +212,10 @@ export function ProjectDetailPage() {
   const isArchived = !!project.archived_at;
   const canArchive = project.status !== 'active';
 
-  const tabDefs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'documents', label: 'Documents', count: projectDocuments.length },
-  ];
+  const tabCounts: Record<string, number | undefined> = {
+    documents: projectDocuments.length,
+  };
+  const tabDefs = TABS.map((t) => ({ ...t, count: tabCounts[t.id] }));
 
   return (
     <div className="space-y-6">

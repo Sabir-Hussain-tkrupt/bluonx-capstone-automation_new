@@ -50,7 +50,7 @@ describe('resolveTrail', () => {
     expect(shape(resolveTrail(`/projects/${PROJECT}/tasks`, asAdmin))).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       ['Tasks', undefined],
     ]);
   });
@@ -59,7 +59,7 @@ describe('resolveTrail', () => {
     expect(shape(resolveTrail(`/projects/${PROJECT}/tasks/${TASK}`, asAdmin))).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       [`{task:${TASK}}`, undefined],
     ]);
   });
@@ -70,7 +70,7 @@ describe('resolveTrail', () => {
     expect(shape(resolveTrail(`${base}/create-bid-package`, asAdmin))).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       [`{task:${TASK}}`, base],
       ['New Bid Package', undefined],
     ]);
@@ -78,7 +78,7 @@ describe('resolveTrail', () => {
     expect(shape(resolveTrail(`${base}/bid-packages/${PKG}`, asAdmin))).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       [`{task:${TASK}}`, base],
       [`{bidPackage:${PKG}}`, undefined],
     ]);
@@ -86,7 +86,7 @@ describe('resolveTrail', () => {
     expect(shape(resolveTrail(`${base}/bid-packages/${PKG}/compare`, asAdmin))).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       [`{task:${TASK}}`, base],
       [`{bidPackage:${PKG}}`, `${base}/bid-packages/${PKG}`],
       ['Compare', undefined],
@@ -102,7 +102,7 @@ describe('resolveTrail', () => {
     expect(shape(trail)).toEqual([
       ['Dashboard', '/dashboard'],
       ['Projects', '/projects'],
-      [`{project:${PROJECT}}`, `/projects/${PROJECT}`],
+      [`{project:${PROJECT}}`, `/projects/${PROJECT}?tab=tasks`],
       [`{task:${TASK}}`, `/projects/${PROJECT}/tasks/${TASK}`],
       [`{milestone:${MILESTONE}}`, undefined],
     ]);
@@ -185,6 +185,22 @@ describe('resolveTrail', () => {
       ['Dashboard', '/dashboard'],
       ['Holiday Calendar', undefined],
     ]);
+  });
+
+  it('points the parent crumb at the tab that contains the child', () => {
+    // The project page's tabs live in the URL, and browser back restores
+    // ?tab=tasks. Without this the breadcrumb would quietly disagree with the
+    // back button and drop the user on Overview.
+    const projectCrumb = (path: string) => resolveTrail(path, asAdmin)[2].href;
+
+    expect(projectCrumb(`/projects/${PROJECT}/tasks/${TASK}`))
+      .toBe(`/projects/${PROJECT}?tab=tasks`);
+    // Applies at any depth: the rung below the project is still the task.
+    expect(projectCrumb(`/projects/${PROJECT}/tasks/${TASK}/milestones/${MILESTONE}`))
+      .toBe(`/projects/${PROJECT}?tab=tasks`);
+    // And not where the child does not sit in a tab.
+    expect(resolveTrail(`/bid-templates/${TEMPLATE}/edit`, asAdmin)[1].href)
+      .toBe('/bid-templates');
   });
 
   it('returns nothing for an unconfigured path', () => {

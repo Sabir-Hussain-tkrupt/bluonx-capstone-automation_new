@@ -44,7 +44,7 @@ describe('useBreadcrumbs', () => {
     expect(result.current).toEqual([
       { label: 'Dashboard', href: '/dashboard' },
       { label: 'Projects', href: '/projects' },
-      { label: 'Riverside Grading', href: `/projects/${PROJECT}` },
+      { label: 'Riverside Grading', href: `/projects/${PROJECT}?tab=tasks` },
       { label: 'Rough Grading', href: undefined },
     ]);
   });

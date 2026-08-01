@@ -83,12 +83,12 @@ const baseVendor = {
   vendor_flags: [],
 };
 
-function renderPage() {
+function renderPage(search?: string) {
   return renderWithRouter(
     <Routes>
       <Route path="/vendors/:id" element={<VendorDetailPage />} />
     </Routes>,
-    { initialEntries: ['/vendors/v-1'] },
+    { initialEntries: [{ pathname: '/vendors/v-1', search }] },
   );
 }
 
@@ -144,6 +144,16 @@ describe('VendorDetailPage — Communication tab', () => {
     expect(
       useVendorEmailLogMock.mock.calls.every(([, enabled]) => enabled === false),
     ).toBe(true);
+  });
+
+  it('fetches the email log on a deep link to the Communication tab', () => {
+    useVendorEmailLogMock.mockReturnValue({ data: undefined, isLoading: true });
+
+    renderPage('?tab=communication');
+
+    // The tab lives in the URL now, so a shared link can land here directly and
+    // the gated fetch fires on first paint rather than waiting for a click.
+    expect(useVendorEmailLogMock).toHaveBeenCalledWith('v-1', true);
   });
 
   it('renders EmailLogTable rows when the Communication tab is activated', () => {
