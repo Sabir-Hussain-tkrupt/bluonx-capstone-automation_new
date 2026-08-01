@@ -48,7 +48,6 @@ vi.mock('@/features/projects/hooks/useProjectDocuments', () => ({
 
 // The tabbed children pull their own data hooks; they are irrelevant here.
 vi.mock('@/features/tasks/components/TaskList', () => ({ TaskList: () => null }));
-vi.mock('@/features/milestones/components/MilestoneTimeline', () => ({ MilestoneTimeline: () => null }));
 
 function projectWith(overrides: Record<string, unknown> = {}) {
   return {
