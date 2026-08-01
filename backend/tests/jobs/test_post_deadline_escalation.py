@@ -7,9 +7,9 @@ MagicMock so we can both observe call kwargs and induce failures.
 
 The fake DB is self-contained here (mirroring test_insurance_expiration.py)
 rather than extending conftest.py — this job's chain set (embedded select,
-bulk UPDATE with .in_(), notifications dedupe SELECT) is specific enough
-that a per-test fake keeps the shared conftest from accreting one-off
-methods.
+bulk UPDATE with .in_() on bid_invitations, bid_packages UPDATE from the shared
+deadline transition, notifications dedupe SELECT) is specific enough that a
+per-test fake keeps the shared conftest from accreting one-off methods.
 """
 
 from __future__ import annotations
@@ -104,6 +104,8 @@ class FakeDB:
         self.notifications = notifications or []
         # Observed UPDATE ops on bid_invitations: (bid_package_id, payload, n_flipped)
         self.invitation_updates: list[tuple] = []
+        # Observed UPDATE ops on bid_packages: (payload, n_matched)
+        self.package_updates: list[tuple] = []
 
     def table(self, name: str) -> _Query:
         return _Query(self, name)
@@ -135,6 +137,13 @@ class FakeDB:
             self.invitation_updates.append((pkg_id, dict(q._payload), len(matched)))
             return _Result(list(matched))
 
+        if q._op == "update" and q._table == "bid_packages":
+            matched = [r for r in self.bid_packages if _matches(r, q._filters)]
+            for r in matched:
+                r.update(q._payload)
+            self.package_updates.append((dict(q._payload), len(matched)))
+            return _Result(list(matched))
+
         return _Result([])
 
 
@@ -154,12 +163,14 @@ def _pkg(
     *,
     created_by: str,
     deadline: str,
+    status: str = "open",
     project_name: str = "Project",
     task_name: str = "Task",
     project_id: str = "proj-1",
 ) -> dict:
     return {
         "id": pkg_id,
+        "status": status,
         "deadline": deadline,
         "created_by": created_by,
         "tasks": {
@@ -356,11 +367,12 @@ class TestRunDailyPostDeadlineEscalation:
 
         assert result["deduplicated_skipped"] == 1
         assert result["notifications_created"] == 0
-        assert result["invitations_marked_no_response"] == 0
-        assert db.invitation_updates == []
         mock.assert_not_called()
-        # Invitation remained at its original status.
-        assert invs[0]["status"] == "sent"
+        # Decoupled: the notification is deduped, but the status transition is a
+        # deadline-driven fact and still runs, so the invitation converges.
+        assert result["invitations_marked_no_response"] == 1
+        assert db.invitation_updates != []
+        assert invs[0]["status"] == "no_response"
 
     # 7
     def test_inactive_creator_skipped(self):
@@ -374,9 +386,10 @@ class TestRunDailyPostDeadlineEscalation:
 
         assert result["skipped_inactive_creator"] == 1
         assert result["notifications_created"] == 0
-        assert result["invitations_marked_no_response"] == 0
         mock.assert_not_called()
-        assert invs[0]["status"] == "sent"
+        # Status still converges even when there is no active creator to notify.
+        assert result["invitations_marked_no_response"] == 1
+        assert invs[0]["status"] == "no_response"
 
     # 8
     def test_deleted_creator_skipped(self):
@@ -391,10 +404,14 @@ class TestRunDailyPostDeadlineEscalation:
         assert result["skipped_inactive_creator"] == 1
         assert result["notifications_created"] == 0
         mock.assert_not_called()
-        assert invs[0]["status"] == "sent"
+        # Status still converges even when the creator was deleted.
+        assert result["invitations_marked_no_response"] == 1
+        assert invs[0]["status"] == "no_response"
 
     # 9
-    def test_invitations_marked_no_response_only_after_successful_dispatch(self):
+    def test_transition_runs_even_when_dispatch_fails(self):
+        """The status transition is decoupled from notification dispatch: a failed
+        notification must NOT leave the invitation stuck at 'sent'/'opened'."""
         creator = _user("u1")
         pkg = _pkg("p1", created_by="u1", deadline=_in_window())
         invs = [_inv("i1", pkg_id="p1", status="sent", company="A")]
@@ -404,9 +421,10 @@ class TestRunDailyPostDeadlineEscalation:
         result = _run(db, notification_creator=mock)
 
         assert result["notifications_created"] == 0
-        assert result["invitations_marked_no_response"] == 0
-        assert db.invitation_updates == []
-        assert invs[0]["status"] == "sent"
+        # Transition ran regardless of the failed dispatch.
+        assert result["invitations_marked_no_response"] == 1
+        assert db.invitation_updates != []
+        assert invs[0]["status"] == "no_response"
         # Worker still completed cleanly.
         assert "duration_seconds" in result
 
@@ -496,3 +514,53 @@ class TestRunDailyPostDeadlineEscalation:
         assert result["packages_affected"] == 0
         mock.assert_not_called()
         assert invs[0]["status"] == "sent"
+
+    # 13 — decision-aware: a decided (closed/cancelled) package is not nudged
+    # and its terminal state is never mutated.
+    def test_terminal_package_not_notified_and_not_flipped(self):
+        creator = _user("u1")
+        pkg = _pkg("p1", created_by="u1", deadline=_in_window(), status="closed")
+        invs = [_inv("i1", pkg_id="p1", status="sent", company="A")]
+        db = FakeDB(bid_packages=[pkg], bid_invitations=invs, users=[creator])
+        mock = MagicMock(return_value={"id": "n"})
+
+        result = _run(db, notification_creator=mock)
+
+        assert result["notifications_created"] == 0
+        assert result["invitations_marked_no_response"] == 0
+        mock.assert_not_called()
+        assert db.invitation_updates == []
+        assert invs[0]["status"] == "sent"
+
+    # 14 — lazy-first: rows already converged to 'no_response' (a PM opened the
+    # page before the cron) are still recognized as affected and notified once.
+    def test_lazy_first_still_notified_exactly_once(self):
+        creator = _user("u1")
+        pkg = _pkg("p1", created_by="u1", deadline=_in_window(), status="evaluating")
+        invs = [_inv("i1", pkg_id="p1", status="no_response", company="A")]
+        db = FakeDB(bid_packages=[pkg], bid_invitations=invs, users=[creator])
+        mock = MagicMock(return_value={"id": "n"})
+
+        result = _run(db, notification_creator=mock)
+
+        assert result["packages_affected"] == 1
+        assert result["notifications_created"] == 1
+        assert mock.call_count == 1
+        # Nothing left to flip; already terminal-status + package already moved.
+        assert result["invitations_marked_no_response"] == 0
+        assert invs[0]["status"] == "no_response"
+
+    # 15 — the shared transition moves an 'open' package to 'evaluating'.
+    def test_open_package_moved_to_evaluating(self):
+        creator = _user("u1")
+        pkg = _pkg("p1", created_by="u1", deadline=_in_window(), status="open")
+        invs = [_inv("i1", pkg_id="p1", status="sent", company="A")]
+        db = FakeDB(bid_packages=[pkg], bid_invitations=invs, users=[creator])
+        mock = MagicMock(return_value={"id": "n"})
+
+        _run(db, notification_creator=mock)
+
+        assert pkg["status"] == "evaluating"
+        assert any(
+            payload.get("status") == "evaluating" for payload, _ in db.package_updates
+        )

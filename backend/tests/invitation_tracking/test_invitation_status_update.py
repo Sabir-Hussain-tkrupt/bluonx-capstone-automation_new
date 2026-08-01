@@ -1,9 +1,10 @@
 """
 Tests for PUT /v1/bid-invitations/{invitation_id}/status.
 
-PMs may manually set invitation status to 'declined', 'expired', or
-'no_response'. The statuses 'sent', 'opened', and 'submitted' are
-system-managed and must be rejected with 400.
+PMs may manually set invitation status to 'declined' or 'no_response'. The
+statuses 'sent', 'opened', 'submitted', and 'expired' are not PM-settable and
+must be rejected with 400. ('expired' is retired: the timeout terminal is
+'no_response', written only by the shared deadline transition.)
 
 Token revocation: a successful PM-driven status transition must also
 hard-revoke all magic_link_tokens for that invitation
@@ -71,10 +72,10 @@ def base_invitation():
 
 
 class TestPMCanSetAllowedStatuses:
-    """PM can update status to declined, expired, no_response."""
+    """PM can update status to declined, no_response."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("new_status", ["declined", "expired", "no_response"])
+    @pytest.mark.parametrize("new_status", ["declined", "no_response"])
     async def test_sets_allowed_status(self, base_invitation, new_status):
         updated = {**base_invitation, "status": new_status}
         client = _client_with_invitation(base_invitation, updated)
@@ -90,10 +91,10 @@ class TestPMCanSetAllowedStatuses:
 
 
 class TestRejectsSystemManagedStatuses:
-    """'sent', 'opened', 'submitted' cannot be set by PM → 400."""
+    """'sent', 'opened', 'submitted', and retired 'expired' cannot be set by PM → 400."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("bad_status", ["sent", "opened", "submitted"])
+    @pytest.mark.parametrize("bad_status", ["sent", "opened", "submitted", "expired"])
     async def test_rejects_system_managed_status(self, base_invitation, bad_status):
         client = _client_with_invitation(base_invitation)
 
@@ -152,7 +153,7 @@ class TestRejectsTransitionFromSubmitted:
     """Submitted is terminal — any PM-requested transition returns 409."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("new_status", ["declined", "expired", "no_response"])
+    @pytest.mark.parametrize("new_status", ["declined", "no_response"])
     async def test_rejects_when_current_status_is_submitted(
         self, base_invitation, new_status
     ):
@@ -235,11 +236,11 @@ class TestTokenRevocationOnDecline:
     for that invitation. Rejected transitions must NOT touch tokens."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("new_status", ["declined", "expired", "no_response"])
+    @pytest.mark.parametrize("new_status", ["declined", "no_response"])
     async def test_revokes_tokens_for_all_pm_settable_statuses(
         self, base_invitation, new_status
     ):
-        """All three PM-settable statuses trigger token revocation."""
+        """Both PM-settable statuses trigger token revocation."""
         updated = {**base_invitation, "status": new_status}
         client, token_updates = _client_with_token_capture(base_invitation, updated)
 

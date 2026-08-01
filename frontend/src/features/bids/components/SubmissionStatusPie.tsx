@@ -13,15 +13,18 @@ interface SubmissionStatusPieProps {
 }
 
 // The pie shows outcomes of delivered invitations only. Undelivered states
-// (pending_send / send_failed) and no_response are intentionally excluded;
-// send_failed is surfaced separately as a summary card + per-row badge.
-type PieStatus = 'sent' | 'opened' | 'submitted' | 'declined' | 'expired';
+// (pending_send / send_failed) are excluded; send_failed is surfaced separately
+// as a summary card + per-row badge. 'no_response' IS a delivered-then-timed-out
+// outcome, so it is shown. 'expired' is retained only for legacy rows (no code
+// path writes it anymore) and shares the neutral slice color.
+type PieStatus = 'sent' | 'opened' | 'submitted' | 'declined' | 'no_response' | 'expired';
 
 const STATUS_LABELS: Record<PieStatus, string> = {
   sent: 'Sent',
   opened: 'Opened',
   submitted: 'Submitted',
   declined: 'Declined',
+  no_response: 'No Response',
   expired: 'Expired',
 };
 
@@ -32,10 +35,18 @@ const STATUS_COLORS: Record<PieStatus, string> = {
   opened: '#f59e0b', // warning-500
   submitted: '#22c55e', // success-500
   declined: '#ef4444', // danger-500
+  no_response: '#64748b', // secondary-500
   expired: '#94a3b8', // secondary-400
 };
 
-const PIE_STATUSES: PieStatus[] = ['sent', 'opened', 'submitted', 'declined', 'expired'];
+const PIE_STATUSES: PieStatus[] = [
+  'sent',
+  'opened',
+  'submitted',
+  'declined',
+  'no_response',
+  'expired',
+];
 
 export function SubmissionStatusPie({ summary }: SubmissionStatusPieProps) {
   if (summary.total === 0) return null;

@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.3
--- Date:     July 15, 2026
+-- Version:  3.4
+-- Date:     August 1, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   31
 -- Engine:   PostgreSQL via Supabase
@@ -351,7 +351,7 @@ CREATE TABLE bid_invitations (
 );
 
 COMMENT ON TABLE bid_invitations IS 'Individual invitation per vendor per bid package. Tracks delivery and response status.';
-COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent.';
+COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent. opened = vendor viewed the portal; submitted/declined = vendor outcomes. no_response is the SINGLE terminal "invited, no bid by the deadline" status, written by the shared deadline transition (lazy read-path + daily post-deadline job converge on it). expired is retained in the CHECK for legacy rows only and is no longer written by any code path.';
 
 
 -- Magic link tokens for vendor bid portal access

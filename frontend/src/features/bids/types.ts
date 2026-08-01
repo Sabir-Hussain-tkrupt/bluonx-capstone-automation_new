@@ -264,8 +264,11 @@ export interface ResendBidLinkResponse {
 
 // ─── Update Invitation Status (PUT /v1/bid-invitations/{id}/status) ─
 
+// 'expired' is retired as a PM-settable status; the timeout terminal is
+// 'no_response', written only by the shared backend deadline transition. The
+// InvitationStatus union above still keeps 'expired' so any legacy rows render.
 export interface UpdateInvitationStatusRequest {
-  status: 'declined' | 'expired' | 'no_response';
+  status: 'declined' | 'no_response';
 }
 
 // ─── Email Log (GET /v1/bid-packages/{id}/email-log) ────────────────
