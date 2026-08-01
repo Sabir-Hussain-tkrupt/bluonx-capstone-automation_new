@@ -50,3 +50,36 @@ dashboard configuration that must be done before the feature works in production
 - [ ] Confirm resend-invite behavior on a not-yet-confirmed user (re-send) vs an
   already-confirmed user (returns 409, nothing to resend). This path depends on the
   live Supabase project and cannot be fully verified with mocks.
+
+---
+
+## Transactional Email Delivery Tracking (SES / SNS)
+
+The `email_log` delivery lifecycle (`delivered` / `bounced` / `complained`) is
+driven entirely by SES event notifications delivered over SNS. Those events only
+fire when each send carries a SES **configuration set**, which comes from the
+`SES_CONFIGURATION_SET` env var. This var defaults to unset and is **not**
+enforced at startup, so a deploy that omits it boots cleanly but every row freezes
+at `sent` and no bounce/complaint is ever recorded. Full mechanics and the dev
+resource ARNs are in [`ses-sns-event-tracking.md`](ses-sns-event-tracking.md).
+
+- [ ] **Create the production SNS topic + SES event destination.** Mirror the dev
+  setup for production: an SNS topic, a SES configuration set whose event
+  destination routes DELIVERY / BOUNCE / COMPLAINT to that topic, and a topic
+  policy allowing `ses.amazonaws.com` to publish.
+
+- [ ] **Set `SES_CONFIGURATION_SET`** in the backend environment to the production
+  configuration set name. Without it, delivery/bounce/complaint tracking silently
+  no-ops (rows stay at `sent`). Treat a missing value as a failed deploy.
+
+- [ ] **Subscribe the production webhook to the topic.** Add an HTTPS subscription
+  pointing at `https://<prod-api>/api/v1/webhooks/ses-notifications`. The app
+  auto-confirms the `SubscriptionConfirmation`; verify the subscription is
+  `Confirmed`, not `PendingConfirmation`.
+
+### Verification after deploy
+
+- [ ] Send a transactional email (e.g. a bid invitation) and confirm the matching
+  `email_log` row advances past `sent` to `delivered`.
+- [ ] Fire a bounce via the SES simulator (`bounce@simulator.amazonses.com`) and
+  confirm the row lands on `bounced` with the bounce subtype in `error_message`.
