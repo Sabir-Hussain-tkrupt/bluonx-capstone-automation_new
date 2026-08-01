@@ -47,9 +47,6 @@ export function BidTemplateDetailPage() {
             </div>
           </Alert>
         )}
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/bid-templates')}>
-          Back to Templates
-        </Button>
       </div>
     );
   }
@@ -74,9 +71,6 @@ export function BidTemplateDetailPage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={() => navigate('/bid-templates')}>
-            Back
-          </Button>
           <Button onClick={() => navigate(`/bid-templates/${id}/edit`)}>
             Edit Template
           </Button>

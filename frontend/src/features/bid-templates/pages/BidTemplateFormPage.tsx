@@ -278,9 +278,6 @@ export function BidTemplateFormPage() {
             </div>
           </Alert>
         )}
-        <Button variant="outline" className="mt-4" onClick={() => navigate(ROUTES.BID_TEMPLATES)}>
-          Back to Templates
-        </Button>
       </div>
     );
   }

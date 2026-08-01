@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
@@ -287,30 +287,20 @@ export function VendorDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<ArrowLeft className="h-4 w-4" />}
-            aria-label="Back"
-            onClick={() => navigate('/vendors')}
-            className="shrink-0"
-          />
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{vendor.company_name}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={vendor.status} variant={statusVariantMap[vendor.status] ?? 'neutral'} />
-              <StatusBadge
-                status={vendor.onboarding_status}
-                variant={onboardingVariantMap[vendor.onboarding_status] ?? 'neutral'}
-              />
-              {unresolvedFlagCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2.5 py-0.5 text-xs font-medium text-danger-700">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" />
-                  {unresolvedFlagCount} Active Flag(s)
-                </span>
-              )}
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{vendor.company_name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={vendor.status} variant={statusVariantMap[vendor.status] ?? 'neutral'} />
+            <StatusBadge
+              status={vendor.onboarding_status}
+              variant={onboardingVariantMap[vendor.onboarding_status] ?? 'neutral'}
+            />
+            {unresolvedFlagCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2.5 py-0.5 text-xs font-medium text-danger-700">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" />
+                {unresolvedFlagCount} Active Flag(s)
+              </span>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { useParams } from 'react-router-dom';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
 import { useBidPackageScores } from '@/features/bids/hooks/useBidPackageScores';
 import { useComputeBidPackageScores } from '@/features/bids/hooks/useComputeBidPackageScores';
+import { useProject } from '@/features/projects/hooks/useProject';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useCreateAward } from '@/features/bids/hooks/useCreateAward';
@@ -43,11 +42,12 @@ export function BidPackageComparePage() {
     taskId: string;
     bidPackageId: string;
   }>();
-  const navigate = useNavigate();
 
   const { data: bp, isLoading: bpLoading, error: bpError } =
     useBidPackageDetail(bidPackageId!);
   const { data: task } = useTask(projectId!, taskId!);
+  // Not rendered here; primes the cache so the breadcrumb can name the project.
+  useProject(projectId!);
   const {
     data: cohort,
     isLoading: scoresLoading,
@@ -146,7 +146,6 @@ export function BidPackageComparePage() {
   if (task && task.bid_type !== 'competitive') {
     return (
       <div className="space-y-4">
-        <BackHeader projectId={projectId!} taskId={taskId!} bidPackageId={bidPackageId!} />
         <div className="rounded-lg border border-secondary-200 bg-white p-6 text-sm text-secondary-700">
           Comparison is only available for competitive bid packages.
         </div>
@@ -161,7 +160,6 @@ export function BidPackageComparePage() {
       'Failed to load comparison.';
     return (
       <div className="space-y-4">
-        <BackHeader projectId={projectId!} taskId={taskId!} bidPackageId={bidPackageId!} />
         <div className="rounded-lg border border-danger-200 bg-danger-50 p-6 text-sm text-danger-700">
           {detail}
         </div>
@@ -172,7 +170,6 @@ export function BidPackageComparePage() {
   if (bpLoading || scoresLoading || !bp || !cohort) {
     return (
       <div className="space-y-4">
-        <BackHeader projectId={projectId!} taskId={taskId!} bidPackageId={bidPackageId!} />
         <Skeleton height="80px" />
         <Skeleton height="240px" />
         <Skeleton height="320px" />
@@ -195,30 +192,16 @@ export function BidPackageComparePage() {
         className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
         data-no-print
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                `/projects/${projectId}/tasks/${taskId}/bid-packages/${bidPackageId}`,
-              )
-            }
-            className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-            aria-label="Back to bid package"
-          >
-            <ChevronLeft className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              Compare bids: {bp.task_name} (Round {bp.round_number})
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={bp.status} size="sm" />
-              <span className="text-xs text-secondary-500">
-                {cohort.cohort_size} scored ·{' '}
-                {cohort.valid_submission_count ?? 0} valid live
-              </span>
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
+            Compare bids: {bp.task_name} (Round {bp.round_number})
+          </h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={bp.status} size="sm" />
+            <span className="text-xs text-secondary-500">
+              {cohort.cohort_size} scored ·{' '}
+              {cohort.valid_submission_count ?? 0} valid live
+            </span>
           </div>
         </div>
       </div>
@@ -301,33 +284,6 @@ export function BidPackageComparePage() {
         isSubmitting={awardMutation.isPending}
         serverError={awardError}
       />
-    </div>
-  );
-}
-
-function BackHeader({
-  projectId,
-  taskId,
-  bidPackageId,
-}: {
-  projectId: string;
-  taskId: string;
-  bidPackageId: string;
-}) {
-  const navigate = useNavigate();
-  return (
-    <div className="flex items-center gap-2" data-no-print>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() =>
-          navigate(
-            `/projects/${projectId}/tasks/${taskId}/bid-packages/${bidPackageId}`,
-          )
-        }
-      >
-        ← Back to bid package
-      </Button>
     </div>
   );
 }
