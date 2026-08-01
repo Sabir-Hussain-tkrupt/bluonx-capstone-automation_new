@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Archive, ArrowLeft, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Archive, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { useTabParam } from '@/hooks/useTabParam';
 import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
 import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
@@ -31,6 +32,15 @@ import type { StatusVariant } from '@/components/ui/types';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
 import { errorMessage, type ApiError } from '@/lib/api';
 import { notifyGeocodeWarning } from '@/utils/geocodeToast';
+
+// Module level, and the single source for both the tab ids the URL accepts and
+// the rendered tab bar: a separate id list would drift from the labels.
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'documents', label: 'Documents' },
+];
+const TAB_IDS = TABS.map((t) => t.id);
 
 const statusVariantMap: Record<string, StatusVariant> = {
   planning: 'info',
@@ -64,7 +74,7 @@ export function ProjectDetailPage() {
   const deleteDocMutation = useDeleteProjectDocument();
   const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useTabParam(TAB_IDS);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
   // One dialog for all three destructive actions, so their confirmations
@@ -202,31 +212,20 @@ export function ProjectDetailPage() {
   const isArchived = !!project.archived_at;
   const canArchive = project.status !== 'active';
 
-  const tabDefs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'documents', label: 'Documents', count: projectDocuments.length },
-  ];
+  const tabCounts: Record<string, number | undefined> = {
+    documents: projectDocuments.length,
+  };
+  const tabDefs = TABS.map((t) => ({ ...t, count: tabCounts[t.id] }));
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<ArrowLeft className="h-4 w-4" />}
-            aria-label="Back"
-            onClick={() => navigate('/projects')}
-            className="shrink-0"
-          />
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{project.name}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={project.status} variant={statusVariantMap[project.status] ?? 'neutral'} />
-              {isArchived && <StatusBadge status="archived" variant="neutral" />}
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{project.name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={project.status} variant={statusVariantMap[project.status] ?? 'neutral'} />
+            {isArchived && <StatusBadge status="archived" variant="neutral" />}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

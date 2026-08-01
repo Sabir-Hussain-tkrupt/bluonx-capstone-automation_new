@@ -20,14 +20,12 @@ import { ProjectListPage } from '@/features/projects/pages/ProjectListPage';
 import { ProjectDetailPage } from '@/features/projects/pages/ProjectDetailPage';
 import { TaskListPage } from '@/features/projects/pages/TaskListPage';
 import { TaskDetailPage } from '@/features/projects/pages/TaskDetailPage';
-import { BidManagementPage } from '@/features/bids/pages/BidManagementPage';
 import { BidPackageCreatePage } from '@/features/bids/pages/BidPackageCreatePage';
 import { BidPackageDetailPage } from '@/features/bids/pages/BidPackageDetailPage';
 import { BidPackageComparePage } from '@/features/bids/pages/BidPackageComparePage';
 import { BidPackageListPage } from '@/features/bids/pages/BidPackageListPage';
 import { MilestoneDetailPage } from '@/features/milestones/pages/MilestoneDetailPage';
 import { MilestoneListPage } from '@/features/milestones/pages/MilestoneListPage';
-import { AwardPage } from '@/features/contracts/pages/AwardPage';
 import { BidTemplateListPage } from '@/features/bid-templates/pages/BidTemplateListPage';
 import { BidTemplateDetailPage } from '@/features/bid-templates/pages/BidTemplateDetailPage';
 import { BidTemplateFormPage } from '@/features/bid-templates/pages/BidTemplateFormPage';
@@ -107,8 +105,6 @@ export function AppRoutes() {
         <Route path={ROUTES.BID_PACKAGE_COMPARE} element={<BidPackageComparePage />} />
         <Route path={ROUTES.MILESTONE_DETAIL} element={<MilestoneDetailPage />} />
         <Route path={ROUTES.MILESTONES} element={<MilestoneListPage />} />
-        <Route path={ROUTES.BID_MANAGEMENT} element={<BidManagementPage />} />
-        <Route path={ROUTES.AWARD} element={<AwardPage />} />
         <Route path={ROUTES.BID_PACKAGES} element={<BidPackageListPage />} />
         <Route path={ROUTES.BID_TEMPLATES} element={<BidTemplateListPage />} />
         <Route path={ROUTES.BID_TEMPLATE_NEW} element={<BidTemplateFormPage />} />

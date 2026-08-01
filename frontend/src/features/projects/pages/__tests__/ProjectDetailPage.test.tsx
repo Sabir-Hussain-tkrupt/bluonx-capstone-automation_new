@@ -173,6 +173,21 @@ describe('ProjectDetailPage document delete', () => {
     );
   });
 
+  it('opens on the tab named in the URL', async () => {
+    // The tab lives in the query string, so back, refresh, and a shared link
+    // all restore it instead of dropping the user on Overview.
+    renderWithRouter(<ProjectDetailPage />, {
+      initialEntries: [{ pathname: `/projects/${PROJECT_ID}`, search: '?tab=documents' }],
+    });
+
+    expect(await screen.findByRole('button', { name: 'Delete site-plans.pdf' }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Documents/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('surfaces a document-list load error with a retry', () => {
     useProjectDocsMock.mockReturnValue({ data: [], isError: true, refetch: vi.fn() });
 

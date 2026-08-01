@@ -27,8 +27,9 @@ export function TopHeader({
         className,
       )}
     >
-      {/* Left side */}
-      <div className="flex items-center gap-4">
+      {/* Left side. min-w-0 all the way down, so a long breadcrumb trail
+          scrolls inside its own box instead of pushing the right side off. */}
+      <div className="flex min-w-0 items-center gap-4">
         {/* Mobile hamburger */}
         {onMenuToggle && (
           <button
@@ -40,7 +41,7 @@ export function TopHeader({
             <Menu className="h-6 w-6" aria-hidden="true" />
           </button>
         )}
-        <div>
+        <div className="min-w-0">
           {breadcrumbs}
           {title && (
             <h1 className={cn('font-semibold text-secondary-900', breadcrumbs ? 'mt-0.5 text-lg' : 'text-xl')}>

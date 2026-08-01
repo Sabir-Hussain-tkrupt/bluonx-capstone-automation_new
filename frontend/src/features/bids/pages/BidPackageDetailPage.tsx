@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ChevronDown, FileText } from 'lucide-react';
+import { ChevronDown, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useBidPackageDetail } from '@/features/bids/hooks/useBidPackageDetail';
+import { useProject } from '@/features/projects/hooks/useProject';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useRevisionRequests } from '@/features/bids/hooks/useRevisionRequests';
 import { useBidPackageEmailLog } from '@/features/bids/hooks/useBidPackageEmailLog';
@@ -37,6 +38,9 @@ export function BidPackageDetailPage() {
 
   const { data: bp, isLoading, error } = useBidPackageDetail(bidPackageId!);
   const { data: task } = useTask(projectId!, taskId!);
+  // Not rendered here; primes the cache so the breadcrumb can name the project
+  // when this page is entered directly from the global bid package list.
+  useProject(projectId!);
   const { data: revisionRequests } = useRevisionRequests(bidPackageId!);
   const { remaining, isPassed } = useCountdown(bp?.deadline ?? '');
 
@@ -165,29 +169,20 @@ export function BidPackageDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(`/projects/${projectId}/tasks/${taskId}`)}
-            className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-          >
-            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              {bp.task_name} (Round {bp.round_number})
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={bp.status} />
-              <span
-                className={cn(
-                  'text-xs',
-                  isPassed ? 'font-medium text-danger-600' : 'text-secondary-500',
-                )}
-              >
-                {remaining}
-              </span>
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
+            {bp.task_name} (Round {bp.round_number})
+          </h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={bp.status} />
+            <span
+              className={cn(
+                'text-xs',
+                isPassed ? 'font-medium text-danger-600' : 'text-secondary-500',
+              )}
+            >
+              {remaining}
+            </span>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">

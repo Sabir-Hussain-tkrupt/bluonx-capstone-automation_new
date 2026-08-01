@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
-  ArrowLeft,
   CalendarClock,
   CheckCircle2,
   MoreHorizontal,
@@ -19,6 +18,8 @@ import { Alert } from '@/components/ui/Alert';
 import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { useProject } from '@/features/projects/hooks/useProject';
+import { useTask } from '@/features/tasks/hooks/useTask';
 import { useMilestone } from '@/features/milestones/hooks/useMilestone';
 import { useUpdateMilestone } from '@/features/milestones/hooks/useUpdateMilestone';
 import { useMarkMilestoneStarted } from '@/features/milestones/hooks/useMarkMilestoneStarted';
@@ -49,10 +50,14 @@ export function MilestoneDetailPage() {
     taskId: string;
     milestoneId: string;
   }>();
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const { data: milestone, isLoading, error } = useMilestone(milestoneId!);
+  // Not rendered here: this page is deep-linked from notifications and the
+  // global milestone list, so its ancestors are often absent from the cache.
+  // Fetching them is what lets the breadcrumb name the project and task.
+  useProject(projectId!);
+  useTask(projectId!, taskId!);
   const updateMutation = useUpdateMilestone();
   const startMutation = useMarkMilestoneStarted();
   const completeMutation = useMarkMilestoneCompleted();
@@ -65,8 +70,6 @@ export function MilestoneDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
   const [rescheduleEnd, setRescheduleEnd] = useState('');
   const [completeEnd, setCompleteEnd] = useState('');
-
-  const backToTask = () => navigate(`/projects/${projectId}/tasks/${taskId}`);
 
   if (isLoading) {
     return (
@@ -174,22 +177,12 @@ export function MilestoneDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={backToTask}
-            className="shrink-0 rounded-lg p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-600"
-            aria-label="Back to task"
-          >
-            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
-              {milestone.name}
-            </h1>
-            <div className="mt-1">
-              <MilestoneStatusBadge status={milestone.status} />
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">
+            {milestone.name}
+          </h1>
+          <div className="mt-1">
+            <MilestoneStatusBadge status={milestone.status} />
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

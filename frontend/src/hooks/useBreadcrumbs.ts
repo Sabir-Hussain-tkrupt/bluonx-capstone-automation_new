@@ -1,71 +1,83 @@
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ROUTES } from '@/constants/routes';
+import { skipToken, useQueries } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/queryKeys';
+import { resolveTrail, type EntityKind, type ResolvedEntityLabel } from '@/lib/breadcrumbs';
+import { useAuth } from '@/contexts/AuthContext';
 import type { BreadcrumbItem } from '@/components/ui/Breadcrumbs';
 
-/** Maps known URL segments to human-readable labels. */
-const SEGMENT_LABELS: Record<string, string> = {
-  dashboard: 'Dashboard',
-  vendors: 'Vendors',
-  projects: 'Projects',
-  tasks: 'Tasks',
-  bids: 'Bid Management',
-  award: 'Award',
-  settings: 'Settings',
-  calendar: 'Holiday Calendar',
+/** Where each entity's display name lives in the query cache. */
+const ENTITY_SOURCES: Record<
+  EntityKind,
+  { key: (id: string) => readonly unknown[]; name: (data: Record<string, unknown>) => string | undefined }
+> = {
+  project: {
+    key: (id) => queryKeys.projects.detail(id),
+    name: (d) => d.name as string | undefined,
+  },
+  task: {
+    key: (id) => queryKeys.tasks.detail(id),
+    name: (d) => d.name as string | undefined,
+  },
+  vendor: {
+    key: (id) => queryKeys.vendors.detail(id),
+    name: (d) => d.company_name as string | undefined,
+  },
+  milestone: {
+    key: (id) => queryKeys.milestones.detail(id),
+    name: (d) => d.name as string | undefined,
+  },
+  bidPackage: {
+    key: (id) => queryKeys.bidPackages.detail(id),
+    // The package's own h1 leads with the task name, which the parent crumb
+    // already carries, so the round is the only new information here.
+    name: (d) => (d.round_number == null ? undefined : `Round ${d.round_number}`),
+  },
+  bidTemplate: {
+    key: (id) => queryKeys.bidTemplates.detail(id),
+    name: (d) => d.name as string | undefined,
+  },
 };
 
-/** Detects dynamic route segments (UUIDs or numeric IDs). */
-function isDynamicSegment(segment: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(segment)
-    || /^\d+$/.test(segment);
-}
-
 /**
- * Generates breadcrumb items from the current URL path.
+ * Breadcrumb items for the current route.
  *
- * Dynamic segments (UUIDs, numeric IDs) show "Details" as a placeholder.
- * Real entity names (vendor name, project name) will be resolved in Phase 3
- * when data-fetching hooks are available.
+ * Structure comes from the route config in lib/breadcrumbs (not from splitting
+ * the pathname), and entity names are read from the React Query cache the page
+ * itself populates. The reads use `skipToken`, so this hook subscribes to cache
+ * entries but can never issue a request of its own: breadcrumbs add no network
+ * traffic and no loading state. Until a page's fetch lands, the crumb shows its
+ * fallback ("Project", "Task", ...) and swaps to the real name on arrival.
  */
 export function useBreadcrumbs(): BreadcrumbItem[] {
   const { pathname } = useLocation();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+
+  const trail = useMemo(() => resolveTrail(pathname, { isAdmin }), [pathname, isAdmin]);
+
+  const entityCrumbs = useMemo(
+    () => trail.filter((c): c is { label: ResolvedEntityLabel; href?: string } =>
+      typeof c.label !== 'string'),
+    [trail],
+  );
+
+  const cached = useQueries({
+    queries: entityCrumbs.map((c) => ({
+      queryKey: ENTITY_SOURCES[c.label.entity].key(c.label.id),
+      queryFn: skipToken,
+    })),
+  });
 
   return useMemo(() => {
-    const segments = pathname.split('/').filter(Boolean);
+    let entityIndex = 0;
 
-    // Dashboard page — single item, no link
-    if (segments.length <= 1 && segments[0] === 'dashboard') {
-      return [{ label: 'Dashboard' }];
-    }
+    return trail.map(({ label, href }) => {
+      if (typeof label === 'string') return { label, href };
 
-    const items: BreadcrumbItem[] = [
-      { label: 'Dashboard', href: ROUTES.DASHBOARD },
-    ];
-
-    let accumulatedPath = '';
-
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      accumulatedPath += `/${segment}`;
-      const isLast = i === segments.length - 1;
-
-      // Skip 'dashboard' — already added as root
-      if (segment === 'dashboard') continue;
-
-      if (isDynamicSegment(segment)) {
-        items.push({
-          label: 'Details',
-          href: isLast ? undefined : accumulatedPath,
-        });
-      } else {
-        items.push({
-          label: SEGMENT_LABELS[segment] || segment,
-          href: isLast ? undefined : accumulatedPath,
-        });
-      }
-    }
-
-    return items;
-  }, [pathname]);
+      const data = cached[entityIndex++]?.data as Record<string, unknown> | undefined;
+      const name = data ? ENTITY_SOURCES[label.entity].name(data) : undefined;
+      return { label: name || label.fallback, href };
+    });
+  }, [trail, cached]);
 }

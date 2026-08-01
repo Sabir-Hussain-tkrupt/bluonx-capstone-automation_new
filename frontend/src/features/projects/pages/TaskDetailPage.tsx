@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
@@ -124,21 +124,11 @@ export function TaskDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<ArrowLeft className="h-4 w-4" />}
-            aria-label="Back"
-            onClick={() => navigate(`/projects/${projectId}`)}
-            className="shrink-0"
-          />
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{task.name}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={task.status} />
-              <span className="text-xs text-secondary-400">{formatPhase(task.phase)}</span>
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{task.name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={task.status} />
+            <span className="text-xs text-secondary-400">{formatPhase(task.phase)}</span>
           </div>
         </div>
         {!isArchived && (

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
+import { useTabParam } from '@/hooks/useTabParam';
 import { useVendor } from '@/features/vendors/hooks/useVendor';
 import { useUpdateVendor } from '@/features/vendors/hooks/useUpdateVendor';
 import { useDeleteVendor } from '@/features/vendors/hooks/useDeleteVendor';
@@ -58,6 +59,18 @@ type PendingAction =
   | { kind: 'deleteDocument'; docId: string; label: string }
   | null;
 
+// Module level, and the single source for both the tab ids the URL accepts and
+// the rendered tab bar: a separate id list would drift from the labels.
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'contacts', label: 'Contacts' },
+  { id: 'trades', label: 'Trades' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'flags', label: 'Flags' },
+  { id: 'communication', label: 'Communication' },
+];
+const TAB_IDS = TABS.map((t) => t.id);
+
 const statusVariantMap: Record<string, StatusVariant> = {
   active: 'success', inactive: 'neutral', suspended: 'danger',
 };
@@ -84,7 +97,7 @@ export function VendorDetailPage() {
   const deleteDocMutation = useDeleteVendorDocument();
   const { download: downloadDoc, downloadingId } = useVendorDocumentDownload();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useTabParam(TAB_IDS);
   const { data: emailLog, isLoading: emailLogLoading } = useVendorEmailLog(
     id!,
     activeTab === 'communication',
@@ -269,17 +282,17 @@ export function VendorDetailPage() {
       ? confirming.docId
       : null;
 
-  const tabDefs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'contacts', label: 'Contacts', count: contacts.length },
-    { id: 'trades', label: 'Trades', count: trades.length },
-    { id: 'documents', label: 'Documents', count: documents.length },
-    { id: 'flags', label: 'Flags', count: flags.length },
+  const tabCounts: Record<string, number | undefined> = {
+    contacts: contacts.length,
+    trades: trades.length,
+    documents: documents.length,
+    flags: flags.length,
     // The email log is only fetched once its tab is opened, so before that a
     // count would always read 0 and look like "no messages" rather than
     // "not loaded yet". Show it only when we actually know.
-    { id: 'communication', label: 'Communication', count: emailLog?.items.length },
-  ];
+    communication: emailLog?.items.length,
+  };
+  const tabDefs = TABS.map((t) => ({ ...t, count: tabCounts[t.id] }));
 
   const unresolvedFlagCount = flags.filter((f) => !f.is_resolved).length;
 
@@ -287,30 +300,20 @@ export function VendorDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<ArrowLeft className="h-4 w-4" />}
-            aria-label="Back"
-            onClick={() => navigate('/vendors')}
-            className="shrink-0"
-          />
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{vendor.company_name}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={vendor.status} variant={statusVariantMap[vendor.status] ?? 'neutral'} />
-              <StatusBadge
-                status={vendor.onboarding_status}
-                variant={onboardingVariantMap[vendor.onboarding_status] ?? 'neutral'}
-              />
-              {unresolvedFlagCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2.5 py-0.5 text-xs font-medium text-danger-700">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" />
-                  {unresolvedFlagCount} Active Flag(s)
-                </span>
-              )}
-            </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold text-secondary-900 sm:text-2xl">{vendor.company_name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge status={vendor.status} variant={statusVariantMap[vendor.status] ?? 'neutral'} />
+            <StatusBadge
+              status={vendor.onboarding_status}
+              variant={onboardingVariantMap[vendor.onboarding_status] ?? 'neutral'}
+            />
+            {unresolvedFlagCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2.5 py-0.5 text-xs font-medium text-danger-700">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger-500" />
+                {unresolvedFlagCount} Active Flag(s)
+              </span>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
