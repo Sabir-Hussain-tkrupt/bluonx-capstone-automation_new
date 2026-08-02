@@ -199,9 +199,16 @@ async def create_bid_package_with_invitations(
         if task.get("deleted_at"):
             raise BidPackageValidationError(404, "Task not found")
 
-        if task.get("bid_type") == "internal":
+        # Gate positively on 'competitive' rather than excluding 'internal', so
+        # a bid type that is not a real flow (a legacy 'direct_assign' row) fails
+        # closed here instead of entering the pipeline, emailing vendors, and
+        # then dead-ending at the scoring gate with no path to award.
+        task_bid_type = task.get("bid_type")
+        if task_bid_type != "competitive":
             raise BidPackageValidationError(
-                400, "Internal tasks cannot have bid packages"
+                400,
+                "Only competitive tasks can have bid packages "
+                f"(bid_type={task_bid_type!r}).",
             )
 
         if task.get("status") in _TERMINAL_TASK_STATUSES:

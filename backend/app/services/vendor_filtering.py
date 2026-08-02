@@ -56,8 +56,13 @@ async def filter_qualified_vendors(
 
     task = task_resp.data
 
-    if task["bid_type"] == "internal":
-        raise ValueError("Internal tasks do not accept bids")
+    # Positive gate (mirrors bid_package_service): only a competitive task
+    # accepts bids. Anything else, including a legacy 'direct_assign' row, is
+    # turned away before vendors are ever filtered for it.
+    if task["bid_type"] != "competitive":
+        raise ValueError(
+            f"Only competitive tasks accept bids (bid_type={task['bid_type']!r})."
+        )
 
     trade_id = task["trade_id"]
     budget_estimate = (
