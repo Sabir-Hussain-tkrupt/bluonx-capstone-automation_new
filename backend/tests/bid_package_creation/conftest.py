@@ -90,6 +90,24 @@ def sample_task_internal() -> dict:
 
 
 @pytest.fixture()
+def sample_task_direct_assign() -> dict:
+    """A legacy direct_assign task. The value is no longer creatable through the
+    API, but the DB CHECK constraint still permits it, so the pipeline gate must
+    turn an existing row away rather than let it enter the bid flow."""
+    return {
+        "id": str(TASK_INTERNAL_ID),
+        "project_id": str(PROJECT_ID),
+        "trade_id": str(uuid4()),
+        "name": "Legacy Direct Assign Task",
+        "phase": "development",
+        "bid_type": "direct_assign",
+        "status": "draft",
+        "created_by": str(PM_USER_ID),
+        "deleted_at": None,
+    }
+
+
+@pytest.fixture()
 def sample_task_completed() -> dict:
     return {
         "id": str(TASK_COMPLETED_ID),

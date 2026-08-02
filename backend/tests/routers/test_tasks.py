@@ -325,8 +325,26 @@ class TestCreateTask:
         resp = client_with(fake).post(BASE, json=self._payload())
         assert resp.status_code == 400
 
+    def test_direct_assign_is_422(self, client_with):
+        """direct_assign is out of product scope and has no award flow, so the
+        API must refuse it — the task form is not the only gate."""
+        resp = client_with(self._fake()).post(BASE, json=self._payload(bid_type="direct_assign"))
+        assert resp.status_code == 422
+
+    def test_internal_is_still_accepted(self, client_with):
+        """Guard against the rejection over-reaching: internal stays valid."""
+        resp = client_with(self._fake()).post(BASE, json=self._payload(bid_type="internal"))
+        assert resp.status_code == 201
+
 
 class TestUpdateTask:
+    def test_bid_type_cannot_be_patched_to_direct_assign(self, client_with):
+        """A draft task may change bid_type, but never to the dropped value."""
+        task = _task(status="draft", bid_type="competitive")
+        fake = FakeDB(projects=[_project()], tasks=[task], trades=_trades())
+        resp = client_with(fake).patch(f"{BASE}/{task['id']}", json={"bid_type": "direct_assign"})
+        assert resp.status_code == 422
+
     def test_bid_type_locked_after_draft_is_409(self, client_with):
         task = _task(status="bidding", bid_type="competitive")
         fake = FakeDB(projects=[_project()], tasks=[task], trades=_trades())

@@ -45,7 +45,9 @@ from app.services.bid_package_service import (
 
 
 class TestTaskBidTypeValidation:
-    """Tasks with bid_type='internal' must never have bid packages."""
+    """Only competitive tasks may have bid packages. The gate is positive, so
+    anything else — 'internal', or a legacy 'direct_assign' row the API no
+    longer accepts — is turned away before any vendor is contacted."""
 
     @pytest.mark.asyncio
     async def test_internal_task_returns_400(
@@ -87,6 +89,49 @@ class TestTaskBidTypeValidation:
 
         assert exc_info.value.status_code == 400
         assert "internal" in str(exc_info.value.detail).lower()
+
+    @pytest.mark.asyncio
+    async def test_legacy_direct_assign_task_returns_400(
+        self,
+        mock_supabase,
+        mock_email_service,
+        mock_template_renderer,
+        sample_task_direct_assign,
+        future_deadline,
+    ):
+        """A pre-existing direct_assign row must fail closed here rather than
+        entering the pipeline and dead-ending at the scoring gate later."""
+        select_chain = MagicMock()
+        select_chain.execute.return_value = MagicMock(data=[sample_task_direct_assign])
+        select_chain.eq.return_value = select_chain
+        select_chain.is_.return_value = select_chain
+        select_chain.single.return_value = select_chain
+        mock_supabase.table.return_value.select.return_value = select_chain
+
+        payload = {
+            "task_id": str(TASK_INTERNAL_ID),
+            "bid_template_id": str(BID_TEMPLATE_ID),
+            "deadline": future_deadline.isoformat(),
+            "project_document_ids": [],
+            "vendor_selections": [
+                {"vendor_id": str(VENDOR_IDS[0]), "vendor_contact_id": str(VENDOR_CONTACT_IDS[0])},
+            ],
+        }
+
+        with pytest.raises(BidPackageValidationError) as exc_info:
+            await create_bid_package_with_invitations(
+                task_id=TASK_INTERNAL_ID,
+                payload=payload,
+                created_by=PM_USER_ID,
+                db=mock_supabase,
+                email_service=mock_email_service,
+                template_renderer=mock_template_renderer,
+            )
+
+        assert exc_info.value.status_code == 400
+        assert "competitive" in str(exc_info.value.detail).lower()
+        # No email may go out for a task that cannot be bid.
+        mock_email_service.send_email.assert_not_called()
 
 
 class TestTaskStatusValidation:

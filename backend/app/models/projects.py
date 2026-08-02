@@ -150,13 +150,21 @@ TASK_STATUSES = Literal[
     "in_progress", "completed", "cancelled",
 ]
 
+# The only two real bid flows. 'direct_assign' was dropped from product scope
+# and its award pipeline was never built, so it is rejected here with a 422 —
+# do not add it back. The value survives only as a dormant seam in the
+# tasks.bid_type CHECK constraint (and bid_submissions.is_direct_assign) so a
+# revival would not need a migration. TaskResponse.bid_type is a plain str, so
+# any legacy row still serializes and still renders.
+TASK_BID_TYPES = Literal["competitive", "internal"]
+
 
 class TaskCreate(BluOnXBase):
     trade_id: UUID
     name: str = Field(..., min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
     phase: Literal["due_diligence", "development"]
-    bid_type: Literal["competitive", "direct_assign", "internal"]
+    bid_type: TASK_BID_TYPES
     budget_estimate: Decimal | None = Field(default=None, ge=0)
 
     _strip_name = field_validator("name")(_require_nonblank_name)
@@ -167,7 +175,7 @@ class TaskUpdate(BluOnXBase):
     description: str | None = Field(default=None, max_length=5000)
     trade_id: UUID | None = None
     phase: Literal["due_diligence", "development"] | None = None
-    bid_type: Literal["competitive", "direct_assign", "internal"] | None = None
+    bid_type: TASK_BID_TYPES | None = None
     budget_estimate: Decimal | None = Field(default=None, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     status: TASK_STATUSES | None = None
