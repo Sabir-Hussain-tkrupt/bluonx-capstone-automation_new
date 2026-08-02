@@ -21,15 +21,10 @@ from app.services.bid_submission_detail_service import (
 router = APIRouter()
 
 
-@router.get("/bid-submissions", response_model=list[BidSubmissionResponse])
-async def list_bid_submissions(
-    bid_package_id: UUID | None = None,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """List bid submissions, optionally filtered by bid_package_id."""
-    # TODO: Implement in later phase
-    return []
+# NOTE: no `GET /bid-submissions` list route by design. Submissions are read
+# straight from Supabase under RLS, and the per-package cohort is served by
+# `GET /bid-packages/{id}/invitations`. This was a stub returning `[]`, which a
+# client could not tell apart from a package with no bids in yet.
 
 
 @router.get(
