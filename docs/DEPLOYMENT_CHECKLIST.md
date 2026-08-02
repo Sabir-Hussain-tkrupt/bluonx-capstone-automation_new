@@ -83,3 +83,30 @@ resource ARNs are in [`ses-sns-event-tracking.md`](ses-sns-event-tracking.md).
   `email_log` row advances past `sent` to `delivered`.
 - [ ] Fire a bounce via the SES simulator (`bounce@simulator.amazonses.com`) and
   confirm the row lands on `bounced` with the bounce subtype in `error_message`.
+
+---
+
+## Scheduler (single-instance constraint)
+
+All seven scheduled jobs (bid reminders, insurance expiration, revision expiry,
+post-deadline escalation, the two milestone jobs, and the self-check) run in-process
+via APScheduler. Every running instance runs its own scheduler, so a second instance
+double-sends every email and double-applies every state transition. There is no
+distributed lock. Rationale and revisit thresholds:
+[`adr/0001-scheduler-single-instance.md`](adr/0001-scheduler-single-instance.md).
+
+- [ ] **Run exactly one instance.** ECS service `desiredCount = 1`. This is a
+  correctness constraint, not a performance dial — do not scale out, and do not
+  add a second instance for availability.
+
+- [ ] **No `--workers` on the uvicorn command.** The Dockerfile `CMD` omits it
+  deliberately; each worker is another scheduler. Same applies to any process
+  manager that would spawn replicas.
+
+### Verification after deploy
+
+- [ ] `GET /api/v1/admin/scheduler-health` returns every job in `KNOWN_JOB_IDS`
+  (`backend/app/jobs/scheduler.py`) with the scheduler reporting as running.
+- [ ] Confirm the external canary (UptimeRobot per the ADR) is actually polling
+  that endpoint and alerting to a monitored inbox. A total scheduler outage has no
+  other automated catch — ECS auto-restart and Sentry are deferred infra.
