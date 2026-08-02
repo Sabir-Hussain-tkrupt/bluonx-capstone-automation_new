@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     # creds + a verified SES_FROM_EMAIL) to send real email. Production is
     # required to use "ses" (enforced in _validate_email_provider below).
     EMAIL_PROVIDER: str = "mock"  # "mock" or "ses"
-    # SES_FROM_EMAIL: str = "awaisonfreelance@gmail.com"
     SES_FROM_EMAIL: str = "noreply@bluonx.com"
     # SES configuration set name. When set, sends carry ConfigurationSetName so
     # SES emits Delivery/Bounce/Complaint events to SNS. Empty/None → no event
