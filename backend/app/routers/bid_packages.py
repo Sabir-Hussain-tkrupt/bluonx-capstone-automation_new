@@ -16,7 +16,6 @@ from app.models.bid_packages import (
     InvitationListResponse,
 )
 from app.models.bids import (
-    BidPackageCreate,
     BidPackageDocumentCreate,
     BidPackageDocumentResponse,
     BidPackageResponse,
@@ -244,15 +243,10 @@ async def read_bid_package_scores(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.post("/bid-packages", response_model=BidPackageResponse, status_code=status.HTTP_201_CREATED)
-async def create_bid_package(
-    bid_package: BidPackageCreate,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """Create a new bid package for a task."""
-    # TODO: Implement in later phase
-    raise HTTPException(status_code=501, detail="Not implemented")
+# NOTE: creation lives at `POST /tasks/{task_id}/bid-packages` (top of this
+# file), which runs the full validate → atomic RPC → send-invitations flow. A
+# bare `POST /bid-packages` used to sit here as a 501 stub; it was removed
+# because two creation paths side by side invite calling the wrong one.
 
 
 @router.patch("/bid-packages/{bid_package_id}", response_model=BidPackageResponse)

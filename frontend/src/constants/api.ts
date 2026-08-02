@@ -34,7 +34,6 @@ export const API_ENDPOINTS = {
 
   // Trades
   TRADES: '/trades',
-  TRADE: (id: string) => `/trades/${id}`,
 
   // Bid Templates
   BID_TEMPLATES: '/bid-templates',
@@ -49,13 +48,10 @@ export const API_ENDPOINTS = {
   BID_PACKAGE: (id: string) => `/bid-packages/${id}`,
   BID_PACKAGE_CLOSE: (id: string) => `/bid-packages/${id}/close`,
   TASK_BID_PACKAGES: (taskId: string) => `/tasks/${taskId}/bid-packages`,
-  BID_PACKAGE_INVITATIONS: (id: string) => `/bid-packages/${id}/invitations`,
   BID_PACKAGE_EMAIL_LOG: (id: string) => `/bid-packages/${id}/email-log`,
   BID_PACKAGE_SCORES: (id: string) => `/bid-packages/${id}/scores`,
 
   // Bid Invitations
-  BID_INVITATIONS: '/bid-invitations',
-  BID_INVITATION: (id: string) => `/bid-invitations/${id}`,
   BID_INVITATION_RESEND_LINK: (id: string) => `/bid-invitations/${id}/resend-link`,
   BID_INVITATION_STATUS: (id: string) => `/bid-invitations/${id}/status`,
 
@@ -63,7 +59,6 @@ export const API_ENDPOINTS = {
   PROJECT_DOCUMENTS: (projectId: string) => `/projects/${projectId}/documents`,
 
   // Bid Submissions
-  BID_SUBMISSIONS: '/bid-submissions',
   BID_SUBMISSION: (id: string) => `/bid-submissions/${id}`,
 
   // Bid Revision Requests
@@ -72,12 +67,9 @@ export const API_ENDPOINTS = {
 
   // Awards
   AWARDS: '/awards',
-  AWARD: (id: string) => `/awards/${id}`,
   AWARD_VALIDATE: (bidSubmissionId: string) => `/awards/validate/${bidSubmissionId}`,
 
   // Contracts
-  CONTRACTS: '/contracts',
-  CONTRACT: (id: string) => `/contracts/${id}`,
   CONTRACT_MARK_COMPLETE: (id: string) => `/contracts/${id}/mark-complete`,
   CONTRACT_REVIEW: (id: string) => `/contracts/${id}/review`,
 
