@@ -85,15 +85,10 @@ async def update_invitation_status_endpoint(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/bid-invitations", response_model=list[BidInvitationResponse])
-async def list_bid_invitations(
-    bid_package_id: UUID | None = None,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """List bid invitations, optionally filtered by bid_package_id."""
-    # TODO: Implement in later phase
-    return []
+# NOTE: no `GET /bid-invitations` list route by design. Invitations are read
+# straight from Supabase under RLS, and the per-package view is served by
+# `GET /bid-packages/{id}/invitations` in bid_packages.py. This was a stub
+# returning `[]`, indistinguishable from an empty result.
 
 
 @router.get("/bid-invitations/{invitation_id}", response_model=BidInvitationResponse)

@@ -16,15 +16,11 @@ from app.services.review_service import ReviewError
 router = APIRouter()
 
 
-@router.get("/contracts", response_model=list[ContractResponse])
-async def list_contracts(
-    task_id: UUID | None = None,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """List contracts, optionally filtered by task_id."""
-    # TODO: Implement in later phase
-    return []
+# NOTE: no `GET /contracts` list route by design. Contracts are read straight
+# from Supabase under RLS — see `fetchTaskActiveContract` in
+# frontend/src/features/milestones/api/milestone.queries.ts. This was a stub
+# returning `[]`, indistinguishable from "this task has no contract", which is
+# a meaningful state in the award flow.
 
 
 @router.get("/contracts/{contract_id}", response_model=ContractResponse)

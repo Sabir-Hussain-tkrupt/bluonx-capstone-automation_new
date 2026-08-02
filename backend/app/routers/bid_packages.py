@@ -281,18 +281,10 @@ async def delete_bid_package(
 # ── Bid Package Documents ────────────────────────────────────────────────
 
 
-@router.get(
-    "/bid-packages/{bid_package_id}/documents",
-    response_model=list[BidPackageDocumentResponse],
-)
-async def list_bid_package_documents(
-    bid_package_id: UUID,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """List documents attached to a bid package."""
-    # TODO: Implement in later phase
-    return []
+# NOTE: no `GET /bid-packages/{id}/documents` list route by design. Attached
+# documents come back on the package detail response, and bid_package_documents
+# is readable from Supabase under RLS. This was a stub returning `[]`, which a
+# client could not distinguish from a package with no attachments.
 
 
 @router.post(

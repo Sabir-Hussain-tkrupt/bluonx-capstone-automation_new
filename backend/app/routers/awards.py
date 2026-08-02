@@ -47,15 +47,11 @@ async def preview_pre_award_validation(
     return validate_pre_award(context)
 
 
-@router.get("/awards", response_model=list[AwardResponse])
-async def list_awards(
-    task_id: UUID | None = None,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """List awards, optionally filtered by task_id."""
-    # TODO: Implement in later phase
-    return []
+# NOTE: there is deliberately no `GET /awards` list route. Awards are read
+# straight from Supabase by the frontend under RLS (the hybrid data-access
+# pattern: reads via Supabase, writes via FastAPI), so a list endpoint here
+# would be redundant. It previously existed as a stub returning `[]`, which a
+# client could not distinguish from "this task has no awards".
 
 
 @router.get("/awards/{award_id}", response_model=AwardResponse)
