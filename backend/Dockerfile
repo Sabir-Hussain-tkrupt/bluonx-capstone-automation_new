@@ -25,4 +25,7 @@ USER appuser
 
 EXPOSE 8000
 
+# Single worker is required, not an untuned default: APScheduler runs in-process,
+# so --workers N runs every scheduled job N times.
+# See docs/adr/0001-scheduler-single-instance.md.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

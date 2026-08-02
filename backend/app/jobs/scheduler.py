@@ -2,9 +2,11 @@
 APScheduler lifecycle + in-memory last-run tracking.
 
 A single AsyncIOScheduler runs background jobs as coroutines on the app's
-event loop. AsyncIOScheduler (not BackgroundScheduler) is deliberate: the
-sync Supabase client is not thread-safe, so jobs must run on the existing
-loop, not in worker threads.
+event loop. AsyncIOScheduler (not BackgroundScheduler) is a simplicity
+choice: no worker-thread pool to size, and jobs reuse the singleton Supabase
+client on the loop. It is not a thread-safety constraint — that client is
+thread-safe for our usage, which is why the request path offloads blocking
+calls via run_in_threadpool (see the ADR's 2026-06-12 note).
 
 The scheduler is started/stopped by the FastAPI lifespan. Last-run state is
 held in memory only — /admin/scheduler-health must be able to report whether
