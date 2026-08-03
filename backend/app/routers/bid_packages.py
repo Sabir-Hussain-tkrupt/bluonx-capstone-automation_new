@@ -153,8 +153,10 @@ async def close_bid_package(
     """Manually close bidding early (open -> evaluating).
 
     Allowed only from 'open' (409 otherwise), before or after the deadline. This
-    stops new bid inflow immediately (the vendor portal gates on status == 'open').
-    In-flight revision tokens are unaffected — they are gated by their own
+    stops new bid inflow immediately (the vendor portal gates on status == 'open')
+    and converges every 'sent'/'opened' invitation to 'no_response', matching what
+    the deadline transition does — so both routes out of 'open' leave the same
+    state. In-flight revision tokens are unaffected — they are gated by their own
     revision_deadline, not the package status.
     """
     try:

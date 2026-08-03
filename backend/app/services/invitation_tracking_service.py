@@ -10,6 +10,10 @@ Read-side and status-management operations on bid packages and invitations:
   that flips overdue sent/opened invitations to 'no_response' and moves an open
   package to 'evaluating'. The same core is called by the lazy read-path here and
   by the daily post-deadline job, so both converge on identical state.
+- Manual early close (close_bidding). Bidding ends by one of two routes — the
+  deadline passing or the PM closing early — and both must leave the same
+  invitation state, so both flip live invitations via the one shared helper
+  (_flip_live_invitations_to_no_response).
 """
 
 from __future__ import annotations
@@ -317,6 +321,31 @@ def _transform_document(row: dict) -> dict:
 # ── Service functions ─────────────────────────────────────────────────────
 
 
+def _flip_live_invitations_to_no_response(*, bid_package_id, db, now: str) -> int:
+    """Flip every 'sent'/'opened' invitation on this package to 'no_response'.
+
+    Shared by the two routes that end bidding — the deadline transition and the
+    PM's early close — so both leave identical invitation state. Kept as one
+    helper precisely so they cannot drift apart.
+
+    Idempotent: a package with nothing live writes nothing. Returns the count
+    flipped.
+    """
+    invitations = _fetch_invitations(db, bid_package_id)
+    count = sum(
+        1 for inv in invitations if inv.get("status") in _TIMED_OUT_SOURCE_STATUSES
+    )
+    if count > 0:
+        (
+            db.table("bid_invitations")
+            .update({"status": "no_response", "updated_at": now})
+            .eq("bid_package_id", str(bid_package_id))
+            .in_("status", list(_TIMED_OUT_SOURCE_STATUSES))
+            .execute()
+        )
+    return count
+
+
 def _apply_overdue_transition(*, bid_package: dict, db) -> dict:
     """Shared, idempotent deadline transition (the single source of truth).
 
@@ -346,19 +375,9 @@ def _apply_overdue_transition(*, bid_package: dict, db) -> dict:
     bid_package_id = bid_package.get("id")
     now = _now_iso()
 
-    invitations = _fetch_invitations(db, bid_package_id)
-    no_response_count = sum(
-        1 for inv in invitations if inv.get("status") in _TIMED_OUT_SOURCE_STATUSES
+    result["no_response_count"] = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
     )
-    if no_response_count > 0:
-        (
-            db.table("bid_invitations")
-            .update({"status": "no_response", "updated_at": now})
-            .eq("bid_package_id", str(bid_package_id))
-            .in_("status", list(_TIMED_OUT_SOURCE_STATUSES))
-            .execute()
-        )
-    result["no_response_count"] = no_response_count
 
     # Only an 'open' package moves; an 'evaluating' one (manually closed early, or
     # already advanced) keeps its status while its lingering rows still converge.
@@ -386,11 +405,20 @@ async def sweep_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
 
 async def close_bidding(*, bid_package_id: UUID, db) -> dict:
     """Manual early close (PM action): open → 'evaluating'. Allowed only from
-    'open' (409 otherwise), both before and after the deadline. New bid inflow is
-    sealed by the existing `status != 'open'` gates — no token revocation and no
-    invitation expiry here (the deadline sweep owns invitation expiry).
+    'open' (409 otherwise), both before and after the deadline.
 
-    Returns {"id", "status"}.
+    Converges invitations the same way the deadline transition does: every
+    'sent'/'opened' row becomes 'no_response'. Both routes to 'evaluating' must
+    leave identical state — otherwise an early close leaves rows reading 'sent'
+    until the original deadline passes, while nobody can actually bid.
+    'no_response' is the terminal "invited, did not bid" status and covers a
+    round ended early just as it covers one that timed out.
+
+    No token revocation: the `status != 'open'` gates in vendor_auth and
+    assert_package_open_and_before_deadline already lock vendors out on the
+    status flip alone, including holders of an unexpired vendor JWT.
+
+    Returns {"id", "status", "no_response_count"}.
     """
     bid_package = _fetch_bid_package(db, bid_package_id)
     if bid_package is None:
@@ -403,13 +431,22 @@ async def close_bidding(*, bid_package_id: UUID, db) -> dict:
             f"Cannot close bidding: the package is '{current_status}', not 'open'.",
         )
 
+    now = _now_iso()
+    no_response_count = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
+    )
+
     (
         db.table("bid_packages")
-        .update({"status": "evaluating", "updated_at": _now_iso()})
+        .update({"status": "evaluating", "updated_at": now})
         .eq("id", str(bid_package_id))
         .execute()
     )
-    return {"id": str(bid_package_id), "status": "evaluating"}
+    return {
+        "id": str(bid_package_id),
+        "status": "evaluating",
+        "no_response_count": no_response_count,
+    }
 
 
 async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
