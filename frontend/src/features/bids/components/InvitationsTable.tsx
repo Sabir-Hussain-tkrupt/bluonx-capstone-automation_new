@@ -20,12 +20,17 @@ function formatDateTime(value: string | null): string {
   });
 }
 
-const canResend = (status: InvitationStatus) =>
-  status === 'pending_send' ||
-  status === 'send_failed' ||
-  status === 'sent' ||
-  status === 'opened' ||
-  status === 'no_response';
+// Resending mints a fresh magic link, which the backend refuses unless the
+// package is still open (resend_bid_link -> 400). Gate on the package, not on
+// the status list: 'no_response' is PM-settable while a package is open, and
+// re-inviting someone marked non-responsive is legitimate.
+const canResend = (status: InvitationStatus, packageOpen: boolean) =>
+  packageOpen &&
+  (status === 'pending_send' ||
+    status === 'send_failed' ||
+    status === 'sent' ||
+    status === 'opened' ||
+    status === 'no_response');
 
 // pending_send / send_failed were never actually delivered, so the action is a
 // first send rather than a resend. Same handler, different label.
@@ -34,8 +39,12 @@ const resendLabel = (status: InvitationStatus) =>
     ? 'Send Bid Link'
     : 'Resend Bid Link';
 
-const canMarkStatus = (status: InvitationStatus) =>
-  status === 'sent' || status === 'opened';
+// Same package gate. Closing bidding converges sent/opened away, so this
+// rarely matches on a closed package today — but a cancelled package is
+// skipped by the deadline sweep, so those rows would survive and the action
+// must not be offered on them.
+const canMarkStatus = (status: InvitationStatus, packageOpen: boolean) =>
+  packageOpen && (status === 'sent' || status === 'opened');
 
 // A terminal request (or a finalized revision) means there is audit history
 // worth expanding even when the current submission is still revision 1.
@@ -62,7 +71,12 @@ interface InvitationsTableProps {
     request: BidRevisionRequest,
     invitation: BidInvitation,
   ) => void;
-  /** Bid package is still open (cosmetic gate for Request Revision). */
+  /**
+   * Package status is 'open'. Gates the two actions the backend refuses on a
+   * non-open package: Resend/Send Bid Link and Mark Declined. Defaults to false
+   * so an omitted prop fails closed. Request Revision deliberately does NOT use
+   * this — see showRequestRevision below.
+   */
   bidPackageOpen?: boolean;
 }
 
@@ -147,11 +161,20 @@ export function InvitationsTable({
       accessor: (row) => {
         const revision = revisionFor(row.id);
         const isPending = revision?.status === 'pending';
+        // Mirrors create_revision_request's guards exactly, so the button is
+        // shown iff the backend would accept: a current submission exists
+        // (submitted + bid_submission_id), no pending request already (the
+        // one-pending-per-invitation index), and no blocking award on the task
+        // (is_awarded is task-scoped and derived from the same
+        // _BLOCKING_AWARD_STATUSES the backend guard uses).
+        //
+        // Deliberately NOT gated on bidPackageOpen: the backend has no
+        // package-status guard here, and evaluating is exactly when a PM wants
+        // a revision. Gating it hid a supported action.
         const showRequestRevision =
           !!onRequestRevision &&
           row.status === 'submitted' &&
           !!row.bid_submission_id &&
-          bidPackageOpen &&
           !isPending &&
           !row.is_awarded;
         const showHistory =
@@ -201,7 +224,7 @@ export function InvitationsTable({
                 {isExpanded ? 'Hide History' : 'History'}
               </Button>
             )}
-            {canResend(row.status) && (
+            {canResend(row.status, bidPackageOpen) && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -212,7 +235,7 @@ export function InvitationsTable({
                 {resendLabel(row.status)}
               </Button>
             )}
-            {canMarkStatus(row.status) && (
+            {canMarkStatus(row.status, bidPackageOpen) && (
               <Button
                 variant="ghost"
                 size="sm"
