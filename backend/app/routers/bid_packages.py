@@ -37,6 +37,7 @@ from app.services.bid_package_list_service import (
 )
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
+    cancel_bid_package,
     close_bidding,
     get_bid_package_detail,
     get_bid_package_email_log,
@@ -165,6 +166,37 @@ async def close_bid_package(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.post("/bid-packages/{bid_package_id}/cancel")
+async def cancel_bid_package_endpoint(
+    bid_package_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Void a bidding round (open | evaluating -> cancelled).
+
+    'evaluating' is cancellable on purpose: nothing reopens a package, so this is
+    the only way out of a round closed early by mistake. 409 from any other
+    status, and 409 when the task already has a live award (that would orphan the
+    award -> contract -> milestones chain).
+
+    Submitted bids are kept as history but stop being awardable. Pending revision
+    requests are cancelled and their tokens revoked — a revision token is gated
+    by its own deadline rather than the package status, so it would otherwise
+    survive the cancel.
+
+    Any active admin or PM may cancel, matching close and award; the caller is
+    recorded in bid_packages.cancelled_by.
+    """
+    try:
+        return await cancel_bid_package(
+            bid_package_id=bid_package_id,
+            cancelled_by=UUID(user["user_id"]),
+            db=db,
+        )
+    except InvitationTrackingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.get(
     "/bid-packages/{bid_package_id}/invitations",
     response_model=InvitationListResponse,
@@ -263,15 +295,11 @@ async def update_bid_package(
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
-@router.delete("/bid-packages/{bid_package_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_bid_package(
-    bid_package_id: UUID,
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """Cancel a bid package."""
-    # TODO: Implement in later phase
-    raise HTTPException(status_code=501, detail="Not implemented")
+# NOTE: cancelling is `POST /bid-packages/{id}/cancel` (above), not DELETE.
+# It is a state transition that preserves the round's history — submitted bids
+# stay queryable, they just stop being awardable — so DELETE would misdescribe
+# it, and POST /{id}/cancel matches its sibling POST /{id}/close. A `DELETE
+# /bid-packages/{id}` 501 stub used to sit here.
 
 
 # ── Bid Package Documents ────────────────────────────────────────────────

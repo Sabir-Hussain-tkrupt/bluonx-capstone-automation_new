@@ -25,7 +25,11 @@ from uuid import UUID
 # Single source of truth for the award statuses that block a new revision
 # request. Imported (not redefined) so this read-path visibility flag can
 # never diverge from the create_revision_request backend guard.
-from app.services.bid_revision_service import _BLOCKING_AWARD_STATUSES
+from app.services.bid_revision_service import (
+    _BLOCKING_AWARD_STATUSES,
+    cancel_revision_request,
+    list_revision_requests_for_package,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +145,23 @@ def _fetch_bid_package(db, bid_package_id: UUID) -> dict | None:
         .select("*, tasks(name), bid_templates(*)")
         .eq("id", str(bid_package_id))
         .single()
+        .execute()
+    )
+    return _unwrap_one(resp.data)
+
+
+def _fetch_user(db, user_id) -> dict | None:
+    """Look up a single user's display name. Deliberately a separate query
+    rather than a join: bid_packages has two FKs to users (created_by and
+    cancelled_by), which makes a bare PostgREST embed on that table ambiguous.
+    Returns None when the row is gone rather than raising."""
+    if not user_id:
+        return None
+    resp = (
+        db.table("users")
+        .select("id, full_name")
+        .eq("id", str(user_id))
+        .limit(1)
         .execute()
     )
     return _unwrap_one(resp.data)
@@ -449,6 +470,99 @@ async def close_bidding(*, bid_package_id: UUID, db) -> dict:
     }
 
 
+_CANCELLABLE_PACKAGE_STATUSES = ("open", "evaluating")
+
+
+async def cancel_bid_package(
+    *, bid_package_id: UUID, cancelled_by: UUID, db
+) -> dict:
+    """Void a bidding round (open | evaluating → 'cancelled').
+
+    'evaluating' is deliberately cancellable: it is the only escape from a round
+    closed early by mistake, since nothing reopens a package. 'closed' is
+    excluded (it is only ever set on award acceptance) and re-cancelling is 409.
+
+    Submitted bids are preserved as audit history — cancelling makes them
+    unawardable ('cancelled' is absent from _AWARDABLE_PACKAGE_STATUSES) rather
+    than deleting anything.
+
+    Pending revision requests MUST be cancelled here. Ordinary bid access dies
+    with the status flip via assert_package_open_and_before_deadline, but a
+    revision token is validated against its own status/deadline and explicitly
+    NOT the package status (see assert_revision_request_active), so a vendor
+    mid-revision could otherwise still submit into a voided round.
+
+    Order is guards → revisions → invitations → package flip. The flip goes last
+    so a mid-way failure leaves a still-open package that the deadline sweep
+    reconciles, never a cancelled package with live revision tokens.
+
+    NOTE: the 'no_response' rows this writes belong to a round the PM voided, not
+    to vendors who ignored an invitation. Any future vendor response-rate metric
+    must exclude invitations whose package is 'cancelled'.
+
+    Returns {"id", "status", "no_response_count", "revisions_cancelled"}.
+    """
+    bid_package = _fetch_bid_package(db, bid_package_id)
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+
+    current_status = bid_package.get("status")
+    if current_status not in _CANCELLABLE_PACKAGE_STATUSES:
+        raise InvitationTrackingError(
+            409,
+            f"Cannot cancel: the package is '{current_status}'. Only "
+            f"{' or '.join(_CANCELLABLE_PACKAGE_STATUSES)} packages can be cancelled.",
+        )
+
+    # An awarded task owns an award → contract → milestones chain; voiding the
+    # round underneath it would orphan that chain.
+    if _task_has_active_award(db, bid_package.get("task_id")):
+        raise InvitationTrackingError(
+            409,
+            "Cannot cancel: this task has already been awarded.",
+        )
+
+    # Loop the single-request helper rather than a bulk update: it carries the
+    # .eq("status","pending") TOCTOU guard and revokes each request's tokens.
+    revisions_cancelled = 0
+    for revision in list_revision_requests_for_package(
+        db, bid_package_id=bid_package_id
+    ):
+        if getattr(revision, "status", None) != "pending":
+            continue
+        cancel_revision_request(
+            db,
+            revision_request_id=revision.id,
+            cancelled_by=cancelled_by,
+        )
+        revisions_cancelled += 1
+
+    now = _now_iso()
+    # The deadline sweep skips cancelled packages, so rows left live here would
+    # stay stale forever. Same helper the deadline path and close_bidding use.
+    no_response_count = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
+    )
+
+    (
+        db.table("bid_packages")
+        .update({
+            "status": "cancelled",
+            "cancelled_by": str(cancelled_by),
+            "cancelled_at": now,
+            "updated_at": now,
+        })
+        .eq("id", str(bid_package_id))
+        .execute()
+    )
+    return {
+        "id": str(bid_package_id),
+        "status": "cancelled",
+        "no_response_count": no_response_count,
+        "revisions_cancelled": revisions_cancelled,
+    }
+
+
 async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     """Return the full bid package detail with invitation summary,
     invitations array, and documents. Applies lazy expiration."""
@@ -498,9 +612,23 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     tasks_join = bid_package.get("tasks") or {}
     task_name = tasks_join.get("name") if isinstance(tasks_join, dict) else None
 
+    # Cancellation attribution. Resolved with an explicit lookup, NOT a
+    # PostgREST embed: bid_packages has two FKs to users (created_by and
+    # cancelled_by), so a bare users(...) embed on this table is ambiguous.
+    # Guarded on status so a normal package costs no extra query. A missing
+    # user row (soft-deleted, or FK nulled) leaves the name None and the UI
+    # falls back to showing the date alone.
+    cancelled_by_name = None
+    if bid_package.get("status") == "cancelled" and bid_package.get("cancelled_by"):
+        canceller = _fetch_user(db, bid_package["cancelled_by"])
+        if canceller:
+            cancelled_by_name = canceller.get("full_name")
+
     return {
         "id": bid_package.get("id"),
         "task_name": task_name,
+        "cancelled_at": bid_package.get("cancelled_at"),
+        "cancelled_by_name": cancelled_by_name,
         "round_number": bid_package.get("round_number"),
         "deadline": bid_package.get("deadline"),
         "status": bid_package.get("status"),

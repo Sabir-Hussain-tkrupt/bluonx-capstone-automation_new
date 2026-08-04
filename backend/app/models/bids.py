@@ -104,8 +104,12 @@ class BidPackageDocumentResponse(BluOnXBase):
 
 # ── bid_invitations ──────────────────────────────────────────────────────
 
+# Must match the bid_invitations.status CHECK constraint and _ALL_STATUSES in
+# invitation_tracking_service. pending_send / send_failed were added with the
+# atomic-creation work and were missing here.
 BID_INVITATION_STATUSES = Literal[
-    "sent", "opened", "submitted", "declined", "expired", "no_response",
+    "pending_send", "sent", "send_failed", "opened",
+    "submitted", "declined", "expired", "no_response",
 ]
 
 

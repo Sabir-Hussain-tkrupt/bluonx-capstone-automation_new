@@ -129,6 +129,11 @@ export interface BidPackageDetail {
    *  declined_by_vendor / cancelled). Drives the comparison-table Award
    *  suppression + the winning row's "Awarded" state. */
   award: ActiveAward | null;
+  /** Set only when status === 'cancelled'. ISO timestamp. */
+  cancelled_at: string | null;
+  /** Who voided the round. Null even on a cancelled package when the user row
+   *  is gone (soft-deleted, or the FK nulled), so render the date on its own. */
+  cancelled_by_name: string | null;
 }
 
 /** The task's live award surfaced on the bid-package detail (Task 9.2/9.3b). */

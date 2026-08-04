@@ -419,3 +419,139 @@ class TestInvitationIsAwarded:
         assert result["invitations"]
         for inv in result["invitations"]:
             assert inv["is_awarded"] is False
+
+
+class TestCancellationAttribution:
+    """A cancelled package reports who voided it and when, so the detail page
+    can explain why nothing on it is actionable.
+
+    The name is resolved with an explicit users lookup rather than a PostgREST
+    embed: bid_packages has two FKs to users (created_by and cancelled_by), so a
+    bare users(...) embed on that table would be ambiguous.
+    """
+
+    @staticmethod
+    def _client(
+        package: dict,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+        user_rows: list[dict] | None = None,
+        seen_tables: list[str] | None = None,
+    ) -> MagicMock:
+        client = MagicMock()
+
+        def table_side_effect(name):
+            if seen_tables is not None:
+                seen_tables.append(name)
+            if name == "bid_packages":
+                return build_chain(data=[package])
+            if name == "bid_invitations":
+                return build_chain(data=sample_invitations_mixed_statuses)
+            if name == "email_log":
+                return build_chain(data=sample_email_log_rows)
+            if name == "bid_package_documents":
+                return build_chain(data=sample_bid_package_documents)
+            if name == "bid_submissions":
+                return build_chain(data=sample_bid_submissions)
+            if name == "users":
+                return build_chain(data=list(user_rows or []))
+            return build_chain(data=[])
+
+        client.table.side_effect = table_side_effect
+        return client
+
+    @pytest.mark.asyncio
+    async def test_cancelled_package_reports_who_and_when(
+        self,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ):
+        canceller = str(uuid4())
+        package = {
+            **sample_bid_package_open,
+            "status": "cancelled",
+            "cancelled_by": canceller,
+            "cancelled_at": "2026-08-03T10:00:00+00:00",
+        }
+        client = self._client(
+            package,
+            sample_invitations_mixed_statuses,
+            sample_email_log_rows,
+            sample_bid_package_documents,
+            sample_bid_submissions,
+            user_rows=[{"id": canceller, "full_name": "Jane Roe"}],
+        )
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID, db=client
+        )
+
+        assert result["cancelled_by_name"] == "Jane Roe"
+        assert result["cancelled_at"] == "2026-08-03T10:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_non_cancelled_package_reports_none_and_skips_lookup(
+        self,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ):
+        """The users query is guarded on status, so a normal package pays
+        nothing for this feature."""
+        seen: list[str] = []
+        client = self._client(
+            sample_bid_package_open,
+            sample_invitations_mixed_statuses,
+            sample_email_log_rows,
+            sample_bid_package_documents,
+            sample_bid_submissions,
+            seen_tables=seen,
+        )
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID, db=client
+        )
+
+        assert result["cancelled_at"] is None
+        assert result["cancelled_by_name"] is None
+        assert "users" not in seen
+
+    @pytest.mark.asyncio
+    async def test_missing_user_row_still_reports_the_date(
+        self,
+        sample_bid_package_open,
+        sample_invitations_mixed_statuses,
+        sample_email_log_rows,
+        sample_bid_package_documents,
+        sample_bid_submissions,
+    ):
+        """cancelled_by is ON DELETE SET NULL and users are soft-deleted, so the
+        name can vanish. The date must survive so the UI still explains itself."""
+        package = {
+            **sample_bid_package_open,
+            "status": "cancelled",
+            "cancelled_by": str(uuid4()),
+            "cancelled_at": "2026-08-03T10:00:00+00:00",
+        }
+        client = self._client(
+            package,
+            sample_invitations_mixed_statuses,
+            sample_email_log_rows,
+            sample_bid_package_documents,
+            sample_bid_submissions,
+            user_rows=[],
+        )
+
+        result = await get_bid_package_detail(
+            bid_package_id=BID_PACKAGE_ID, db=client
+        )
+
+        assert result["cancelled_by_name"] is None
+        assert result["cancelled_at"] == "2026-08-03T10:00:00+00:00"

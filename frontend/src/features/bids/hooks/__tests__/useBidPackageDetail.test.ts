@@ -44,6 +44,10 @@ function basePayload(overrides: Partial<BidPackageDetail> = {}): BidPackageDetai
     },
     invitations: [],
     submitted_bids: [],
+    desired_start_date: null,
+    award: null,
+    cancelled_at: null,
+    cancelled_by_name: null,
     ...overrides,
   };
 }

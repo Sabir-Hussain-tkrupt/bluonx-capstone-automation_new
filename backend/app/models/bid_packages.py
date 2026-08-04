@@ -145,6 +145,11 @@ class BidPackageDetailResponse(BluOnXBase):
     # The task's live award (or null when re-awardable). Drives the comparison
     # UI's Award-button suppression + winning-row "Awarded" state.
     award: ActiveAwardInfo | None = None
+    # Cancellation attribution — populated only when status == 'cancelled'.
+    # cancelled_by_name may be None even then (user row soft-deleted or the FK
+    # nulled), so the UI must render the date on its own.
+    cancelled_at: datetime | None = None
+    cancelled_by_name: str | None = None
 
 
 class InvitationListResponse(BluOnXBase):
