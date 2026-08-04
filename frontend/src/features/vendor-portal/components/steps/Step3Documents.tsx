@@ -203,6 +203,9 @@ export function Step3Documents({
           onError={(msg) => setUploadError(msg)}
           label="Drag and drop files here, or click to browse"
           hint="PDF, JPEG, or PNG · up to 10 MB each"
+          // Step 3 renders its own attachment list below; suppress the
+          // component's internal list so files aren't shown twice.
+          showFileList={false}
         />
         {uploadError && (
           <div className="mt-3">

@@ -64,6 +64,7 @@ from app.services.vendor_portal_service import (
     build_bid_context,
     build_line_item_rows,
     build_revision_prefill,
+    compute_total_amount,
     enforce_attachment_limits,
     fetch_attachment_usage,
     fetch_attachments,
@@ -283,6 +284,20 @@ async def get_bid_context(
     return build_bid_context(db, ctx.bid_invitation_id)
 
 
+def _resolve_stored_total(
+    payload: DraftPayload, is_lump_sum: bool, template_map: dict
+) -> str | None:
+    """The total_amount value to persist on a draft.
+
+    Structured templates: server-derived from the line items (authoritative,
+    drift-proof), never the client float. Lump-sum templates: the vendor's own
+    total_amount is the sole pricing input.
+    """
+    if is_lump_sum:
+        return str(payload.total_amount) if payload.total_amount is not None else None
+    return str(compute_total_amount(payload.line_items, template_map))
+
+
 @router.post(
     "/submissions",
     response_model=BidDraftModel,
@@ -341,6 +356,7 @@ async def create_draft(
     # edits (Task 5.4 contract).
     template_id = await _fetch_template_id_for_invitation(db, ctx.bid_invitation_id)
     template_map = fetch_template_items_map(db, template_id)
+    is_lump_sum = bool(fetch_template_metadata(db, template_id)["is_lump_sum"])
 
     # Insert the submission row. The DB trigger enforces vendor_id matches
     # the invitation — a defensive backstop should something slip through
@@ -348,9 +364,7 @@ async def create_draft(
     submission_row = {
         "bid_invitation_id": str(ctx.bid_invitation_id),
         "vendor_id": str(ctx.vendor_id),
-        "total_amount": (
-            str(payload.total_amount) if payload.total_amount is not None else None
-        ),
+        "total_amount": _resolve_stored_total(payload, is_lump_sum, template_map),
         "vendor_notes": payload.vendor_notes,
         "proposed_start_date": (
             payload.proposed_start_date.isoformat()
@@ -458,13 +472,12 @@ async def update_draft(
 
     template_id = await _fetch_template_id_for_invitation(db, ctx.bid_invitation_id)
     template_map = fetch_template_items_map(db, template_id)
+    is_lump_sum = bool(fetch_template_metadata(db, template_id)["is_lump_sum"])
 
     # Update scalar fields. updated_at auto-refreshes via trg_bid_submissions_updated_at.
     db.table("bid_submissions").update(
         {
-            "total_amount": (
-                str(payload.total_amount) if payload.total_amount is not None else None
-            ),
+            "total_amount": _resolve_stored_total(payload, is_lump_sum, template_map),
             "vendor_notes": payload.vendor_notes,
             "proposed_start_date": (
                 payload.proposed_start_date.isoformat()

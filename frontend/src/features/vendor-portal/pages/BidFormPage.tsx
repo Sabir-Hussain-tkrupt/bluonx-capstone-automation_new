@@ -5,7 +5,7 @@ import { ROUTES } from '@/constants/routes';
 import { BidDeadlineCountdown } from '../components/BidDeadlineCountdown';
 import { DeadlineExpiredModal } from '../components/DeadlineExpiredModal';
 import { DraftIndicator } from '../components/DraftIndicator';
-import { ProgressStepper } from '../components/ProgressStepper';
+import { PORTAL_STEPS, ProgressStepper } from '../components/ProgressStepper';
 import { Step1CompanyInfo } from '../components/steps/Step1CompanyInfo';
 import { Step2Pricing } from '../components/steps/Step2Pricing';
 import { Step3Documents } from '../components/steps/Step3Documents';
@@ -26,6 +26,7 @@ import {
 } from '../services/portalApi';
 import {
   PortalApiError,
+  type FormLineItem,
   type PortalFieldError,
   type RevisionPrefillResponse,
   type StepIndex,
@@ -69,6 +70,42 @@ function stepForField(field: string): StepIndex {
   return 2;
 }
 
+/** Static server field paths → vendor-facing labels. */
+const FIELD_LABELS: Record<string, string> = {
+  total_amount: 'Total bid amount',
+  vendor_notes: 'Notes to owner',
+  proposed_start_date: 'Proposed start date',
+  sow_attested_name: 'Scope of Work signature',
+  line_items: 'Line items',
+};
+
+/** Per-line subfields inside `line_items[N].<sub>`. */
+const LINE_SUBFIELD_LABELS: Record<string, string> = {
+  quantity: 'Quantity',
+  unit_price: 'Unit price',
+  lump_sum_amount: 'Lump sum',
+  line_total: 'Line total',
+  item_type: 'Item type',
+};
+
+/**
+ * Turns a raw server field path (e.g. `line_items[2].unit_price`) into a
+ * vendor-readable label. Line-item paths resolve to the item's description,
+ * relying on client `line_items` sharing the server's sort_order ordering.
+ */
+function friendlyFieldLabel(field: string, lineItems: FormLineItem[]): string {
+  const staticLabel = FIELD_LABELS[field];
+  if (staticLabel) return staticLabel;
+  const match = field.match(/^line_items\[(\d+)\]\.(\w+)$/);
+  if (match) {
+    const idx = Number(match[1]);
+    const sub = LINE_SUBFIELD_LABELS[match[2]] ?? match[2];
+    const desc = lineItems[idx]?.description;
+    return desc ? `${desc}: ${sub}` : `Line ${idx + 1}: ${sub}`;
+  }
+  return field;
+}
+
 export function BidFormPage() {
   const bidContext = useBidContext();
   const navigate = useNavigate();
@@ -93,6 +130,9 @@ export function BidFormPage() {
   // In-flight ensureSubmissionId promise — dedupes concurrent upload-
   // initiated draft creations from racing the auto-save POST.
   const creatingDraftRef = useRef<Promise<string> | null>(null);
+  // Focus target for step changes (a11y): moving focus here announces the
+  // new step (via aria-label) and gives keyboard users a fresh anchor.
+  const stepContainerRef = useRef<HTMLDivElement>(null);
 
   // Hydrate on first mount. Initial path: from existing_draft if any.
   // Revision path: resume an in-progress revision draft if the backend
@@ -236,8 +276,10 @@ export function BidFormPage() {
   const goToStep = useCallback(
     (step: StepIndex) => {
       form.setStep(step);
-      // Focus main heading / top for a11y + mobile UX.
+      // Move keyboard/SR focus into the new step (its aria-label names the
+      // step), then scroll to the top for mobile UX.
       requestAnimationFrame(() => {
+        stepContainerRef.current?.focus({ preventScroll: true });
         const main = document.getElementById('portal-main');
         main?.scrollTo({ top: 0, behavior: 'smooth' });
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -435,7 +477,10 @@ export function BidFormPage() {
             <ul className="list-disc space-y-1 pl-5 text-sm">
               {fieldErrors.map((e, idx) => (
                 <li key={`${e.field}-${idx}`}>
-                  <span className="font-medium">{e.field}:</span> {e.message}
+                  <span className="font-medium">
+                    {friendlyFieldLabel(e.field, form.state.pricing.line_items)}:
+                  </span>{' '}
+                  {e.message}
                 </li>
               ))}
             </ul>
@@ -443,7 +488,14 @@ export function BidFormPage() {
         </div>
       )}
 
-      <div className="mt-6">
+      <div
+        ref={stepContainerRef}
+        tabIndex={-1}
+        aria-label={`Step ${form.state.step}: ${
+          PORTAL_STEPS.find((s) => s.index === form.state.step)?.label ?? ''
+        }`}
+        className="mt-6 focus:outline-none"
+      >
         {form.state.step === 1 && (
           <Step1CompanyInfo
             onNext={() => handleNextFromStep(1)}

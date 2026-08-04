@@ -18,6 +18,12 @@ export interface FileUploadProps {
   uploadProgress?: number;
   /** Allow removing individual files before upload */
   onRemoveFile?: (index: number) => void;
+  /**
+   * Render the internal list of just-selected files. Default true. Set false
+   * when the caller manages and displays its own attachment list (e.g. the
+   * bid portal's Step 3), to avoid listing every file twice.
+   */
+  showFileList?: boolean;
 }
 
 /**
@@ -58,6 +64,7 @@ export function FileUpload({
   uploading = false,
   uploadProgress,
   onRemoveFile,
+  showFileList = true,
 }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -199,7 +206,7 @@ export function FileUpload({
         </div>
       )}
 
-      {selectedFiles.length > 0 && (
+      {showFileList && selectedFiles.length > 0 && (
         <ul className="mt-2 space-y-1">
           {selectedFiles.map((file, i) => (
             <li key={i} className="flex items-center gap-2 text-sm text-secondary-600">

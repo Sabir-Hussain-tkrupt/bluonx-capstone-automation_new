@@ -167,7 +167,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                     type="number"
                     inputMode="decimal"
                     min={0}
-                    step="0.01"
+                    step={1000}
                     value={item.lump_sum_amount ?? ''}
                     onChange={(e) =>
                       onUpdate(item.template_item_id, {
@@ -188,7 +188,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step="0.01"
+                      step={1}
                       value={item.quantity ?? ''}
                       onChange={(e) =>
                         onUpdate(item.template_item_id, {
@@ -204,7 +204,7 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
                       type="number"
                       inputMode="decimal"
                       min={0}
-                      step="0.01"
+                      step={1000}
                       value={item.unit_price ?? ''}
                       onChange={(e) =>
                         onUpdate(item.template_item_id, {

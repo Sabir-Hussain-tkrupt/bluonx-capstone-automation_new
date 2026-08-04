@@ -135,6 +135,9 @@ def _patch_helpers(monkeypatch):
 
     monkeypatch.setattr(vp, "_fetch_template_id_for_invitation", _tmpl)
     monkeypatch.setattr(vp, "fetch_template_items_map", lambda *a, **k: {})
+    monkeypatch.setattr(
+        vp, "fetch_template_metadata", lambda *a, **k: {"is_lump_sum": True}
+    )
     monkeypatch.setattr(vp, "build_line_item_rows", lambda *a, **k: [])
     monkeypatch.setattr(
         vp, "load_draft_response", lambda _db, sid: _draft_model(str(sid))
