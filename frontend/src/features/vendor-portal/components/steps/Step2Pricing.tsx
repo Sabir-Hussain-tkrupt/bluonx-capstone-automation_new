@@ -45,8 +45,10 @@ function validatePricing(state: BidFormState, isLump: boolean) {
       const p = item.unit_price;
       if (q === null || Number.isNaN(q)) {
         errors.lineItems[item.template_item_id] = 'Quantity is required.';
-      } else if (q < 0) {
-        errors.lineItems[item.template_item_id] = 'Quantity must be ≥ 0.';
+      } else if (q <= 0) {
+        // Matches the server rule (qty > 0): a per-unit line with zero units
+        // is meaningless. "No cost" is expressed via unit price = 0, not qty 0.
+        errors.lineItems[item.template_item_id] = 'Quantity must be greater than zero.';
       } else if (p === null || Number.isNaN(p)) {
         errors.lineItems[item.template_item_id] = 'Unit price is required.';
       } else if (p < 0) {
