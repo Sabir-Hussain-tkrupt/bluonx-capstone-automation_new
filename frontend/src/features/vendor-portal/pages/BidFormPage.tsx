@@ -26,6 +26,7 @@ import {
 } from '../services/portalApi';
 import {
   PortalApiError,
+  type FormLineItem,
   type PortalFieldError,
   type RevisionPrefillResponse,
   type StepIndex,
@@ -67,6 +68,42 @@ function stepForField(field: string): StepIndex {
   if (field.startsWith('vendor_notes')) return 3;
   if (field.startsWith('line_items') || field.startsWith('total_amount')) return 2;
   return 2;
+}
+
+/** Static server field paths → vendor-facing labels. */
+const FIELD_LABELS: Record<string, string> = {
+  total_amount: 'Total bid amount',
+  vendor_notes: 'Notes to owner',
+  proposed_start_date: 'Proposed start date',
+  sow_attested_name: 'Scope of Work signature',
+  line_items: 'Line items',
+};
+
+/** Per-line subfields inside `line_items[N].<sub>`. */
+const LINE_SUBFIELD_LABELS: Record<string, string> = {
+  quantity: 'Quantity',
+  unit_price: 'Unit price',
+  lump_sum_amount: 'Lump sum',
+  line_total: 'Line total',
+  item_type: 'Item type',
+};
+
+/**
+ * Turns a raw server field path (e.g. `line_items[2].unit_price`) into a
+ * vendor-readable label. Line-item paths resolve to the item's description,
+ * relying on client `line_items` sharing the server's sort_order ordering.
+ */
+function friendlyFieldLabel(field: string, lineItems: FormLineItem[]): string {
+  const staticLabel = FIELD_LABELS[field];
+  if (staticLabel) return staticLabel;
+  const match = field.match(/^line_items\[(\d+)\]\.(\w+)$/);
+  if (match) {
+    const idx = Number(match[1]);
+    const sub = LINE_SUBFIELD_LABELS[match[2]] ?? match[2];
+    const desc = lineItems[idx]?.description;
+    return desc ? `${desc}: ${sub}` : `Line ${idx + 1}: ${sub}`;
+  }
+  return field;
 }
 
 export function BidFormPage() {
@@ -440,7 +477,10 @@ export function BidFormPage() {
             <ul className="list-disc space-y-1 pl-5 text-sm">
               {fieldErrors.map((e, idx) => (
                 <li key={`${e.field}-${idx}`}>
-                  <span className="font-medium">{e.field}:</span> {e.message}
+                  <span className="font-medium">
+                    {friendlyFieldLabel(e.field, form.state.pricing.line_items)}:
+                  </span>{' '}
+                  {e.message}
                 </li>
               ))}
             </ul>
