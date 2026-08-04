@@ -17,7 +17,7 @@ import {
   useBidPackageEmailLog,
 } from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
-import { useCloseBidding } from '@/features/bids/hooks/useCloseBidding';
+import { CloseBiddingDialog } from '@/features/bids/components/CloseBiddingDialog';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
@@ -72,7 +72,7 @@ export function BidPackageDetailPage() {
   // Mutations
   const resendBidLinkMutation = useResendBidLink(bidPackageId!);
   const statusMutation = useUpdateInvitationStatus(bidPackageId!);
-  const closeBiddingMutation = useCloseBidding(bidPackageId!, taskId!);
+  // Close-bidding lives in CloseBiddingDialog, which owns its own mutation.
 
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -103,21 +103,6 @@ export function BidPackageDetailPage() {
           message: (err as { message?: string })?.message || 'Failed to resend bid link.',
         });
         setResendingId(null);
-      },
-    });
-  };
-
-  const handleConfirmClose = () => {
-    closeBiddingMutation.mutate(undefined, {
-      onSuccess: () => {
-        toast({ variant: 'success', message: 'Bidding closed. The package is now under evaluation.' });
-        setShowCloseConfirm(false);
-      },
-      onError: (err) => {
-        toast({
-          variant: 'danger',
-          message: (err as { message?: string })?.message || 'Failed to close bidding.',
-        });
       },
     });
   };
@@ -455,42 +440,15 @@ export function BidPackageDetailPage() {
         </p>
       </Modal>
 
-      {/* Close Bidding Confirmation Modal */}
-      <Modal
+      {/* Close Bidding Confirmation */}
+      <CloseBiddingDialog
         isOpen={showCloseConfirm}
-        onClose={() => {
-          if (!closeBiddingMutation.isPending) setShowCloseConfirm(false);
-        }}
-        title="Close bidding"
-        size="sm"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => setShowCloseConfirm(false)}
-              disabled={closeBiddingMutation.isPending}
-            >
-              Keep open
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleConfirmClose}
-              isLoading={closeBiddingMutation.isPending}
-            >
-              Close bidding
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          This stops new bids immediately and moves the package to evaluation.{' '}
-          <strong>
-            {summary.total - summary.submitted} of {summary.total}
-          </strong>{' '}
-          invited vendor{summary.total - summary.submitted === 1 ? '' : 's'} have not submitted yet.
-          Vendors with an in-flight revision request can still submit until their revision deadline.
-        </p>
-      </Modal>
+        onClose={() => setShowCloseConfirm(false)}
+        bidPackageId={bidPackageId!}
+        taskId={taskId!}
+        totalInvited={summary.total}
+        submittedCount={summary.submitted}
+      />
     </div>
   );
 }

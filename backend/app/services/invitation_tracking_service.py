@@ -536,6 +536,12 @@ async def update_invitation_status(
     """Update invitation status. Only declined/no_response are PM-settable.
     Other values (including retired 'expired') → 400.
 
+    Requires the parent package to still be 'open' (409 otherwise), mirroring
+    the guard resend_bid_link already applies. The UI hides this action on a
+    closed package, but the UI is not the gate: a PM holding a page loaded
+    before someone else closed bidding would otherwise still mutate a row on a
+    package where bidding is over.
+
     On a successful transition, all magic_link_tokens for this invitation are
     hard-revoked (is_used=True, revoked_at=NOW(), revoked_by=current_user_id)
     so the vendor can no longer enter the portal via an old link.
@@ -562,6 +568,20 @@ async def update_invitation_status(
     # its own submission history.
     if existing_row.get("status") == "submitted":
         raise TerminalStatusError()
+
+    # Checked after the terminal guard on purpose: a submitted invitation
+    # deserves the more specific "this vendor actually bid" error, and this
+    # skips the extra query in that case.
+    bid_package = _fetch_bid_package(db, existing_row.get("bid_package_id"))
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+    package_status = bid_package.get("status")
+    if package_status != "open":
+        raise InvitationTrackingError(
+            409,
+            f"Cannot change invitation status: the bid package is "
+            f"'{package_status}', not 'open'.",
+        )
 
     updated_resp = (
         db.table("bid_invitations")
