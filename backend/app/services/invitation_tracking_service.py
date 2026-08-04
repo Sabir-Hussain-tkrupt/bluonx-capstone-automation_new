@@ -10,6 +10,10 @@ Read-side and status-management operations on bid packages and invitations:
   that flips overdue sent/opened invitations to 'no_response' and moves an open
   package to 'evaluating'. The same core is called by the lazy read-path here and
   by the daily post-deadline job, so both converge on identical state.
+- Manual early close (close_bidding). Bidding ends by one of two routes — the
+  deadline passing or the PM closing early — and both must leave the same
+  invitation state, so both flip live invitations via the one shared helper
+  (_flip_live_invitations_to_no_response).
 """
 
 from __future__ import annotations
@@ -21,7 +25,11 @@ from uuid import UUID
 # Single source of truth for the award statuses that block a new revision
 # request. Imported (not redefined) so this read-path visibility flag can
 # never diverge from the create_revision_request backend guard.
-from app.services.bid_revision_service import _BLOCKING_AWARD_STATUSES
+from app.services.bid_revision_service import (
+    _BLOCKING_AWARD_STATUSES,
+    cancel_revision_request,
+    list_revision_requests_for_package,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +145,23 @@ def _fetch_bid_package(db, bid_package_id: UUID) -> dict | None:
         .select("*, tasks(name), bid_templates(*)")
         .eq("id", str(bid_package_id))
         .single()
+        .execute()
+    )
+    return _unwrap_one(resp.data)
+
+
+def _fetch_user(db, user_id) -> dict | None:
+    """Look up a single user's display name. Deliberately a separate query
+    rather than a join: bid_packages has two FKs to users (created_by and
+    cancelled_by), which makes a bare PostgREST embed on that table ambiguous.
+    Returns None when the row is gone rather than raising."""
+    if not user_id:
+        return None
+    resp = (
+        db.table("users")
+        .select("id, full_name")
+        .eq("id", str(user_id))
+        .limit(1)
         .execute()
     )
     return _unwrap_one(resp.data)
@@ -317,6 +342,31 @@ def _transform_document(row: dict) -> dict:
 # ── Service functions ─────────────────────────────────────────────────────
 
 
+def _flip_live_invitations_to_no_response(*, bid_package_id, db, now: str) -> int:
+    """Flip every 'sent'/'opened' invitation on this package to 'no_response'.
+
+    Shared by the two routes that end bidding — the deadline transition and the
+    PM's early close — so both leave identical invitation state. Kept as one
+    helper precisely so they cannot drift apart.
+
+    Idempotent: a package with nothing live writes nothing. Returns the count
+    flipped.
+    """
+    invitations = _fetch_invitations(db, bid_package_id)
+    count = sum(
+        1 for inv in invitations if inv.get("status") in _TIMED_OUT_SOURCE_STATUSES
+    )
+    if count > 0:
+        (
+            db.table("bid_invitations")
+            .update({"status": "no_response", "updated_at": now})
+            .eq("bid_package_id", str(bid_package_id))
+            .in_("status", list(_TIMED_OUT_SOURCE_STATUSES))
+            .execute()
+        )
+    return count
+
+
 def _apply_overdue_transition(*, bid_package: dict, db) -> dict:
     """Shared, idempotent deadline transition (the single source of truth).
 
@@ -346,19 +396,9 @@ def _apply_overdue_transition(*, bid_package: dict, db) -> dict:
     bid_package_id = bid_package.get("id")
     now = _now_iso()
 
-    invitations = _fetch_invitations(db, bid_package_id)
-    no_response_count = sum(
-        1 for inv in invitations if inv.get("status") in _TIMED_OUT_SOURCE_STATUSES
+    result["no_response_count"] = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
     )
-    if no_response_count > 0:
-        (
-            db.table("bid_invitations")
-            .update({"status": "no_response", "updated_at": now})
-            .eq("bid_package_id", str(bid_package_id))
-            .in_("status", list(_TIMED_OUT_SOURCE_STATUSES))
-            .execute()
-        )
-    result["no_response_count"] = no_response_count
 
     # Only an 'open' package moves; an 'evaluating' one (manually closed early, or
     # already advanced) keeps its status while its lingering rows still converge.
@@ -386,11 +426,20 @@ async def sweep_overdue_invitations(*, bid_package_id: UUID, db) -> dict:
 
 async def close_bidding(*, bid_package_id: UUID, db) -> dict:
     """Manual early close (PM action): open → 'evaluating'. Allowed only from
-    'open' (409 otherwise), both before and after the deadline. New bid inflow is
-    sealed by the existing `status != 'open'` gates — no token revocation and no
-    invitation expiry here (the deadline sweep owns invitation expiry).
+    'open' (409 otherwise), both before and after the deadline.
 
-    Returns {"id", "status"}.
+    Converges invitations the same way the deadline transition does: every
+    'sent'/'opened' row becomes 'no_response'. Both routes to 'evaluating' must
+    leave identical state — otherwise an early close leaves rows reading 'sent'
+    until the original deadline passes, while nobody can actually bid.
+    'no_response' is the terminal "invited, did not bid" status and covers a
+    round ended early just as it covers one that timed out.
+
+    No token revocation: the `status != 'open'` gates in vendor_auth and
+    assert_package_open_and_before_deadline already lock vendors out on the
+    status flip alone, including holders of an unexpired vendor JWT.
+
+    Returns {"id", "status", "no_response_count"}.
     """
     bid_package = _fetch_bid_package(db, bid_package_id)
     if bid_package is None:
@@ -403,13 +452,115 @@ async def close_bidding(*, bid_package_id: UUID, db) -> dict:
             f"Cannot close bidding: the package is '{current_status}', not 'open'.",
         )
 
+    now = _now_iso()
+    no_response_count = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
+    )
+
     (
         db.table("bid_packages")
-        .update({"status": "evaluating", "updated_at": _now_iso()})
+        .update({"status": "evaluating", "updated_at": now})
         .eq("id", str(bid_package_id))
         .execute()
     )
-    return {"id": str(bid_package_id), "status": "evaluating"}
+    return {
+        "id": str(bid_package_id),
+        "status": "evaluating",
+        "no_response_count": no_response_count,
+    }
+
+
+_CANCELLABLE_PACKAGE_STATUSES = ("open", "evaluating")
+
+
+async def cancel_bid_package(
+    *, bid_package_id: UUID, cancelled_by: UUID, db
+) -> dict:
+    """Void a bidding round (open | evaluating → 'cancelled').
+
+    'evaluating' is deliberately cancellable: it is the only escape from a round
+    closed early by mistake, since nothing reopens a package. 'closed' is
+    excluded (it is only ever set on award acceptance) and re-cancelling is 409.
+
+    Submitted bids are preserved as audit history — cancelling makes them
+    unawardable ('cancelled' is absent from _AWARDABLE_PACKAGE_STATUSES) rather
+    than deleting anything.
+
+    Pending revision requests MUST be cancelled here. Ordinary bid access dies
+    with the status flip via assert_package_open_and_before_deadline, but a
+    revision token is validated against its own status/deadline and explicitly
+    NOT the package status (see assert_revision_request_active), so a vendor
+    mid-revision could otherwise still submit into a voided round.
+
+    Order is guards → revisions → invitations → package flip. The flip goes last
+    so a mid-way failure leaves a still-open package that the deadline sweep
+    reconciles, never a cancelled package with live revision tokens.
+
+    NOTE: the 'no_response' rows this writes belong to a round the PM voided, not
+    to vendors who ignored an invitation. Any future vendor response-rate metric
+    must exclude invitations whose package is 'cancelled'.
+
+    Returns {"id", "status", "no_response_count", "revisions_cancelled"}.
+    """
+    bid_package = _fetch_bid_package(db, bid_package_id)
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+
+    current_status = bid_package.get("status")
+    if current_status not in _CANCELLABLE_PACKAGE_STATUSES:
+        raise InvitationTrackingError(
+            409,
+            f"Cannot cancel: the package is '{current_status}'. Only "
+            f"{' or '.join(_CANCELLABLE_PACKAGE_STATUSES)} packages can be cancelled.",
+        )
+
+    # An awarded task owns an award → contract → milestones chain; voiding the
+    # round underneath it would orphan that chain.
+    if _task_has_active_award(db, bid_package.get("task_id")):
+        raise InvitationTrackingError(
+            409,
+            "Cannot cancel: this task has already been awarded.",
+        )
+
+    # Loop the single-request helper rather than a bulk update: it carries the
+    # .eq("status","pending") TOCTOU guard and revokes each request's tokens.
+    revisions_cancelled = 0
+    for revision in list_revision_requests_for_package(
+        db, bid_package_id=bid_package_id
+    ):
+        if getattr(revision, "status", None) != "pending":
+            continue
+        cancel_revision_request(
+            db,
+            revision_request_id=revision.id,
+            cancelled_by=cancelled_by,
+        )
+        revisions_cancelled += 1
+
+    now = _now_iso()
+    # The deadline sweep skips cancelled packages, so rows left live here would
+    # stay stale forever. Same helper the deadline path and close_bidding use.
+    no_response_count = _flip_live_invitations_to_no_response(
+        bid_package_id=bid_package_id, db=db, now=now
+    )
+
+    (
+        db.table("bid_packages")
+        .update({
+            "status": "cancelled",
+            "cancelled_by": str(cancelled_by),
+            "cancelled_at": now,
+            "updated_at": now,
+        })
+        .eq("id", str(bid_package_id))
+        .execute()
+    )
+    return {
+        "id": str(bid_package_id),
+        "status": "cancelled",
+        "no_response_count": no_response_count,
+        "revisions_cancelled": revisions_cancelled,
+    }
 
 
 async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
@@ -461,9 +612,23 @@ async def get_bid_package_detail(*, bid_package_id: UUID, db) -> dict:
     tasks_join = bid_package.get("tasks") or {}
     task_name = tasks_join.get("name") if isinstance(tasks_join, dict) else None
 
+    # Cancellation attribution. Resolved with an explicit lookup, NOT a
+    # PostgREST embed: bid_packages has two FKs to users (created_by and
+    # cancelled_by), so a bare users(...) embed on this table is ambiguous.
+    # Guarded on status so a normal package costs no extra query. A missing
+    # user row (soft-deleted, or FK nulled) leaves the name None and the UI
+    # falls back to showing the date alone.
+    cancelled_by_name = None
+    if bid_package.get("status") == "cancelled" and bid_package.get("cancelled_by"):
+        canceller = _fetch_user(db, bid_package["cancelled_by"])
+        if canceller:
+            cancelled_by_name = canceller.get("full_name")
+
     return {
         "id": bid_package.get("id"),
         "task_name": task_name,
+        "cancelled_at": bid_package.get("cancelled_at"),
+        "cancelled_by_name": cancelled_by_name,
         "round_number": bid_package.get("round_number"),
         "deadline": bid_package.get("deadline"),
         "status": bid_package.get("status"),
@@ -499,6 +664,12 @@ async def update_invitation_status(
     """Update invitation status. Only declined/no_response are PM-settable.
     Other values (including retired 'expired') → 400.
 
+    Requires the parent package to still be 'open' (409 otherwise), mirroring
+    the guard resend_bid_link already applies. The UI hides this action on a
+    closed package, but the UI is not the gate: a PM holding a page loaded
+    before someone else closed bidding would otherwise still mutate a row on a
+    package where bidding is over.
+
     On a successful transition, all magic_link_tokens for this invitation are
     hard-revoked (is_used=True, revoked_at=NOW(), revoked_by=current_user_id)
     so the vendor can no longer enter the portal via an old link.
@@ -525,6 +696,20 @@ async def update_invitation_status(
     # its own submission history.
     if existing_row.get("status") == "submitted":
         raise TerminalStatusError()
+
+    # Checked after the terminal guard on purpose: a submitted invitation
+    # deserves the more specific "this vendor actually bid" error, and this
+    # skips the extra query in that case.
+    bid_package = _fetch_bid_package(db, existing_row.get("bid_package_id"))
+    if bid_package is None:
+        raise BidPackageNotFoundError()
+    package_status = bid_package.get("status")
+    if package_status != "open":
+        raise InvitationTrackingError(
+            409,
+            f"Cannot change invitation status: the bid package is "
+            f"'{package_status}', not 'open'.",
+        )
 
     updated_resp = (
         db.table("bid_invitations")

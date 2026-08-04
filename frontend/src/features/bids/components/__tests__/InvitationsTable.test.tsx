@@ -21,7 +21,13 @@ function makeInvitation(overrides: Partial<BidInvitation> = {}): BidInvitation {
   };
 }
 
-function renderTable(invitations: BidInvitation[], onViewBid?: (id: string) => void) {
+function renderTable(
+  invitations: BidInvitation[],
+  onViewBid?: (id: string) => void,
+  // Most cases describe a live package; the closed-package cases opt out
+  // explicitly. The component itself defaults this to false (fail closed).
+  bidPackageOpen = true,
+) {
   return render(
     <InvitationsTable
       invitations={invitations}
@@ -31,6 +37,7 @@ function renderTable(invitations: BidInvitation[], onViewBid?: (id: string) => v
       onViewBid={onViewBid}
       resendingId={null}
       updatingId={null}
+      bidPackageOpen={bidPackageOpen}
     />,
   );
 }
@@ -98,7 +105,10 @@ describe('InvitationsTable — View Bid action', () => {
 });
 
 describe('InvitationsTable — Request Revision visibility', () => {
-  function renderWithRevision(invitation: BidInvitation) {
+  function renderWithRevision(
+    invitation: BidInvitation,
+    bidPackageOpen = true,
+  ) {
     return render(
       <InvitationsTable
         invitations={[invitation]}
@@ -108,7 +118,7 @@ describe('InvitationsTable — Request Revision visibility', () => {
         resendingId={null}
         updatingId={null}
         onRequestRevision={vi.fn()}
-        bidPackageOpen
+        bidPackageOpen={bidPackageOpen}
       />,
     );
   }
@@ -133,6 +143,40 @@ describe('InvitationsTable — Request Revision visibility', () => {
         bid_submission_id: 'sub-1',
         is_awarded: true,
       }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Request Revision' }),
+    ).toBeNull();
+  });
+
+  it('still renders Request Revision once the package is no longer open', () => {
+    // create_revision_request has no package-status guard, and evaluating is
+    // precisely when a PM reviews bids and asks for a revision. The button must
+    // track the backend, not the package status.
+    renderWithRevision(
+      makeInvitation({
+        status: 'submitted',
+        bid_submission_id: 'sub-1',
+        is_awarded: false,
+      }),
+      false,
+    );
+    expect(
+      screen.getAllByRole('button', { name: 'Request Revision' }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('hides Request Revision on a closed package once the task is awarded', () => {
+    // Guards the risk the alignment introduces: is_awarded is task-scoped, so
+    // a non-winning row on an awarded package must not offer an action the
+    // backend would reject with 409.
+    renderWithRevision(
+      makeInvitation({
+        status: 'submitted',
+        bid_submission_id: 'sub-1',
+        is_awarded: true,
+      }),
+      false,
     );
     expect(
       screen.queryByRole('button', { name: 'Request Revision' }),
@@ -178,11 +222,84 @@ describe('InvitationsTable — Resend / Send Bid Link action', () => {
         onMarkDeclined={vi.fn()}
         resendingId={null}
         updatingId={null}
+        bidPackageOpen
       />,
     );
 
     const buttons = screen.getAllByRole('button', { name: 'Send Bid Link' });
     await user.click(buttons[0]);
     expect(onResend).toHaveBeenCalledWith('inv-fail');
+  });
+});
+
+describe('InvitationsTable — actions are gated on the package being open', () => {
+  // resend_bid_link and update_invitation_status both refuse a non-open
+  // package, so offering these actions produces a guaranteed error. This is
+  // the state a package lands in after the deadline passes or the PM closes
+  // bidding early: rows converge to no_response on an 'evaluating' package.
+  const RESENDABLE: InvitationStatus[] = [
+    'no_response',
+    'pending_send',
+    'send_failed',
+    'sent',
+    'opened',
+  ];
+
+  it.each(RESENDABLE)(
+    'hides the resend action for a %s row when the package is not open',
+    (status) => {
+      renderTable([makeInvitation({ status })], undefined, false);
+
+      expect(screen.queryByRole('button', { name: 'Resend Bid Link' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Send Bid Link' })).toBeNull();
+    },
+  );
+
+  it.each(RESENDABLE)(
+    'still shows the resend action for a %s row while the package is open',
+    (status) => {
+      renderTable([makeInvitation({ status })], undefined, true);
+
+      const resend = screen.queryAllByRole('button', { name: 'Resend Bid Link' });
+      const send = screen.queryAllByRole('button', { name: 'Send Bid Link' });
+      expect(resend.length + send.length).toBeGreaterThan(0);
+    },
+  );
+
+  it.each(['sent', 'opened'] as InvitationStatus[])(
+    'hides Mark Declined for a %s row when the package is not open',
+    (status) => {
+      renderTable([makeInvitation({ status })], undefined, false);
+
+      expect(screen.queryByRole('button', { name: 'Mark Declined' })).toBeNull();
+    },
+  );
+
+  it.each(['sent', 'opened'] as InvitationStatus[])(
+    'still shows Mark Declined for a %s row while the package is open',
+    (status) => {
+      renderTable([makeInvitation({ status })], undefined, true);
+
+      expect(
+        screen.getAllByRole('button', { name: 'Mark Declined' }).length,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  it('defaults to closed when bidPackageOpen is omitted', () => {
+    // Fail-closed: an omitted prop must never expose an action the API refuses.
+    render(
+      <InvitationsTable
+        invitations={[makeInvitation({ status: 'sent' })]}
+        isLoading={false}
+        onResendBidLink={vi.fn()}
+        onMarkDeclined={vi.fn()}
+        resendingId={null}
+        updatingId={null}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Resend Bid Link' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Mark Declined' })).toBeNull();
   });
 });

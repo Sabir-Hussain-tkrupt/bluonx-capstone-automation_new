@@ -308,6 +308,8 @@ CREATE TABLE bid_packages (
 
   bid_template_id UUID        REFERENCES bid_templates(id) ON DELETE RESTRICT,
   created_by    UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  cancelled_by  UUID          REFERENCES users(id) ON DELETE SET NULL,
+  cancelled_at  TIMESTAMPTZ,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -317,6 +319,8 @@ COMMENT ON COLUMN bid_packages.round_number IS 'Auto-set by trigger: round 1 = f
 COMMENT ON COLUMN bid_packages.scope_of_work_document_id IS 'PM-uploaded Scope of Work for this round (a project_documents row, document_kind=scope_of_work, project-documents bucket). One SoW per package; not re-uploaded on per-vendor revision. Mandatory at the application layer (required request field + service check); nullable in-DB only to avoid backfilling pre-feature rows. ON DELETE RESTRICT protects it as a contract record.';
 COMMENT ON COLUMN bid_packages.instructions IS 'Optional PM-supplied bid-submission instructions shown to vendors in the bid portal and invitation email. Distinct from tasks.description (scope of work). Examples: include mobilization as separate line item, bid held firm for 30 days, unit prices all-inclusive.';
 COMMENT ON COLUMN bid_packages.desired_start_date IS 'PM-communicated target start date for this bidding round. NULL = flexible/none; timeline dimension neutralized in scoring when NULL.';
+COMMENT ON COLUMN bid_packages.cancelled_by IS 'Who voided this round (status = cancelled). NULL for every other status. ON DELETE SET NULL (not RESTRICT like created_by) so removing a user never blocks the row; the UI falls back to showing cancelled_at alone. NOTE: this is the SECOND FK from bid_packages to users, so a bare users(...) PostgREST embed on this table is ambiguous — resolve the name with an explicit lookup instead.';
+COMMENT ON COLUMN bid_packages.cancelled_at IS 'When the round was voided. Paired with cancelled_by; both set together by the cancel action and never written by any other path.';
 
 -- Junction: project documents shared with a bid package
 CREATE TABLE bid_package_documents (
@@ -351,7 +355,7 @@ CREATE TABLE bid_invitations (
 );
 
 COMMENT ON TABLE bid_invitations IS 'Individual invitation per vendor per bid package. Tracks delivery and response status.';
-COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent. opened = vendor viewed the portal; submitted/declined = vendor outcomes. no_response is the SINGLE terminal "invited, no bid by the deadline" status, written by the shared deadline transition (lazy read-path + daily post-deadline job converge on it). expired is retained in the CHECK for legacy rows only and is no longer written by any code path.';
+COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent. opened = vendor viewed the portal; submitted/declined = vendor outcomes. no_response is the SINGLE terminal "invited, did not bid" status. It is written by BOTH routes out of an open package: the shared deadline transition (lazy read-path + daily post-deadline job converge on it) and the PM manually closing bidding early (close_bidding). Both call the same helper so the two routes leave identical state. expired is retained in the CHECK for legacy rows only and is no longer written by any code path.';
 
 
 -- Magic link tokens for vendor bid portal access

@@ -22,8 +22,10 @@ import pytest
 
 # Import will fail until implementation lands — expected for test-first.
 from app.services.invitation_tracking_service import (
+    BidPackageNotFoundError,
     InvalidStatusError,
     InvitationNotFoundError,
+    InvitationTrackingError,
     TerminalStatusError,
     update_invitation_status,
 )
@@ -37,9 +39,18 @@ from .conftest import (
 CURRENT_USER_ID = uuid4()
 
 
-def _client_with_invitation(invitation: dict, updated_invitation: dict = None):
+def _client_with_invitation(
+    invitation: dict,
+    updated_invitation: dict = None,
+    package_status: str = "open",
+):
     """Return a mock client that finds the given invitation and stages
-    `updated_invitation` as the result of the update."""
+    `updated_invitation` as the result of the update.
+
+    Also serves the parent bid_packages row, which the service now reads to
+    refuse status changes on a non-open package. Defaults to 'open' so the
+    existing success-path cases keep describing a live package.
+    """
     client = MagicMock()
     result_row = updated_invitation or invitation
 
@@ -50,6 +61,13 @@ def _client_with_invitation(invitation: dict, updated_invitation: dict = None):
             chain.update.return_value = chain
             chain.execute.return_value = MagicMock(data=[result_row])
             return chain
+        if name == "bid_packages":
+            return build_chain(
+                data=[{
+                    "id": invitation.get("bid_package_id"),
+                    "status": package_status,
+                }]
+            )
         return build_chain(data=[])
 
     client.table.side_effect = table_side_effect
@@ -195,11 +213,17 @@ class TestResponseContainsUpdatedInvitation:
 
 
 def _client_with_token_capture(
-    invitation: dict, updated_invitation: dict = None
+    invitation: dict,
+    updated_invitation: dict = None,
+    package_status: str = "open",
 ) -> tuple[MagicMock, list[dict]]:
     """Mock client that returns the invitation on SELECT, captures any
     magic_link_tokens UPDATE payloads, and returns the updated row on the
-    bid_invitations UPDATE."""
+    bid_invitations UPDATE.
+
+    Serves the parent package too (default 'open'), so these cases exercise the
+    revocation path rather than tripping the package guard.
+    """
     client = MagicMock()
     result_row = updated_invitation or invitation
     token_updates: list[dict] = []
@@ -211,6 +235,14 @@ def _client_with_token_capture(
             chain = build_chain(data=[invitation])
             chain.update.return_value = build_chain(data=[result_row])
             return chain
+
+        if name == "bid_packages":
+            return build_chain(
+                data=[{
+                    "id": invitation.get("bid_package_id"),
+                    "status": package_status,
+                }]
+            )
 
         if name == "magic_link_tokens":
             token_chain = build_chain(data=[])
@@ -307,3 +339,91 @@ class TestTokenRevocationOnDecline:
             )
 
         assert len(token_updates) == 0
+
+
+class TestRequiresOpenPackage:
+    """A PM status change is refused once bidding is over.
+
+    The UI hides Mark Declined on a non-open package, but the UI is not the
+    gate: a page loaded before another PM closed bidding would otherwise still
+    mutate the row. Mirrors the guard resend_bid_link already applies.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("package_status", ["evaluating", "closed", "cancelled"])
+    @pytest.mark.parametrize("new_status", ["declined", "no_response"])
+    async def test_rejects_when_package_not_open(
+        self, base_invitation, package_status, new_status
+    ):
+        client = _client_with_invitation(
+            base_invitation, package_status=package_status
+        )
+
+        with pytest.raises(InvitationTrackingError) as ei:
+            await update_invitation_status(
+                invitation_id=INVITATION_IDS["sent"],
+                new_status=new_status,
+                current_user_id=CURRENT_USER_ID,
+                db=client,
+            )
+
+        assert ei.value.status_code == 409
+        assert package_status in str(ei.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_tokens_not_revoked_when_package_closed(self, base_invitation):
+        """The guard must fire before any write — no status update, no
+        revocation. This is what proves it is a gate and not a late check."""
+        client, token_updates = _client_with_token_capture(
+            base_invitation, package_status="evaluating"
+        )
+
+        with pytest.raises(InvitationTrackingError):
+            await update_invitation_status(
+                invitation_id=INVITATION_IDS["sent"],
+                new_status="declined",
+                current_user_id=CURRENT_USER_ID,
+                db=client,
+            )
+
+        assert len(token_updates) == 0
+
+    @pytest.mark.asyncio
+    async def test_missing_package_is_404(self, base_invitation):
+        """Defensive: an invitation whose package row is gone must not fall
+        through to a successful update."""
+        client = MagicMock()
+
+        def table_side_effect(name: str):
+            if name == "bid_invitations":
+                chain = build_chain(data=[base_invitation])
+                chain.update.return_value = build_chain(data=[base_invitation])
+                return chain
+            return build_chain(data=[])
+
+        client.table.side_effect = table_side_effect
+
+        with pytest.raises(BidPackageNotFoundError):
+            await update_invitation_status(
+                invitation_id=INVITATION_IDS["sent"],
+                new_status="declined",
+                current_user_id=CURRENT_USER_ID,
+                db=client,
+            )
+
+    @pytest.mark.asyncio
+    async def test_submitted_still_reports_terminal_not_package_state(
+        self, base_invitation
+    ):
+        """Ordering guard: a submitted invitation on a closed package reports
+        the more specific 'this vendor actually bid' error."""
+        submitted = {**base_invitation, "status": "submitted"}
+        client = _client_with_invitation(submitted, package_status="evaluating")
+
+        with pytest.raises(TerminalStatusError):
+            await update_invitation_status(
+                invitation_id=INVITATION_IDS["sent"],
+                new_status="declined",
+                current_user_id=CURRENT_USER_ID,
+                db=client,
+            )

@@ -17,7 +17,9 @@ import {
   useBidPackageEmailLog,
 } from '@/features/bids/hooks/useBidPackageEmailLog';
 import { useResendBidLink } from '@/features/bids/hooks/useResendBidLink';
-import { useCloseBidding } from '@/features/bids/hooks/useCloseBidding';
+import { CloseBiddingDialog } from '@/features/bids/components/CloseBiddingDialog';
+import { CancelBidPackageDialog } from '@/features/bids/components/CancelBidPackageDialog';
+import { CancelledPackageNotice } from '@/features/bids/components/CancelledPackageNotice';
 import { useUpdateInvitationStatus } from '@/features/bids/hooks/useUpdateInvitationStatus';
 import { useCountdown } from '@/features/bids/hooks/useCountdown';
 import { InvitationsTable } from '@/features/bids/components/InvitationsTable';
@@ -60,6 +62,13 @@ export function BidPackageDetailPage() {
     return map;
   }, [revisionRequests]);
 
+  // Cancelling the package cancels these server-side, so the confirm dialog
+  // warns about them.
+  const pendingRevisionCount = useMemo(
+    () => (revisionRequests ?? []).filter((r) => r.status === 'pending').length,
+    [revisionRequests],
+  );
+
   // Email log — lazy loaded, paginated
   const [showEmailLog, setShowEmailLog] = useState(false);
   const [emailLogPage, setEmailLogPage] = useState(1);
@@ -72,7 +81,7 @@ export function BidPackageDetailPage() {
   // Mutations
   const resendBidLinkMutation = useResendBidLink(bidPackageId!);
   const statusMutation = useUpdateInvitationStatus(bidPackageId!);
-  const closeBiddingMutation = useCloseBidding(bidPackageId!, taskId!);
+  // Close-bidding lives in CloseBiddingDialog, which owns its own mutation.
 
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -103,21 +112,6 @@ export function BidPackageDetailPage() {
           message: (err as { message?: string })?.message || 'Failed to resend bid link.',
         });
         setResendingId(null);
-      },
-    });
-  };
-
-  const handleConfirmClose = () => {
-    closeBiddingMutation.mutate(undefined, {
-      onSuccess: () => {
-        toast({ variant: 'success', message: 'Bidding closed. The package is now under evaluation.' });
-        setShowCloseConfirm(false);
-      },
-      onError: (err) => {
-        toast({
-          variant: 'danger',
-          message: (err as { message?: string })?.message || 'Failed to close bidding.',
-        });
       },
     });
   };
@@ -216,7 +210,9 @@ export function BidPackageDetailPage() {
               Close Bidding
             </Button>
           )}
-          {bp.status === 'open' && (
+          {/* Cancellable from 'evaluating' too: nothing reopens a package, so
+              this is the only way out of a round closed early by mistake. */}
+          {(bp.status === 'open' || bp.status === 'evaluating') && (
             <Button
               variant="danger"
               size="sm"
@@ -227,6 +223,13 @@ export function BidPackageDetailPage() {
           )}
         </div>
       </div>
+
+      {bp.status === 'cancelled' && (
+        <CancelledPackageNotice
+          cancelledAt={bp.cancelled_at}
+          cancelledByName={bp.cancelled_by_name}
+        />
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -425,72 +428,25 @@ export function BidPackageDetailPage() {
         </p>
       </Modal>
 
-      {/* Cancel Confirmation Modal */}
-      <Modal
+      {/* Cancel Bid Package Confirmation */}
+      <CancelBidPackageDialog
         isOpen={showCancelConfirm}
         onClose={() => setShowCancelConfirm(false)}
-        title="Cancel Bid Package"
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowCancelConfirm(false)}>
-              Keep Open
-            </Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                // TODO: Implement cancel bid package API call
-                setShowCancelConfirm(false);
-                toast({ variant: 'info', message: 'Cancel bid package is not yet implemented.' });
-              }}
-            >
-              Cancel Bid Package
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          Are you sure you want to cancel this bid package? All pending invitations will be closed
-          out. This action cannot be undone.
-        </p>
-      </Modal>
+        bidPackageId={bidPackageId!}
+        taskId={taskId!}
+        submittedCount={summary.submitted}
+        pendingRevisionCount={pendingRevisionCount}
+      />
 
-      {/* Close Bidding Confirmation Modal */}
-      <Modal
+      {/* Close Bidding Confirmation */}
+      <CloseBiddingDialog
         isOpen={showCloseConfirm}
-        onClose={() => {
-          if (!closeBiddingMutation.isPending) setShowCloseConfirm(false);
-        }}
-        title="Close bidding"
-        size="sm"
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => setShowCloseConfirm(false)}
-              disabled={closeBiddingMutation.isPending}
-            >
-              Keep open
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleConfirmClose}
-              isLoading={closeBiddingMutation.isPending}
-            >
-              Close bidding
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-secondary-600">
-          This stops new bids immediately and moves the package to evaluation.{' '}
-          <strong>
-            {summary.total - summary.submitted} of {summary.total}
-          </strong>{' '}
-          invited vendor{summary.total - summary.submitted === 1 ? '' : 's'} have not submitted yet.
-          Vendors with an in-flight revision request can still submit until their revision deadline.
-        </p>
-      </Modal>
+        onClose={() => setShowCloseConfirm(false)}
+        bidPackageId={bidPackageId!}
+        taskId={taskId!}
+        totalInvited={summary.total}
+        submittedCount={summary.submitted}
+      />
     </div>
   );
 }
