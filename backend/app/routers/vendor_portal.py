@@ -64,6 +64,8 @@ from app.services.vendor_portal_service import (
     build_bid_context,
     build_line_item_rows,
     build_revision_prefill,
+    enforce_attachment_limits,
+    fetch_attachment_usage,
     fetch_attachments,
     fetch_submission_detail,
     fetch_template_items_map,
@@ -890,6 +892,13 @@ async def upload_attachment(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="File exceeds the 10MB size limit.",
         )
+
+    # Per-submission caps: block runaway attachment counts / total size before
+    # doing any storage work. Bounds abuse from a leaked magic link or a
+    # malicious vendor (the JWT-scoped owner is the only caller that reaches
+    # here, but that owner is otherwise unbounded).
+    existing_count, existing_total = fetch_attachment_usage(db, str(submission_id))
+    enforce_attachment_limits(existing_count, existing_total, len(file_bytes))
 
     content_type = file.content_type or "application/octet-stream"
     filename = sanitize_filename(file.filename or "attachment")

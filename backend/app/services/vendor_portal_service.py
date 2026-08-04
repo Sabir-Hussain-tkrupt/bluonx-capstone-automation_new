@@ -769,6 +769,59 @@ def fetch_attachments(db, bid_submission_id: str) -> list[AttachmentResponse]:
     return out
 
 
+# ── Attachment quota (per-submission abuse guard) ─────────────────────────
+
+# A real vendor bid carries a proposal PDF plus a handful of certs / alternates:
+# a few files, occasionally up to ~15. These caps sit well above legitimate use
+# while bounding storage abuse from a leaked/forwarded magic link or a malicious
+# vendor. The per-file 10MB cap lives in the router; these bound the submission
+# as a whole. Tune here if the client's bids run heavier.
+MAX_ATTACHMENTS_PER_SUBMISSION = 20
+MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024  # 50 MB per submission
+
+
+def fetch_attachment_usage(db, bid_submission_id: str) -> tuple[int, int]:
+    """Return (file_count, total_bytes) currently attached to a submission."""
+    resp = (
+        db.table("bid_attachments")
+        .select("file_size")
+        .eq("bid_submission_id", bid_submission_id)
+        .execute()
+    )
+    rows = resp.data or []
+    total = sum(int(r.get("file_size") or 0) for r in rows)
+    return len(rows), total
+
+
+def enforce_attachment_limits(
+    existing_count: int, existing_total_bytes: int, new_size: int
+) -> None:
+    """Block an upload that would breach a per-submission attachment cap.
+
+    Raises 409 (not 422): the file itself is valid, the submission is simply
+    full. Each message names the fix (remove a file first). Pure and testable:
+    the router resolves current usage via `fetch_attachment_usage`.
+    """
+    if existing_count >= MAX_ATTACHMENTS_PER_SUBMISSION:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This bid already has the maximum of "
+                f"{MAX_ATTACHMENTS_PER_SUBMISSION} attachments. "
+                "Remove a file before adding another."
+            ),
+        )
+    if existing_total_bytes + new_size > MAX_ATTACHMENT_TOTAL_BYTES:
+        max_mb = MAX_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Attachments for this bid would exceed the {max_mb}MB total "
+                "limit. Remove a file before adding another."
+            ),
+        )
+
+
 def _format_currency(amount: Decimal | float | str | None) -> str:
     """USD formatting for email receipts. Falls back to '—' for null totals."""
     if amount is None:
