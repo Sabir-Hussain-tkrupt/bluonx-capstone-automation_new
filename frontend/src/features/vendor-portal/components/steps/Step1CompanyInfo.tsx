@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { FileText } from 'lucide-react';
 import { Button, Card, FormField, TextInput, useToast } from '@/components/ui';
 import { useBidContext } from '../../hooks/useBidContext';
@@ -34,11 +35,23 @@ export function Step1CompanyInfo({
 }: Step1CompanyInfoProps) {
   const { vendor, project, task, bid_package, project_documents } = useBidContext();
   const { toast } = useToast();
+  const [attempted, setAttempted] = useState(false);
   const requiredStart = !!bid_package.desired_start_date;
   // Signature must match the vendor's company name. Only surface the error
-  // once the vendor has typed something (don't shout on an untouched field).
+  // once the vendor has typed something (don't shout on an untouched field)
+  // or once they've tried to advance.
   const sigTouched = sowAttestedName.trim().length > 0;
   const sigMatches = signatureMatches(sowAttestedName, vendor.company_name);
+  // Gate "Next" like Steps 2/3 do: the SoW signature is always required and
+  // the proposed start date is required when the package sets a desired date.
+  const startMissing = requiredStart && !proposedStartDate;
+  const canProceed = sigMatches && !startMissing;
+
+  function handleNext() {
+    setAttempted(true);
+    if (!canProceed) return;
+    onNext();
+  }
 
   async function handleDownload(documentId: string, fileName: string) {
     try {
@@ -108,6 +121,9 @@ export function Step1CompanyInfo({
           label="Proposed start date"
           htmlFor="proposed-start-date"
           required={requiredStart}
+          error={
+            attempted && startMissing ? 'Proposed start date is required.' : undefined
+          }
           hint={
             requiredStart
               ? 'Pre-filled with the desired date; change it if you cannot hit that target.'
@@ -119,6 +135,7 @@ export function Step1CompanyInfo({
             id="proposed-start-date"
             value={proposedStartDate ?? ''}
             required={requiredStart}
+            error={attempted && startMissing}
             onChange={(e) => {
               const v = e.target.value;
               onUpdateProposedStartDate(v === '' ? null : v);
@@ -166,8 +183,10 @@ export function Step1CompanyInfo({
           required
           hint="Type your company name exactly as shown to confirm you have reviewed the Scope of Work and your bid reflects it."
           error={
-            sigTouched && !sigMatches
-              ? 'This must exactly match your company name to sign.'
+            (sigTouched || attempted) && !sigMatches
+              ? sigTouched
+                ? 'This must exactly match your company name to sign.'
+                : 'Please sign by typing your company name to attest to the Scope of Work.'
               : undefined
           }
         >
@@ -177,7 +196,7 @@ export function Step1CompanyInfo({
             autoComplete="off"
             placeholder={vendor.company_name.toUpperCase()}
             value={sowAttestedName}
-            error={sigTouched && !sigMatches}
+            error={(sigTouched || attempted) && !sigMatches}
             onChange={(e) => onUpdateSowAttestation(e.target.value)}
           />
         </FormField>
@@ -226,7 +245,7 @@ export function Step1CompanyInfo({
         <Button type="button" variant="outline" onClick={onSaveDraft}>
           Save Draft
         </Button>
-        <Button type="button" variant="primary" onClick={onNext}>
+        <Button type="button" variant="primary" onClick={handleNext}>
           Next: Pricing →
         </Button>
       </div>
