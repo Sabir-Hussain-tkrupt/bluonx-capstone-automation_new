@@ -5,7 +5,7 @@ import { ROUTES } from '@/constants/routes';
 import { BidDeadlineCountdown } from '../components/BidDeadlineCountdown';
 import { DeadlineExpiredModal } from '../components/DeadlineExpiredModal';
 import { DraftIndicator } from '../components/DraftIndicator';
-import { ProgressStepper } from '../components/ProgressStepper';
+import { PORTAL_STEPS, ProgressStepper } from '../components/ProgressStepper';
 import { Step1CompanyInfo } from '../components/steps/Step1CompanyInfo';
 import { Step2Pricing } from '../components/steps/Step2Pricing';
 import { Step3Documents } from '../components/steps/Step3Documents';
@@ -93,6 +93,9 @@ export function BidFormPage() {
   // In-flight ensureSubmissionId promise — dedupes concurrent upload-
   // initiated draft creations from racing the auto-save POST.
   const creatingDraftRef = useRef<Promise<string> | null>(null);
+  // Focus target for step changes (a11y): moving focus here announces the
+  // new step (via aria-label) and gives keyboard users a fresh anchor.
+  const stepContainerRef = useRef<HTMLDivElement>(null);
 
   // Hydrate on first mount. Initial path: from existing_draft if any.
   // Revision path: resume an in-progress revision draft if the backend
@@ -236,8 +239,10 @@ export function BidFormPage() {
   const goToStep = useCallback(
     (step: StepIndex) => {
       form.setStep(step);
-      // Focus main heading / top for a11y + mobile UX.
+      // Move keyboard/SR focus into the new step (its aria-label names the
+      // step), then scroll to the top for mobile UX.
       requestAnimationFrame(() => {
+        stepContainerRef.current?.focus({ preventScroll: true });
         const main = document.getElementById('portal-main');
         main?.scrollTo({ top: 0, behavior: 'smooth' });
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -443,7 +448,14 @@ export function BidFormPage() {
         </div>
       )}
 
-      <div className="mt-6">
+      <div
+        ref={stepContainerRef}
+        tabIndex={-1}
+        aria-label={`Step ${form.state.step}: ${
+          PORTAL_STEPS.find((s) => s.index === form.state.step)?.label ?? ''
+        }`}
+        className="mt-6 focus:outline-none"
+      >
         {form.state.step === 1 && (
           <Step1CompanyInfo
             onNext={() => handleNextFromStep(1)}
