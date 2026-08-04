@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { MilestoneStatusBadge } from '@/features/milestones/components/MilestoneStatusBadge';
 import { buildMilestonePath } from '@/features/milestones/utils/buildMilestonePath';
-import { pauseSeverity, formatStalled } from '@/features/milestones/utils/pauseSeverity';
+import { formatStalled } from '@/features/milestones/utils/pauseSeverity';
 import {
   usePausedMilestones,
   usePausedMilestonesCount,
@@ -13,12 +13,17 @@ import type { MilestoneOverviewRow } from '@/features/milestones/api/milestoneOv
 
 const MAX_ROWS = 5;
 
-const severityAccent: Record<string, { border: string; days: string }> = {
-  none: { border: 'border-l-secondary-200', days: 'text-secondary-600' },
-  neutral: { border: 'border-l-secondary-200', days: 'text-secondary-600' },
-  amber: { border: 'border-l-warning-400', days: 'text-warning-700' },
-  red: { border: 'border-l-danger-500', days: 'text-danger-700' },
+/**
+ * Left-border/days-text color, keyed off the milestone's real `status` (not a
+ * day-count heuristic) so the row accent always agrees with the status pill
+ * next to it. Any status outside the two paused states falls back to neutral
+ * rather than an arbitrary color.
+ */
+const statusAccent: Record<string, { border: string; days: string }> = {
+  delayed: { border: 'border-l-warning-400', days: 'text-warning-700' },
+  unresponsive: { border: 'border-l-danger-500', days: 'text-danger-700' },
 };
+const defaultAccent = { border: 'border-l-secondary-200', days: 'text-secondary-600' };
 
 function AttentionRow({
   row,
@@ -27,7 +32,7 @@ function AttentionRow({
   row: MilestoneOverviewRow;
   isMine: boolean;
 }) {
-  const accent = severityAccent[pauseSeverity(row.days_paused)] ?? severityAccent.neutral;
+  const accent = statusAccent[row.status] ?? defaultAccent;
   return (
     <li>
       <Link
@@ -36,7 +41,7 @@ function AttentionRow({
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <MilestoneStatusBadge status={row.status} size="sm" />
+            <MilestoneStatusBadge status={row.status} size="sm" minWidth />
             <p className="truncate text-sm font-medium text-secondary-900">
               {row.milestone_name}
             </p>

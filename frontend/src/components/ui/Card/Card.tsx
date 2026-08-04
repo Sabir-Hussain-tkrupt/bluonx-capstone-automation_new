@@ -29,7 +29,7 @@ export function Card({
   return (
     <section
       aria-label={title}
-      className={cn('rounded-lg border border-secondary-300 bg-white shadow-sm', className)}
+      className={cn('rounded-lg border border-secondary-200/60 bg-white shadow-sm', className)}
     >
       {hasHeader && (
         <div className="flex items-start justify-between border-b border-secondary-200 px-6 py-4">

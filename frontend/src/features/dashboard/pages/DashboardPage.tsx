@@ -10,15 +10,15 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Card } from '@/components/ui/Card';
 
 function VendorsIcon() {
-  return <Users className="h-6 w-6" aria-hidden="true" />;
+  return <Users className="h-5 w-5" aria-hidden="true" />;
 }
 
 function ProjectsIcon() {
-  return <Folder className="h-6 w-6" aria-hidden="true" />;
+  return <Folder className="h-5 w-5" aria-hidden="true" />;
 }
 
 function SettingsIcon() {
-  return <Settings className="h-6 w-6" aria-hidden="true" />;
+  return <Settings className="h-5 w-5" aria-hidden="true" />;
 }
 
 interface QuickNavCard {
@@ -26,6 +26,8 @@ interface QuickNavCard {
   description: string;
   href: string;
   icon: React.ReactNode;
+  /** Icon color only — background stays neutral so cards don't compete with the stat/attention sections above. */
+  iconColor: string;
   adminOnly?: boolean;
 }
 
@@ -35,18 +37,21 @@ const QUICK_NAV_CARDS: QuickNavCard[] = [
     description: 'Manage vendor profiles, contacts, and trade certifications.',
     href: ROUTES.VENDORS,
     icon: <VendorsIcon />,
+    iconColor: 'text-primary-600',
   },
   {
     title: 'Projects',
     description: 'View and manage development and construction projects.',
     href: ROUTES.PROJECTS,
     icon: <ProjectsIcon />,
+    iconColor: 'text-accent-600',
   },
   {
     title: 'Settings',
     description: 'Manage users, trades, and system configuration.',
     href: ROUTES.SETTINGS,
     icon: <SettingsIcon />,
+    iconColor: 'text-secondary-600',
     adminOnly: true,
   },
 ];
@@ -126,7 +131,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Open Tasks"
-          accent="warning"
+          accent="primary"
           value={
             countsLoading && openTaskCount == null
               ? <StatSkeleton />
@@ -135,7 +140,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Pending Bids"
-          accent="info"
+          accent="primary"
           value={
             countsLoading && pendingBidCount == null
               ? <StatSkeleton />
@@ -144,7 +149,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Active Vendors"
-          accent="success"
+          accent="primary"
           value={
             activeVendorsLoading && activeVendorCount == null
               ? <StatSkeleton />
@@ -162,9 +167,11 @@ export function DashboardPage() {
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {visibleCards.map((card) => (
             <Link key={card.title} to={card.href} className="group block">
-              <Card padding="md" className="transition-shadow group-hover:shadow-md">
+              <Card padding="sm" className="transition-shadow group-hover:shadow-md">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600 transition-colors group-hover:bg-primary-100">
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg bg-secondary-100 transition-colors group-hover:bg-secondary-200 ${card.iconColor}`}
+                  >
                     {card.icon}
                   </span>
                   <h3 className="text-base font-semibold text-secondary-900">{card.title}</h3>
