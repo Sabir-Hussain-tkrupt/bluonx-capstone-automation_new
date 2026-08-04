@@ -145,6 +145,7 @@ def _patch_common(monkeypatch):
 
     monkeypatch.setattr(vp, "_fetch_template_id_for_invitation", _tmpl_id)
     monkeypatch.setattr(vp, "fetch_template_items_map", lambda *_a: {})
+    monkeypatch.setattr(vp, "fetch_template_metadata", lambda *_a: {"is_lump_sum": True})
     monkeypatch.setattr(vp, "load_draft_response", lambda *_a, **_k: _draft_model())
     monkeypatch.setattr(vp, "assert_package_open_and_before_deadline", lambda *_a, **_k: None)
 

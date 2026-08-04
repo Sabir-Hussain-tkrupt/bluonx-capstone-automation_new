@@ -631,6 +631,30 @@ def build_line_item_rows(
     return rows
 
 
+def compute_total_amount(
+    payload_items: list[DraftLineItemInput],
+    template_map: dict[str, dict],
+) -> Decimal:
+    """Sum the server-computed line totals for a structured submission.
+
+    The single server-side source of truth for a structured bid's total:
+    derived from the same per-line math as `build_line_item_rows` (via
+    `compute_line_total`), so the stored `total_amount` can never drift from
+    the persisted line totals. Used on draft create/update instead of trusting
+    the client's float. Unknown template ids are skipped here — the 422 for
+    them is raised by `build_line_item_rows`.
+    """
+    total = Decimal("0")
+    for li in payload_items:
+        tpl = template_map.get(str(li.template_item_id))
+        if not tpl:
+            continue
+        total += compute_line_total(
+            tpl["item_type"], li.quantity, li.unit_price, li.lump_sum_amount
+        )
+    return total
+
+
 def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
     """Re-read a submission as a draft response (shape matches existing_draft).
 
