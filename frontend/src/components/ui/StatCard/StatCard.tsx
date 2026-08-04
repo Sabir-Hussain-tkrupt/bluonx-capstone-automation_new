@@ -22,7 +22,7 @@ export function StatCard({ label, value, accent = 'primary', meta }: StatCardPro
   return (
     <Card padding="md" className={accentClass[accent]}>
       <p className="text-xs uppercase tracking-wider text-secondary-500">{label}</p>
-      <p className="mt-2 text-3xl font-semibold text-secondary-900 tabular-nums">{value}</p>
+      <p className="mt-3 text-3xl font-semibold text-secondary-900 tabular-nums">{value}</p>
       {meta && <p className="mt-2 text-xs text-secondary-500">{meta}</p>}
     </Card>
   );
