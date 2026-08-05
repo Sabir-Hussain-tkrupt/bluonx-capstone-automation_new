@@ -5,7 +5,7 @@
 -- Version:  3.5
 -- Date:     August 2, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   31
+-- Tables:   32
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -15,7 +15,7 @@
 --   3. Project & Task Management (3 tables)
 --   4. Bid Lifecycle             (11 tables)
 --   5. Award & Contract          (3 tables)
---   6. Milestone Tracking        (5 tables)
+--   6. Milestone Tracking        (6 tables)
 --   7. Communication & Audit     (3 tables)
 --
 -- CONVENTIONS:
@@ -2413,10 +2413,4 @@ GRANT SELECT ON v_vendor_email_log TO authenticated, service_role;
 
 -- ============================================================================
 -- END OF SCHEMA
--- ============================================================================
--- Total tables:    30
--- Total indexes:   58 custom (54 regular + 4 partial unique) + auto PK/UNIQUE
--- Total triggers:  31 (30 active + 1 disabled onboarding sync)
--- Total functions: 20 (15 active + 1 disabled onboarding sync)
--- Total views:     3 (v_milestone_overview, v_vendor_performance, v_vendor_email_log)
 -- ============================================================================
