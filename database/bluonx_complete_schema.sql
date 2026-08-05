@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.5
+-- Version:  3.6
 -- Date:     August 2, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   32
+-- Tables:   33
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -17,6 +17,7 @@
 --   5. Award & Contract          (3 tables)
 --   6. Milestone Tracking        (6 tables)
 --   7. Communication & Audit     (3 tables)
+--   8. System Configuration       (1 table)
 --
 -- CONVENTIONS:
 --   • All PKs are UUID (gen_random_uuid)
@@ -821,6 +822,34 @@ COMMENT ON COLUMN notifications.reference_type IS 'Polymorphic: links notificati
 
 
 -- ============================================================================
+-- GROUP 8: SYSTEM CONFIGURATION
+-- ========================================
+
+-- Holidays: org-wide non-working days for business-day arithmetic.
+-- Weekends are NOT stored here (hardcoded in fn_is_business_day). This table
+-- holds only the dates a human recognizes as a holiday. Seeded annually from
+-- the Python `holidays` package (source='seeded'), then admin-editable.
+-- Consumed by the vendor responsiveness clock (the "3 working days then flag
+-- unresponsive" rule) and by check-in reminder offsets.
+CREATE TABLE holidays (
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  holiday_date  DATE          NOT NULL UNIQUE,
+  name          VARCHAR(100)  NOT NULL,
+  source        VARCHAR(20)   NOT NULL DEFAULT 'manual'
+                              CHECK (source IN ('seeded', 'manual')),
+  created_by    UUID          REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT chk_holidays_name_not_blank CHECK (btrim(name) <> '')
+);
+
+COMMENT ON TABLE  holidays IS 'Org-wide non-working days. Weekends are NOT stored here (hardcoded in fn_is_business_day). Drives the vendor responsiveness clock and check-in reminder offsets.';
+COMMENT ON COLUMN holidays.source     IS '"seeded" = inserted by the annual reseed job from the Python holidays package. "manual" = added by an admin. The reseed job only ever touches seeded rows.';
+COMMENT ON COLUMN holidays.created_by IS 'NULL for seeded rows (no human actor). SET NULL on user delete: the holiday outlives the admin who added it.';
+
+
+-- ============================================================================
 -- SECTION 3: DEFERRED FOREIGN KEYS
 -- (for tables created before their referenced tables)
 -- ============================================================================
@@ -1563,6 +1592,164 @@ CREATE TRIGGER trg_milestones_guard_dates
   BEFORE UPDATE OF start_date, end_date ON milestones
   FOR EACH ROW EXECUTE FUNCTION fn_guard_milestone_dates();
 
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.12  HOLIDAY CALENDAR GUARDRAILS
+-- ────────────────────────────────────────────────────────────────────────────
+-- Three limits. None exist because an admin would act maliciously. They exist
+-- because a bad bulk import or a date-range UI bug would silently stop every
+-- vendor from ever being flagged, and nobody would notice for weeks.
+--   1. Past dates frozen      - protects the integrity of milestone_events
+--   2. Max 25 holidays / year - US federal is 11; 25 leaves generous headroom
+--   3. Max 14 consecutive     - permits a shutdown week, blocks a shutdown month
+-- "Today" is America/Chicago (matching v_milestone_overview); bare CURRENT_DATE
+-- is UTC on Supabase and would reject a legitimate edit made 00:00-06:00 local.
+
+CREATE OR REPLACE FUNCTION fn_holidays_guardrails()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_today      DATE := (NOW() AT TIME ZONE 'America/Chicago')::date;
+  v_date       DATE;
+  v_year_count INTEGER;
+  v_run_start  DATE;
+  v_run_end    DATE;
+  v_run_len    INTEGER;
+BEGIN
+  v_date := COALESCE(NEW.holiday_date, OLD.holiday_date);
+
+  IF v_date < v_today THEN
+    RAISE EXCEPTION 'Cannot % a holiday on % (past dates are frozen; it may already have affected a responsiveness decision)',
+      lower(TG_OP), v_date USING ERRCODE = 'PT422';
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND OLD.holiday_date < v_today THEN
+    RAISE EXCEPTION 'Cannot modify the holiday on % (past dates are frozen)',
+      OLD.holiday_date USING ERRCODE = 'PT422';
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+
+  SELECT COUNT(*) INTO v_year_count
+    FROM holidays
+   WHERE EXTRACT(YEAR FROM holiday_date) = EXTRACT(YEAR FROM NEW.holiday_date)
+     AND id <> NEW.id;
+
+  IF v_year_count >= 25 THEN
+    RAISE EXCEPTION 'Year % already has % holidays (max 25). Remove one before adding another.',
+      EXTRACT(YEAR FROM NEW.holiday_date), v_year_count USING ERRCODE = 'PT422';
+  END IF;
+
+  -- Contiguous-run cap. Walk out from the new date across holidays AND weekends
+  -- alike, since a Fri-to-Mon block is a 4-day closure in practice.
+  v_run_start := NEW.holiday_date;
+  LOOP
+    EXIT WHEN NOT EXISTS (
+      SELECT 1 FROM holidays WHERE holiday_date = v_run_start - 1 AND id <> NEW.id
+    ) AND EXTRACT(DOW FROM v_run_start - 1) NOT IN (0, 6);
+    v_run_start := v_run_start - 1;
+  END LOOP;
+
+  v_run_end := NEW.holiday_date;
+  LOOP
+    EXIT WHEN NOT EXISTS (
+      SELECT 1 FROM holidays WHERE holiday_date = v_run_end + 1 AND id <> NEW.id
+    ) AND EXTRACT(DOW FROM v_run_end + 1) NOT IN (0, 6);
+    v_run_end := v_run_end + 1;
+  END LOOP;
+
+  v_run_len := (v_run_end - v_run_start) + 1;
+  IF v_run_len > 14 THEN
+    RAISE EXCEPTION 'This would create a % day closure from % to % (max 14 consecutive non-working days)',
+      v_run_len, v_run_start, v_run_end USING ERRCODE = 'PT422';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_holidays_guardrails
+  BEFORE INSERT OR UPDATE OR DELETE ON holidays
+  FOR EACH ROW EXECUTE FUNCTION fn_holidays_guardrails();
+
+CREATE TRIGGER trg_holidays_updated_at
+  BEFORE UPDATE ON holidays FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 6.13  BUSINESS-DAY ARITHMETIC (single source of calendar truth)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Every consumer (APScheduler responsiveness sweep, reminder offsets) calls
+-- these. No weekend/holiday-skipping date math should exist anywhere else.
+-- STABLE, not IMMUTABLE: they read a table whose contents change.
+-- Read-only helpers, so unlike the write RPCs in Section 7 they are granted to
+-- authenticated as well as service_role. anon is revoked: anon has no SELECT
+-- policy on holidays, would see zero rows, and answer TRUE for Christmas Day.
+
+CREATE OR REPLACE FUNCTION fn_is_business_day(p_date DATE)
+RETURNS BOOLEAN AS $$
+  SELECT p_date IS NOT NULL
+     AND EXTRACT(DOW FROM p_date) NOT IN (0, 6)
+     AND NOT EXISTS (SELECT 1 FROM holidays WHERE holiday_date = p_date);
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION fn_is_business_day(DATE) IS 'TRUE when the date is neither a weekend nor a holiday. Weekends are hardcoded by design.';
+
+CREATE OR REPLACE FUNCTION fn_add_business_days(p_start DATE, p_days INTEGER)
+RETURNS DATE AS $$
+DECLARE
+  v_cursor    DATE    := p_start;
+  v_remaining INTEGER := p_days;
+  v_guard     INTEGER := 0;
+BEGIN
+  IF p_start IS NULL OR p_days IS NULL THEN
+    RETURN NULL;
+  END IF;
+  IF p_days < 0 THEN
+    RAISE EXCEPTION 'fn_add_business_days does not support negative offsets (got %)', p_days
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  WHILE v_remaining > 0 LOOP
+    v_cursor := v_cursor + 1;
+    IF fn_is_business_day(v_cursor) THEN
+      v_remaining := v_remaining - 1;
+    END IF;
+    v_guard := v_guard + 1;
+    IF v_guard > (p_days * 7) + 400 THEN
+      RAISE EXCEPTION 'fn_add_business_days runaway from % (+% days). Check holidays for an implausible block.',
+        p_start, p_days;
+    END IF;
+  END LOOP;
+
+  RETURN v_cursor;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION fn_add_business_days(DATE, INTEGER) IS 'Advance a date by N business days. Inverse of fn_business_days_between. A check-in sent Friday with a 3 working-day window is due end of the following Wednesday.';
+
+CREATE OR REPLACE FUNCTION fn_business_days_between(p_from DATE, p_to DATE)
+RETURNS INTEGER AS $$
+  SELECT CASE
+    WHEN p_from IS NULL OR p_to IS NULL THEN NULL
+    WHEN p_to <= p_from THEN 0
+    ELSE (
+      SELECT COUNT(*)::INTEGER
+        FROM generate_series(p_from + 1, p_to, INTERVAL '1 day') AS d(day)
+       WHERE fn_is_business_day(d.day::DATE)
+    )
+  END;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION fn_business_days_between(DATE, DATE) IS 'Business days elapsed in (p_from, p_to]. Exact inverse of fn_add_business_days. Returns 0 when p_to <= p_from.';
+
+REVOKE ALL ON FUNCTION fn_is_business_day(DATE)             FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION fn_add_business_days(DATE, INTEGER)  FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION fn_business_days_between(DATE, DATE)  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION fn_is_business_day(DATE)             TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION fn_add_business_days(DATE, INTEGER)  TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION fn_business_days_between(DATE, DATE) TO authenticated, service_role;
 
 
 
