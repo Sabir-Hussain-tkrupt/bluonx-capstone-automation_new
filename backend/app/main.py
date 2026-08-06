@@ -26,6 +26,7 @@ from app.routers import (
     docusign_health,
     docusign_webhooks,
     health,
+    holidays,
     milestones,
     notifications,
     projects,
@@ -94,6 +95,7 @@ app.include_router(vendors.router, prefix=_v1, tags=["Vendors"])
 app.include_router(projects.router, prefix=_v1, tags=["Projects"])
 app.include_router(tasks.router, prefix=_v1, tags=["Tasks"])
 app.include_router(trades.router, prefix=_v1, tags=["Trades"])
+app.include_router(holidays.router, prefix=_v1, tags=["Holidays"])
 app.include_router(bid_packages.router, prefix=_v1, tags=["Bid Packages"])
 app.include_router(bid_templates.router, prefix=_v1, tags=["Bid Templates"])
 app.include_router(bid_invitations.router, prefix=_v1, tags=["Bid Invitations"])

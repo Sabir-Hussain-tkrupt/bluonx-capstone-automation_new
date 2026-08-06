@@ -12,8 +12,9 @@ from app.jobs.scheduler import (
 ENDPOINT = "/api/v1/admin/scheduler-health"
 
 # The jobs the scheduler foundation must surface: the original hourly
-# revision_expiry, the four Phase 7 jobs, and the two milestone jobs (the Phase
-# 10.3 daily check-in send and the Phase 10.2 no-response escalation).
+# revision_expiry, the four Phase 7 jobs, the two milestone jobs (the Phase 10.3
+# daily check-in send and the Phase 10.2 no-response escalation), and the annual
+# holiday calendar top-up.
 EXPECTED_JOB_IDS = {
     "revision_expiry",
     "daily_bid_reminders",
@@ -21,6 +22,7 @@ EXPECTED_JOB_IDS = {
     "post_deadline_escalation",
     "milestone_daily_checkin",
     "milestone_no_response",
+    "holiday_seed",
     "scheduler_self_check",
 }
 

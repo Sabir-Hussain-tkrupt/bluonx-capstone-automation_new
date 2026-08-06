@@ -43,6 +43,7 @@ KNOWN_JOB_IDS = (
     "post_deadline_escalation",
     "milestone_daily_checkin",
     "milestone_no_response",
+    "holiday_seed",
     "scheduler_self_check",
 )
 
@@ -131,6 +132,7 @@ def start_scheduler() -> None:
     # tracked_job / DEFAULT_JOB_KWARGS from this module.
     from app.jobs import (
         bid_reminders,
+        holiday_seed,
         insurance_expiration,
         milestone_daily_checkin,
         milestone_no_response,
@@ -145,6 +147,7 @@ def start_scheduler() -> None:
     post_deadline_escalation.register(scheduler)
     milestone_daily_checkin.register(scheduler)
     milestone_no_response.register(scheduler)
+    holiday_seed.register(scheduler)
     scheduler_self_check.register(scheduler)
 
     global _started_at

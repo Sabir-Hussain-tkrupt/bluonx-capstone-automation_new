@@ -40,6 +40,9 @@ JOB_ID = "scheduler_self_check"
 _NOTIFICATION_TYPE = "scheduler_alert"
 
 # Jobs the self-check evaluates. scheduler_self_check is intentionally absent.
+# So is holiday_seed: it runs once a year, and a 1-year interval is meaningless
+# to staleness math (the never-ran branch would only trip after 365 days of
+# continuous uptime).
 EXPECTED_INTERVALS: dict[str, timedelta] = {
     "revision_expiry": timedelta(hours=1),
     "daily_bid_reminders": timedelta(days=1),
