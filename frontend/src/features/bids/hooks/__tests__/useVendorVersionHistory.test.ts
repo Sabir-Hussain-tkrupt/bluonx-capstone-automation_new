@@ -9,32 +9,14 @@ vi.mock('@/features/bids/api/bid-package.queries', () => ({
 
 import { fetchBidSubmissionDetail } from '@/features/bids/api/bid-package.queries';
 import type { BidSubmissionDetail } from '@/features/bids/types';
+import { makeBidSubmissionDetail } from '@/features/bids/test/fixtures';
 import { useVendorVersionHistory } from '../useVendorVersionHistory';
 
 const mockFetch = vi.mocked(fetchBidSubmissionDetail);
 
-function sub(
-  over: Partial<BidSubmissionDetail> & { id: string },
-): BidSubmissionDetail {
-  return {
-    bid_invitation_id: 'inv-1',
-    status: 'submitted',
-    is_direct_assign: false,
-    is_superseded: false,
-    is_draft: false,
-    revision_number: 1,
-    supersedes_submission_id: null,
-    total_amount: 1000,
-    vendor_notes: null,
-    submitted_at: '2026-05-01T00:00:00Z',
-    vendor_company_name: 'Apex',
-    vendor_contact_name: null,
-    vendor_contact_email: null,
-    line_items: [],
-    attachments: [],
-    ...over,
-  };
-}
+// `id` stays required: every chain fixture here is addressed by id.
+const sub = (over: Partial<BidSubmissionDetail> & { id: string }) =>
+  makeBidSubmissionDetail(over);
 
 function createWrapper() {
   const queryClient = new QueryClient({

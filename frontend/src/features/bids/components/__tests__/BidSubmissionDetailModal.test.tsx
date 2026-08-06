@@ -3,6 +3,11 @@ import { screen } from '@testing-library/react';
 import { renderWithRouter } from '@/test/test-utils';
 import { BidSubmissionDetailModal } from '../BidSubmissionDetailModal';
 import type { BidSubmissionDetail } from '@/features/bids/types';
+import {
+  makeBidSubmissionAttachment,
+  makeBidSubmissionDetail,
+  makeBidSubmissionLineItem,
+} from '@/features/bids/test/fixtures';
 
 const mockUseBidSubmissionDetail = vi.fn();
 
@@ -10,35 +15,23 @@ vi.mock('@/features/bids/hooks/useBidSubmissionDetail', () => ({
   useBidSubmissionDetail: (id: string | null) => mockUseBidSubmissionDetail(id),
 }));
 
+// A fully populated submission — the shared builder owns the field list, this
+// wrapper adds only the pricing/notes/attachments this file asserts on.
 function makeDetail(overrides: Partial<BidSubmissionDetail> = {}): BidSubmissionDetail {
-  return {
-    id: 'sub-1',
-    bid_invitation_id: 'inv-1',
-    status: 'submitted',
-    is_direct_assign: false,
-    is_draft: false,
-    is_superseded: false,
-    revision_number: 1,
-    supersedes_submission_id: null,
+  return makeBidSubmissionDetail({
     total_amount: 47500,
     vendor_notes: 'Includes mobilization.',
-    submitted_at: '2026-05-01T12:00:00Z',
     vendor_company_name: 'Apex Grading',
     vendor_contact_name: 'Jane Roe',
     vendor_contact_email: 'jane@apex.example.com',
     line_items: [
-      {
+      makeBidSubmissionLineItem({
         id: 'li-1',
         description: 'Site prep',
-        item_type: 'lump_sum',
-        quantity: null,
-        unit_of_measure: null,
-        unit_price: null,
         lump_sum_amount: 12500,
         line_total: 12500,
-        sort_order: 0,
-      },
-      {
+      }),
+      makeBidSubmissionLineItem({
         id: 'li-2',
         description: 'Excavation',
         item_type: 'unit_price',
@@ -48,21 +41,11 @@ function makeDetail(overrides: Partial<BidSubmissionDetail> = {}): BidSubmission
         lump_sum_amount: null,
         line_total: 30000,
         sort_order: 1,
-      },
+      }),
     ],
-    attachments: [
-      {
-        id: 'a-1',
-        file_name: 'scope.pdf',
-        file_size: 12345,
-        file_type: 'application/pdf',
-        uploaded_at: '2026-05-01T12:00:00Z',
-        download_url: 'https://signed.example.com/scope.pdf?token=abc',
-        download_url_expires_in: 3600,
-      },
-    ],
+    attachments: [makeBidSubmissionAttachment()],
     ...overrides,
-  };
+  });
 }
 
 describe('BidSubmissionDetailModal', () => {
@@ -150,6 +133,39 @@ describe('BidSubmissionDetailModal', () => {
     );
 
     expect(screen.queryByText('Attachments')).toBeNull();
+  });
+
+  it('shows the proposed start date in both the header and the total block', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail({ proposed_start_date: '2026-09-15' }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    // Formatted by formatDateOnly, which parses the parts rather than going
+    // through `new Date(string)` so the day cannot slip in a negative-offset zone.
+    expect(screen.getByText(/Proposed start Sep 15, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/Start: Sep 15, 2026/)).toBeInTheDocument();
+  });
+
+  it('omits the proposed start date entirely when the vendor gave none', () => {
+    mockUseBidSubmissionDetail.mockReturnValue({
+      data: makeDetail({ proposed_start_date: null }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithRouter(
+      <BidSubmissionDetailModal submissionId="sub-1" isOpen onClose={() => {}} />,
+    );
+
+    // Not an em dash placeholder from formatDateOnly — the rows are not rendered.
+    expect(screen.queryByText(/Proposed start/)).toBeNull();
+    expect(screen.queryByText(/Start:/)).toBeNull();
   });
 
   it('shows the Direct Assign pill when is_direct_assign is true', () => {

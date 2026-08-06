@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VendorVersionHistory } from '../VendorVersionHistory';
 import type { BidSubmissionDetail } from '@/features/bids/types';
+import { makeBidSubmissionDetail } from '@/features/bids/test/fixtures';
 
 const useVendorVersionHistory = vi.fn();
 
@@ -11,29 +12,8 @@ vi.mock('@/features/bids/hooks/useVendorVersionHistory', () => ({
     useVendorVersionHistory(...args),
 }));
 
-function makeSubmission(
-  overrides: Partial<BidSubmissionDetail>,
-): BidSubmissionDetail {
-  return {
-    id: 'sub-x',
-    bid_invitation_id: 'inv-1',
-    status: 'submitted',
-    is_direct_assign: false,
-    is_draft: false,
-    is_superseded: false,
-    revision_number: 1,
-    supersedes_submission_id: null,
-    total_amount: 0,
-    vendor_notes: null,
-    submitted_at: '2026-05-06T14:32:00Z',
-    vendor_company_name: 'Apex',
-    vendor_contact_name: null,
-    vendor_contact_email: null,
-    line_items: [],
-    attachments: [],
-    ...overrides,
-  };
-}
+const makeSubmission = (overrides: Partial<BidSubmissionDetail>) =>
+  makeBidSubmissionDetail(overrides);
 
 describe('VendorVersionHistory', () => {
   beforeEach(() => {

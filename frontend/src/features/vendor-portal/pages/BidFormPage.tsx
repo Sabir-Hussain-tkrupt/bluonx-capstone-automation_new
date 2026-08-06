@@ -28,31 +28,10 @@ import {
   PortalApiError,
   type FormLineItem,
   type PortalFieldError,
-  type RevisionPrefillResponse,
   type StepIndex,
   type SubmissionAttachmentMeta,
 } from '../types/portal';
-
-/** Decimal strings (Pydantic Decimal over the wire) → number | null. */
-function toNum(v: string | null): number | null {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function prefillToHydration(pf: RevisionPrefillResponse) {
-  return {
-    vendor_notes: pf.vendor_notes,
-    total_amount: toNum(pf.total_amount),
-    proposed_start_date: pf.proposed_start_date,
-    line_items: pf.line_items.map((li) => ({
-      template_item_id: li.template_item_id,
-      quantity: toNum(li.quantity),
-      unit_price: toNum(li.unit_price),
-      lump_sum_amount: toNum(li.lump_sum_amount),
-    })),
-  };
-}
+import { prefillToHydration } from '../utils/prefill';
 
 /**
  * Maps a server field path to the step that owns it. The validator

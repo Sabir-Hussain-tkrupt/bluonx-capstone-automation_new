@@ -1,29 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useBidFormState } from '../useBidFormState';
-import type {
-  BidDraft,
-  PortalBidTemplate,
-  RevisionPrefillResponse,
-} from '../../types/portal';
+import { prefillToHydration } from '../../utils/prefill';
+import { makeBidDraft, makePortalBidTemplate } from '../../test/fixtures';
+import type { RevisionPrefillResponse } from '../../types/portal';
 
-const lumpTemplate: PortalBidTemplate = {
-  id: 'tpl',
-  name: 'Lump sum',
-  is_lump_sum: true,
-  items: [],
-};
+const lumpTemplate = makePortalBidTemplate();
 
-const draft: BidDraft = {
-  id: 'draft-1',
+const draft = makeBidDraft({
   vendor_notes: 'hi',
   total_amount: 1000,
-  line_items: [],
-  attachment_ids: [],
-  last_saved_at: '2026-06-04T00:00:00Z',
   proposed_start_date: '2026-09-15',
-};
+});
 
+// The wire shape: decimals arrive as strings. Hydration goes through
+// `prefillToHydration` exactly as BidFormPage does, so this exercises the real
+// conversion rather than hand-feeding the hook an already-numeric object.
 const prefill: RevisionPrefillResponse = {
   total_amount: '2500.00',
   vendor_notes: 'prior notes',
@@ -46,8 +38,15 @@ describe('useBidFormState — proposed_start_date plumbing', () => {
 
   it('HYDRATE_FROM_PREFILL copies proposed_start_date from the prefill', () => {
     const { result } = renderHook(() => useBidFormState(lumpTemplate));
-    act(() => result.current.hydrateFromPrefill(prefill));
+    act(() => result.current.hydrateFromPrefill(prefillToHydration(prefill)));
     expect(result.current.state.companyInfo.proposed_start_date).toBe('2026-09-20');
+  });
+
+  it('HYDRATE_FROM_PREFILL lands the total as a number, not the wire string', () => {
+    const { result } = renderHook(() => useBidFormState(lumpTemplate));
+    act(() => result.current.hydrateFromPrefill(prefillToHydration(prefill)));
+    expect(result.current.state.pricing.total_amount).toBe(2500);
+    expect(typeof result.current.state.pricing.total_amount).toBe('number');
   });
 
   it('updateProposedStartDate replaces the date and marks the form dirty', () => {

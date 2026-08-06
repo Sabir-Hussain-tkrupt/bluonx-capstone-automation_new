@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { cloneElement, type ReactElement } from 'react';
 import { SubmissionStatusPie } from '../SubmissionStatusPie';
-import type { InvitationSummary } from '@/features/bids/types';
+import { makeInvitationSummary } from '@/features/bids/test/fixtures';
 
 // Recharts' ResponsiveContainer measures parent box, which JSDOM reports as 0×0
 // and the chart will not render. Stub it to a fixed-size div so child charts paint.
@@ -18,18 +18,7 @@ vi.mock('recharts', async () => {
   };
 });
 
-function makeSummary(overrides: Partial<InvitationSummary> = {}): InvitationSummary {
-  return {
-    total: 0,
-    sent: 0,
-    opened: 0,
-    submitted: 0,
-    declined: 0,
-    expired: 0,
-    no_response: 0,
-    ...overrides,
-  };
-}
+const makeSummary = makeInvitationSummary;
 
 describe('SubmissionStatusPie', () => {
   it('renders nothing when total is 0', () => {
@@ -66,6 +55,41 @@ describe('SubmissionStatusPie', () => {
     expect(queryByText('Sent')).toBeNull();
     expect(queryByText('Opened')).toBeNull();
     expect(queryByText('Declined')).toBeNull();
+  });
+
+  it('excludes undelivered invitations (pending_send / send_failed) from the pie', () => {
+    // The pie shows outcomes of *delivered* invitations. send_failed is
+    // surfaced separately as a summary card and per-row badge, and
+    // pending_send has no outcome yet, so neither may appear as a slice.
+    const { container, queryByText } = render(
+      <SubmissionStatusPie
+        summary={makeSummary({
+          total: 5,
+          pending_send: 2,
+          send_failed: 1,
+          submitted: 1,
+          declined: 1,
+        })}
+      />,
+    );
+
+    const legendItems = container.querySelectorAll('.recharts-legend-item');
+    expect(legendItems.length).toBe(2);
+    expect(queryByText('Submitted')).toBeInTheDocument();
+    expect(queryByText('Declined')).toBeInTheDocument();
+    expect(queryByText('Pending Send')).toBeNull();
+    expect(queryByText('Send Failed')).toBeNull();
+  });
+
+  it('renders nothing when every invitation is still undelivered', () => {
+    // total is non-zero, so the early return does not fire, but no status is
+    // in the pie set — the component must bail on the empty data instead of
+    // drawing an empty chart.
+    const { container } = render(
+      <SubmissionStatusPie summary={makeSummary({ total: 3, pending_send: 2, send_failed: 1 })} />,
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 
   it('renders a No Response slice when present', () => {

@@ -9,6 +9,7 @@ vi.mock('@/features/bids/api/bid-package.queries', () => ({
 
 import { fetchBidPackageDetail } from '@/features/bids/api/bid-package.queries';
 import type { BidPackageDetail } from '@/features/bids/types';
+import { makeInvitationSummary } from '@/features/bids/test/fixtures';
 import { useBidPackageDetail } from '../useBidPackageDetail';
 
 const mockFetch = vi.mocked(fetchBidPackageDetail);
@@ -31,17 +32,7 @@ function basePayload(overrides: Partial<BidPackageDetail> = {}): BidPackageDetai
     instructions: null,
     bid_template: null,
     documents: [],
-    invitation_summary: {
-      total: 0,
-      pending_send: 0,
-      sent: 0,
-      send_failed: 0,
-      opened: 0,
-      submitted: 0,
-      declined: 0,
-      expired: 0,
-      no_response: 0,
-    },
+    invitation_summary: makeInvitationSummary(),
     invitations: [],
     submitted_bids: [],
     desired_start_date: null,
