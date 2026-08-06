@@ -1,7 +1,6 @@
-import { api } from '@/lib/api';
+import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
 import type {
   QualifiedVendorsResponse,
   BidPackageDetail,
@@ -55,15 +54,7 @@ export async function fetchBidPackagesForTask(taskId: string): Promise<BidPackag
     .eq('task_id', taskId)
     .order('round_number', { ascending: false });
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((data ?? []) as any[]).map((row: Record<string, unknown>) => {

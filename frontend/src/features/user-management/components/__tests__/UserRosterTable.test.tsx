@@ -6,10 +6,9 @@ import type { UserAdminResponse } from '../../types';
 
 // The row-action menu uses the api client via mutation hooks; stub it so nothing
 // hits the network at render time.
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
-  errorMessage: (err: { message?: string } | undefined, fallback: string) =>
-    err?.message ?? fallback,
 }));
 
 const ADMIN_ID = 'admin-1';

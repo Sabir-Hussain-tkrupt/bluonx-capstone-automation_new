@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEventBase from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { TaskDetailPage } from '../TaskDetailPage';
+import { makeApiError } from '@/test/api-error';
 
 const userEvent = userEventBase.setup({ delay: null });
 
@@ -63,7 +64,7 @@ describe('TaskDetailPage load failures', () => {
     useTaskMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 404, message: 'The requested resource was not found.' },
+      error: makeApiError('The requested resource was not found.', 404, 'NOT_FOUND'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -76,7 +77,7 @@ describe('TaskDetailPage load failures', () => {
     useTaskMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 0, message: 'Unable to reach the server.' },
+      error: makeApiError('Unable to reach the server.', 0, 'NETWORK_ERROR'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -91,7 +92,9 @@ describe('TaskDetailPage load failures', () => {
 describe('TaskDetailPage delete', () => {
   it('confirms before deleting and surfaces the 409 guard message', async () => {
     const guard = 'Cannot delete task: it has active bid packages. Cancel the task instead to preserve its history.';
-    deleteMutate.mockImplementation((_id, opts) => opts.onError?.({ status: 409, message: guard }));
+    deleteMutate.mockImplementation((_id, opts) =>
+      opts.onError?.(makeApiError(guard, 409, 'CONFLICT')),
+    );
 
     renderWithRouter(<TaskDetailPage />);
 

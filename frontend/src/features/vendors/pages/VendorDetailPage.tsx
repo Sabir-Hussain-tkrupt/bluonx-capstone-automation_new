@@ -34,19 +34,8 @@ import { Field } from '@/components/ui/Field';
 import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import type { VendorContact } from '@/features/vendors/api/vendor.queries';
 import type { StatusVariant } from '@/components/ui/types';
-import type { ApiError } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { notifyGeocodeWarning } from '@/utils/geocodeToast';
-
-/**
- * Prefer the server's message over a generic one.
- *
- * The delete guard's 409 names exactly what blocks the delete, and a 403
- * explains that the action is admin-only. Both are the most useful thing we
- * can show, and both used to be discarded in favour of "Failed to ...".
- */
-function errorMessage(error: unknown, fallback: string): string {
-  return (error as ApiError | undefined)?.message || fallback;
-}
 
 /**
  * The destructive action awaiting confirmation.
@@ -128,7 +117,7 @@ export function VendorDetailPage() {
   // different messages: telling someone their vendor was deleted when the
   // network dropped sends them looking for the wrong thing.
   if (error || !vendor) {
-    const status = (error as ApiError | undefined)?.status;
+    const status = error?.status;
     if (!error || status === 404) {
       return (
         <Alert variant="danger" title="Vendor not found">

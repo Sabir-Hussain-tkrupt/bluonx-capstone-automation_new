@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { api, type ApiError } from '@/lib/api';
+import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import { toNumberOrNull } from '@/lib/format';
 
@@ -90,15 +90,7 @@ export async function fetchTaskById(projectId: string, taskId: string): Promise<
     .is('deleted_at', null)
     .single();
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: error.code === 'PGRST116' ? 404 : 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error, error.code === 'PGRST116' ? 404 : 0);
 
   const row = data as unknown as Record<string, unknown>;
   const trades = row.trades as { name: string } | null;
@@ -113,15 +105,7 @@ export async function fetchActiveTrades(): Promise<Trade[]> {
     .eq('is_active', true)
     .order('name');
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error);
 
   return (data ?? []) as unknown as Trade[];
 }

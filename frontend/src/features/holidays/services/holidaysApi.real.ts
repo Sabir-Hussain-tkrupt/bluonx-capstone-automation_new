@@ -20,7 +20,7 @@
  * on a 422 whose detail is a string.
  */
 import { supabase } from '@/lib/supabase';
-import { api, type ApiError } from '@/lib/api';
+import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import type { Holiday, HolidaysApi } from './holidaysApi.types';
 
@@ -54,15 +54,7 @@ export const realHolidaysApi: HolidaysApi = {
       .lte('holiday_date', `${year}-12-31`)
       .order('holiday_date', { ascending: true });
 
-    if (error) {
-      const apiError: ApiError = {
-        message: error.message,
-        code: error.code,
-        status: 0,
-        details: error,
-      };
-      throw apiError;
-    }
+    if (error) throw fromSupabaseError(error);
 
     return ((data ?? []) as unknown as HolidayRow[]).map(toHoliday);
   },

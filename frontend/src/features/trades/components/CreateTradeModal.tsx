@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select';
 import { FormField } from '@/components/ui/FormField';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast';
-import type { ApiError } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { useCreateTrade } from '../hooks/useCreateTrade';
 import { TRADE_PHASE_LABELS, TRADE_PHASE_ORDER } from '../types';
 
@@ -72,8 +72,7 @@ export function CreateTradeModal({ isOpen, onClose }: CreateTradeModalProps) {
           resetAndClose();
         },
         onError: (error: unknown) => {
-          const apiError = error as ApiError;
-          setSubmitError(apiError?.message ?? 'Failed to create trade. Please try again.');
+          setSubmitError(errorMessage(error, 'Failed to create trade. Please try again.'));
         },
       },
     );

@@ -12,7 +12,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Field } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { formatCurrency } from '@/lib/format';
-import { errorMessage, type ApiError } from '@/lib/api';
+import { errorMessage, isApiError } from '@/lib/api';
 import { useTask } from '@/features/tasks/hooks/useTask';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
@@ -70,7 +70,7 @@ export function TaskDetailPage() {
   }
 
   if (error) {
-    const status = (error as unknown as ApiError | undefined)?.status;
+    const status = isApiError(error) ? error.status : undefined;
     if (status !== 404) {
       return (
         <Alert variant="danger" title="Could not load task">

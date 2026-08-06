@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { fromSupabaseError } from '@/lib/api';
 import type { Trade } from '../types';
 
 export async function fetchTrades(): Promise<Trade[]> {
@@ -10,15 +10,7 @@ export async function fetchTrades(): Promise<Trade[]> {
     .order('phase')
     .order('name');
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error);
 
   return (data ?? []) as unknown as Trade[];
 }

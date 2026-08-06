@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { BidTemplateListPage } from '../BidTemplateListPage';
 import type { BidTemplate } from '@/features/bid-templates/api/bid-template.queries';
+import { makeApiError } from '@/test/api-error';
 
 // The shared Table renders a desktop table and a mobile card list from the
 // same data, so every row action appears twice. Assert against the first.
@@ -81,7 +82,7 @@ describe('BidTemplateListPage load failures', () => {
     mockQuery({
       data: undefined,
       isError: true,
-      error: { message: 'Failed to fetch bid templates from database', status: 502 },
+      error: makeApiError('Failed to fetch bid templates from database', 502),
     });
 
     renderWithRouter(<BidTemplateListPage />);
@@ -99,7 +100,7 @@ describe('BidTemplateListPage load failures', () => {
     const refetch = mockQuery({
       data: undefined,
       isError: true,
-      error: { message: 'Network error', status: 0 },
+      error: makeApiError('Network error', 0, 'NETWORK_ERROR'),
     });
 
     renderWithRouter(<BidTemplateListPage />);
@@ -179,10 +180,13 @@ describe('BidTemplateListPage delete guard', () => {
 
     // Drive the mutation's onError the way React Query would.
     const onError = deleteMutationMock.mutate.mock.calls[0][1].onError;
-    onError({
-      status: 409,
-      message: 'This template is referenced by bid package(s) (Rough Grading (open)).',
-    });
+    onError(
+      makeApiError(
+        'This template is referenced by bid package(s) (Rough Grading (open)).',
+        409,
+        'CONFLICT',
+      ),
+    );
 
     expect(await screen.findByText(/Rough Grading \(open\)/)).toBeInTheDocument();
   });

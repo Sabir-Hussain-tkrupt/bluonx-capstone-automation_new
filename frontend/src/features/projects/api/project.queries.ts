@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { api, type ApiError } from '@/lib/api';
+import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import { toNumberOrNull } from '@/lib/format';
 
@@ -106,15 +106,7 @@ export async function fetchProjectById(id: string): Promise<Project> {
     .is('deleted_at', null)
     .single();
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: error.code === 'PGRST116' ? 404 : 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error, error.code === 'PGRST116' ? 404 : 0);
 
   return normalizeProject(data as unknown as Project);
 }

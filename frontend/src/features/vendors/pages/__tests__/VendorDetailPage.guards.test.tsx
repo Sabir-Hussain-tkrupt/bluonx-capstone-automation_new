@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEventBase from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { VendorDetailPage } from '../VendorDetailPage';
+import { makeApiError } from '@/test/api-error';
 
 const userEvent = userEventBase.setup({ delay: null });
 
@@ -119,7 +120,7 @@ describe('VendorDetailPage load failures', () => {
     useVendorMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 404, message: 'The requested resource was not found.' },
+      error: makeApiError('The requested resource was not found.', 404, 'NOT_FOUND'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -135,7 +136,7 @@ describe('VendorDetailPage load failures', () => {
     useVendorMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 0, message: 'Unable to reach the server. Check your connection.' },
+      error: makeApiError('Unable to reach the server. Check your connection.', 0, 'NETWORK_ERROR'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -154,7 +155,7 @@ describe('VendorDetailPage load failures', () => {
     useVendorMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 500, message: 'A server error occurred.' },
+      error: makeApiError('A server error occurred.', 500, 'SERVER_ERROR'),
       refetch,
       isFetching: false,
     });

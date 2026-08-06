@@ -18,7 +18,7 @@ import { InsuranceExpiringBadge } from '@/features/vendors/components/InsuranceE
 import type { Vendor, VendorListFilters } from '@/features/vendors/api/vendor.queries';
 import type { Column } from '@/components/ui/Table/Table';
 import type { StatusVariant } from '@/components/ui/types';
-import type { ApiError } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 const statusVariantMap: Record<string, StatusVariant> = {
@@ -219,7 +219,7 @@ export function VendorListPage() {
         <Alert variant="danger" title="Could not load vendors">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              {(error as ApiError)?.message ?? 'Something went wrong. Please try again.'}
+              {errorMessage(error, 'Something went wrong. Please try again.')}
             </span>
             <Button
               variant="outline"

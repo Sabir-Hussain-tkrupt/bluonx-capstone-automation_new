@@ -4,13 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { InviteUserModal } from '../InviteUserModal';
 
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
-  errorMessage: (err: { message?: string } | undefined, fallback: string) =>
-    err?.message ?? fallback,
 }));
 
 import { api } from '@/lib/api';
+import { makeApiError } from '@/test/api-error';
 const mockPost = vi.mocked(api.post);
 
 describe('InviteUserModal', () => {
@@ -56,7 +56,9 @@ describe('InviteUserModal', () => {
   });
 
   it('surfaces the server 409 detail and keeps the modal open', async () => {
-    mockPost.mockRejectedValueOnce({ message: 'A user with this email already exists.' });
+    mockPost.mockRejectedValueOnce(
+      makeApiError('A user with this email already exists.', 409, 'CONFLICT'),
+    );
     const onClose = vi.fn();
     const user = userEvent.setup();
     renderWithRouter(<InviteUserModal isOpen onClose={onClose} />);

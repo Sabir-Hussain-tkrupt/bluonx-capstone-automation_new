@@ -30,7 +30,7 @@ import { ProjectForm } from '@/features/projects/components/ProjectForm';
 import { ProjectDocumentUpload } from '@/features/projects/components/ProjectDocumentUpload';
 import type { StatusVariant } from '@/components/ui/types';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
-import { errorMessage, type ApiError } from '@/lib/api';
+import { errorMessage, isApiError } from '@/lib/api';
 import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 
 // Module level, and the single source for both the tab ids the URL accepts and
@@ -92,7 +92,7 @@ export function ProjectDetailPage() {
   }
 
   if (error) {
-    const status = (error as unknown as ApiError | undefined)?.status;
+    const status = isApiError(error) ? error.status : undefined;
     if (status !== 404) {
       return (
         <Alert variant="danger" title="Could not load project">
