@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
+# End-to-end write paths against the real database, as the module docstring says.
+pytestmark = pytest.mark.requires_db
+
 CREATE = "/api/v1/holidays"
 RANGE = "/api/v1/holidays/range"
 

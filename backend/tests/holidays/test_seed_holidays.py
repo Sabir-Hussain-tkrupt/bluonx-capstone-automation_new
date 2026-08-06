@@ -74,6 +74,7 @@ def test_no_state_subdivision_is_applied():
 # ── Seeding against the real table ──────────────────────────────────────────
 
 
+@pytest.mark.requires_db
 def test_seed_writes_federal_weekdays_with_no_actor(sb, seed_year):
     result = seed_federal_holidays(sb, years=[seed_year])
 
@@ -94,6 +95,7 @@ def test_seed_writes_federal_weekdays_with_no_actor(sb, seed_year):
     assert all(date.fromisoformat(r["holiday_date"]).weekday() < 5 for r in rows)
 
 
+@pytest.mark.requires_db
 def test_seed_is_idempotent(sb, seed_year):
     first = seed_federal_holidays(sb, years=[seed_year])
     second = seed_federal_holidays(sb, years=[seed_year])
@@ -102,6 +104,7 @@ def test_seed_is_idempotent(sb, seed_year):
     assert second["skipped_existing"] == first["inserted"]
 
 
+@pytest.mark.requires_db
 def test_seed_never_touches_a_manual_row(sb, seed_year):
     """An admin who renamed a federal holiday, or claimed the date for their own,
     must keep their row when the seed runs."""

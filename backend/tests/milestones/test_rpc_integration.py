@@ -29,6 +29,10 @@ from supabase import create_client
 
 from app.core.config import settings
 
+# Probes the live RPC boundary (existence, EXECUTE grants, raised SQLSTATEs),
+# which is precisely what a mock cannot verify.
+pytestmark = pytest.mark.requires_db
+
 
 @pytest.fixture(scope="module")
 def service_db():

@@ -32,11 +32,13 @@ _app_main.stop_scheduler = lambda: None
 
 
 # ── Test user credentials (pre-created in Supabase) ─────────────────────
+# Deliberately NOT asserted at import time. A module-level assert in a conftest
+# fails during collection, which takes the entire suite down — including the
+# ~1350 tests that never touch a database — for anyone who has not filled these
+# in. The check lives in `admin_jwt` instead, so a missing credential skips the
+# handful of tests that actually need it. See backend/.env.example.
 TEST_ADMIN_EMAIL = os.getenv("TEST_ADMIN_EMAIL")
 TEST_ADMIN_PASSWORD = os.getenv("TEST_ADMIN_PASSWORD")
-assert TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD, (
-    "TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set in backend/.env"
-)
 
 
 @pytest.fixture(scope="session")
@@ -49,7 +51,16 @@ def admin_jwt(supabase_url: str) -> str:
     """
     Sign in as the test admin user via Supabase Auth REST API.
     Returns a valid JWT access token for the session.
+
+    Skips (rather than fails) when the credentials are absent, so a clone with
+    an unfilled .env still runs everything that does not need a database.
     """
+    if not (TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD):
+        pytest.skip(
+            "TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD are not set in backend/.env "
+            "(see backend/.env.example)"
+        )
+
     url = f"{supabase_url}/auth/v1/token?grant_type=password"
     resp = httpx.post(
         url,

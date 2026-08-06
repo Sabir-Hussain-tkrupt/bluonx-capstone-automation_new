@@ -203,6 +203,7 @@ class TestActorAttribution:
 
         return TestClient(app)
 
+    @pytest.mark.requires_db
     def test_authenticated_request_logs_the_actor(
         self, authed_client, auth_headers, request_records
     ):
@@ -221,6 +222,7 @@ class TestActorAttribution:
         assert not hasattr(record, "user_id")
         assert not hasattr(record, "role")
 
+    @pytest.mark.requires_db
     def test_actor_does_not_leak_into_the_next_request(
         self, authed_client, auth_headers, request_records
     ):
