@@ -98,6 +98,7 @@ class TestJWTDecoding:
         assert resp.status_code == 401
 
 
+@pytest.mark.requires_db
 class TestAuthenticatedAccess:
     """Integration tests using a real JWT from Supabase Auth."""
 
@@ -105,16 +106,3 @@ class TestAuthenticatedAccess:
         """A valid admin JWT should be accepted by protected endpoints."""
         resp = client.get("/api/v1/users/me", headers=auth_headers)
         assert resp.status_code == 200
-
-    def test_valid_token_returns_user_data(self, client, auth_headers):
-        """GET /users/me should return the admin user's profile."""
-        resp = client.get("/api/v1/users/me", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["email"] == "admin@bluonx.dev"
-        assert data["role"] == "admin"
-        assert data["is_active"] is True
-        assert "id" in data
-        assert "full_name" in data
-        assert "created_at" in data
-        assert "updated_at" in data

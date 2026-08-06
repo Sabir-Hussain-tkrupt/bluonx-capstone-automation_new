@@ -129,6 +129,31 @@ The app opens on **http://localhost:5173**. Log in with a Supabase user for the 
 | Frontend production build | `cd frontend && npm run build` |
 | Run backend tests | `docker compose run --rm api pytest` |
 
+### Backend tests
+
+`pytest` runs the hermetic suite: no database, no credentials, no network. This
+is the default and it is what you should get green before pushing.
+
+A small number of tests exercise SQL triggers, business-day functions and RPC
+grants, which cannot be meaningfully mocked. They are marked `requires_db` and
+are **deselected by default**:
+
+| Command | Runs |
+|---------|------|
+| `pytest` | the hermetic suite (default) |
+| `pytest -m requires_db` | only the live-database tests |
+| `pytest -m ""` | everything |
+
+To run the `requires_db` set you need `TEST_ADMIN_EMAIL` and
+`TEST_ADMIN_PASSWORD` in `backend/.env` (see `backend/.env.example`), pointing at
+an admin user in the same Supabase project as `SUPABASE_URL`. Leave them blank
+and those tests skip rather than fail.
+
+Two cautions while the team shares one Supabase project: these tests write real
+rows (they clean up after themselves), and two people running `-m requires_db`
+at the same time can collide over the same calendar dates. Coordinate before
+running them, or leave them to one person.
+
 ---
 
 ## Troubleshooting

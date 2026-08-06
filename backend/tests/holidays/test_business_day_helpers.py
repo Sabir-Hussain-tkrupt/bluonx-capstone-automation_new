@@ -15,6 +15,10 @@ from datetime import timedelta
 
 import pytest
 
+# Every test here calls a SQL function through the real client. Mocking them
+# would only assert that the mock matches itself.
+pytestmark = pytest.mark.requires_db
+
 
 def _between(sb, d_from, d_to) -> int:
     resp = sb.rpc(

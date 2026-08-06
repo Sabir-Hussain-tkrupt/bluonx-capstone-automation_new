@@ -21,6 +21,10 @@ from postgrest.exceptions import APIError
 
 from app.core.time import business_today
 
+# The guardrails under test are DB triggers, so every test here needs the real
+# database.
+pytestmark = pytest.mark.requires_db
+
 
 def _insert(sb, d: date, name: str = "Guardrail Probe"):
     return (

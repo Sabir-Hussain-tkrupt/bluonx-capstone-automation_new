@@ -17,6 +17,10 @@ import pytest
 from app.core.config import settings
 from app.core.vendor_auth import VENDOR_JWT_ALGORITHM, VENDOR_TOKEN_TYPE
 
+# The gate checks in validate-token depend on actual SQL behavior, so this suite
+# seeds real rows (see conftest) rather than mocking.
+pytestmark = pytest.mark.requires_db
+
 VALIDATE_PATH = "/api/v1/vendor-auth/validate-token"
 
 
