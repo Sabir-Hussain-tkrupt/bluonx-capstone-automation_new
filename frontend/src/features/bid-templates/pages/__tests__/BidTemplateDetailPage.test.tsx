@@ -11,6 +11,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { BidTemplateDetailPage } from '../BidTemplateDetailPage';
+import { makeApiError } from '@/test/api-error';
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>(
@@ -45,7 +46,7 @@ describe('BidTemplateDetailPage load states', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('reports a 404 as not found, with no Retry', () => {
-    mockQuery({ error: { status: 404, message: 'Bid template not found' } });
+    mockQuery({ error: makeApiError('Bid template not found', 404, 'NOT_FOUND') });
 
     renderWithRouter(<BidTemplateDetailPage />);
 
@@ -56,10 +57,7 @@ describe('BidTemplateDetailPage load states', () => {
 
   it('reports a server error as a load failure, with the message and Retry', () => {
     mockQuery({
-      error: {
-        status: 502,
-        message: 'Failed to fetch bid template from database',
-      },
+      error: makeApiError('Failed to fetch bid template from database', 502),
     });
 
     renderWithRouter(<BidTemplateDetailPage />);
@@ -75,7 +73,7 @@ describe('BidTemplateDetailPage load states', () => {
   it('refetches when Retry is clicked', async () => {
     const user = userEvent.setup();
     const refetch = mockQuery({
-      error: { status: 500, message: 'Internal Server Error' },
+      error: makeApiError('Internal Server Error', 500, 'SERVER_ERROR'),
     });
 
     renderWithRouter(<BidTemplateDetailPage />);

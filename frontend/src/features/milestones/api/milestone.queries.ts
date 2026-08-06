@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { fromSupabaseError } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -75,15 +75,6 @@ export interface TaskActiveContract {
   end_date: string | null;
 }
 
-function toApiError(error: { message: string; code?: string }): ApiError {
-  return {
-    message: error.message,
-    code: error.code ?? 'SUPABASE_ERROR',
-    status: 0,
-    details: error,
-  };
-}
-
 // ─── Supabase Direct Reads (RLS) ──────────────────────────────────────
 
 export async function fetchMilestonesForTask(taskId: string): Promise<Milestone[]> {
@@ -93,7 +84,7 @@ export async function fetchMilestonesForTask(taskId: string): Promise<Milestone[
     .eq('task_id', taskId)
     .order('sort_order', { ascending: true });
 
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return (data ?? []) as unknown as Milestone[];
 }
 
@@ -104,11 +95,7 @@ export async function fetchMilestone(id: string): Promise<MilestoneWithResponses
     .eq('id', id)
     .single();
 
-  if (error) {
-    const apiError = toApiError(error);
-    apiError.status = error.code === 'PGRST116' ? 404 : 0;
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error, error.code === 'PGRST116' ? 404 : 0);
   return data as unknown as MilestoneWithResponses;
 }
 
@@ -125,7 +112,7 @@ export async function fetchMilestoneEvents(milestoneId: string): Promise<Milesto
     .eq('milestone_id', milestoneId)
     .order('created_at', { ascending: false });
 
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return (data ?? []) as unknown as MilestoneEvent[];
 }
 
@@ -144,6 +131,6 @@ export async function fetchTaskActiveContract(
     .neq('status', 'terminated')
     .maybeSingle();
 
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return (data as unknown as TaskActiveContract | null) ?? null;
 }

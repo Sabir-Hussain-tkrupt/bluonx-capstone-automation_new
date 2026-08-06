@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { ApiError } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { useTrades } from '../hooks/useTrades';
 import { TRADE_PHASE_LABELS, TRADE_PHASE_ORDER } from '../types';
 import type { Trade, TradePhase } from '../types';
@@ -60,7 +60,7 @@ export function TradeManagementPanel() {
           dismissible
           onDismiss={() => refetch()}
         >
-          {(error as unknown as ApiError)?.message ?? 'Please try again.'}
+          {errorMessage(error, 'Please try again.')}
         </Alert>
       )}
 

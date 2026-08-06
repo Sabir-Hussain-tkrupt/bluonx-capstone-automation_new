@@ -3,11 +3,11 @@ import { screen } from '@testing-library/react';
 import { renderWithRouter } from '@/test/test-utils';
 import { UserManagementPage } from '../UserManagementPage';
 import type { UserAdminResponse } from '../../types';
+import { makeApiError } from '@/test/api-error';
 
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
-  errorMessage: (err: { message?: string } | undefined, fallback: string) =>
-    err?.message ?? fallback,
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -59,7 +59,7 @@ describe('UserManagementPage', () => {
       data: undefined,
       isLoading: false,
       isError: true,
-      error: { message: 'boom' },
+      error: makeApiError('boom', 500),
       refetch: vi.fn(),
     });
     renderWithRouter(<UserManagementPage />);

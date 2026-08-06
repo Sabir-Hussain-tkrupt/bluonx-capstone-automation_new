@@ -23,7 +23,12 @@ const holidaySchema = z
   .object({
     multiDay: z.boolean(),
     date: z.string().regex(YMD, 'Pick a valid date.'),
-    endDate: z.string().optional().default(''),
+    // Deliberately no `.default('')`. A zod default splits the schema's input
+    // type from its output type, which then no longer matches the single
+    // `useForm<HolidayFormValues>` generic. It would also never fire: both
+    // `defaultValues` and the reset-on-open supply `endDate: ''`, and the
+    // registered input always yields a string.
+    endDate: z.string().optional(),
     name: z
       .string()
       .trim()
@@ -200,8 +205,12 @@ export function HolidayFormModal({ isOpen, onClose, holiday, year }: HolidayForm
           </Alert>
         )}
 
-        <FormField label="Name" required error={errors.name?.message}>
+        {/* Every FormField gets an explicit htmlFor paired with the control's
+            id. Without it FormField falls back to a generated id that matches
+            no input, leaving the label associated with nothing. */}
+        <FormField label="Name" htmlFor="holiday-name" required error={errors.name?.message}>
           <TextInput
+            id="holiday-name"
             {...register('name')}
             placeholder="e.g. Independence Day, Company Holiday"
             error={errors.name?.message}
@@ -211,8 +220,13 @@ export function HolidayFormModal({ isOpen, onClose, holiday, year }: HolidayForm
 
         {/* DatePicker renders its own error text, so FormField supplies only the
             label here — passing error to both would duplicate the message. */}
-        <FormField label={multiDay ? 'Start date' : 'Date'} required>
-          <DatePicker {...register('date')} minDate={today} error={errors.date?.message} />
+        <FormField label={multiDay ? 'Start date' : 'Date'} htmlFor="holiday-date" required>
+          <DatePicker
+            id="holiday-date"
+            {...register('date')}
+            minDate={today}
+            error={errors.date?.message}
+          />
         </FormField>
 
         {!isEdit && (
@@ -224,8 +238,9 @@ export function HolidayFormModal({ isOpen, onClose, holiday, year }: HolidayForm
         )}
 
         {!isEdit && multiDay && (
-          <FormField label="End date" required>
+          <FormField label="End date" htmlFor="holiday-end-date" required>
             <DatePicker
+              id="holiday-end-date"
               {...register('endDate')}
               minDate={startDate || today}
               error={errors.endDate?.message}

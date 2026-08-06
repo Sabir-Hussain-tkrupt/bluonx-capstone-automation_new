@@ -5,13 +5,13 @@ import { renderWithRouter } from '@/test/test-utils';
 import { UserRowActions } from '../UserRowActions';
 import type { UserAdminResponse } from '../../types';
 
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
-  errorMessage: (err: { message?: string } | undefined, fallback: string) =>
-    err?.message ?? fallback,
 }));
 
 import { api } from '@/lib/api';
+import { makeApiError } from '@/test/api-error';
 const mockPatch = vi.mocked(api.patch);
 const mockPost = vi.mocked(api.post);
 const mockDelete = vi.mocked(api.delete);
@@ -117,7 +117,9 @@ describe('UserRowActions', () => {
   });
 
   it('surfaces the server 409 detail when a guard rejects a mutation', async () => {
-    mockPatch.mockRejectedValueOnce({ message: 'Cannot remove the last active admin.' });
+    mockPatch.mockRejectedValueOnce(
+      makeApiError('Cannot remove the last active admin.', 409, 'CONFLICT'),
+    );
     const ue = userEvent.setup();
     render(user({ role: 'admin', full_name: 'Other Admin' }));
     await openMenu(ue, 'Other Admin');

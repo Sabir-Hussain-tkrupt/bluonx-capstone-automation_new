@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEventBase from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { ProjectDetailPage } from '../ProjectDetailPage';
+import { makeApiError } from '@/test/api-error';
 
 const userEvent = userEventBase.setup({ delay: null });
 
@@ -89,7 +90,7 @@ describe('ProjectDetailPage load failures', () => {
     useProjectMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 404, message: 'The requested resource was not found.' },
+      error: makeApiError('The requested resource was not found.', 404, 'NOT_FOUND'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -105,7 +106,7 @@ describe('ProjectDetailPage load failures', () => {
     useProjectMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: { status: 0, message: 'Unable to reach the server. Check your connection.' },
+      error: makeApiError('Unable to reach the server. Check your connection.', 0, 'NETWORK_ERROR'),
       refetch: vi.fn(),
       isFetching: false,
     });
@@ -128,7 +129,9 @@ describe('ProjectDetailPage delete', () => {
     const guard =
       'Cannot delete: the following tasks are still in progress: "Grading" (in_progress). ' +
       'Complete or cancel them first, or archive the project instead.';
-    deleteProjectMutate.mockImplementation((_id, opts) => opts.onError?.({ status: 409, message: guard }));
+    deleteProjectMutate.mockImplementation((_id, opts) =>
+      opts.onError?.(makeApiError(guard, 409, 'CONFLICT')),
+    );
 
     renderWithRouter(<ProjectDetailPage />);
 

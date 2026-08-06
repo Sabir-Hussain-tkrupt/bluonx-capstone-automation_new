@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEventBase from '@testing-library/user-event';
 import { renderWithRouter } from '@/test/test-utils';
 import { TaskList } from '../TaskList';
+import { makeApiError } from '@/test/api-error';
 
 const userEvent = userEventBase.setup({ delay: null });
 
@@ -53,7 +54,7 @@ describe('TaskList load failures', () => {
       ...success([]),
       data: undefined,
       isError: true,
-      error: { message: 'Unable to reach the server.', status: 0 },
+      error: makeApiError('Unable to reach the server.', 0, 'NETWORK_ERROR'),
       refetch,
     });
 
@@ -72,7 +73,9 @@ describe('TaskList delete', () => {
     // The regression targets: delete used to fire from a bare Modal, and its
     // onError discarded the server message.
     const guard = 'Cannot delete task: it has active bid packages. Cancel the task instead to preserve its history.';
-    deleteMutate.mockImplementation((_id, opts) => opts.onError?.({ status: 409, message: guard }));
+    deleteMutate.mockImplementation((_id, opts) =>
+      opts.onError?.(makeApiError(guard, 409, 'CONFLICT')),
+    );
     useTasksMock.mockReturnValue(success([task()]));
 
     renderWithRouter(<TaskList projectId="p1" />);

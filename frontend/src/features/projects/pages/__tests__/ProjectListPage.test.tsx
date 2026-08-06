@@ -5,6 +5,7 @@ import userEventBase from '@testing-library/user-event';
 const userEvent = userEventBase.setup({ delay: null });
 import { renderWithRouter } from '@/test/test-utils';
 import { ProjectListPage } from '../ProjectListPage';
+import { makeApiError } from '@/test/api-error';
 
 const useProjectsMock = vi.fn();
 const createMutateMock = vi.fn();
@@ -40,7 +41,7 @@ describe('ProjectListPage load failures', () => {
       ...emptySuccess,
       data: undefined,
       isError: true,
-      error: { message: 'Unable to reach the server. Check your connection.', status: 0 },
+      error: makeApiError('Unable to reach the server. Check your connection.', 0, 'NETWORK_ERROR'),
     });
 
     renderWithRouter(<ProjectListPage />);
@@ -58,7 +59,7 @@ describe('ProjectListPage load failures', () => {
       ...emptySuccess,
       data: undefined,
       isError: true,
-      error: { message: 'Server error', status: 500 },
+      error: makeApiError('Server error', 500, 'SERVER_ERROR'),
       refetch,
     });
 

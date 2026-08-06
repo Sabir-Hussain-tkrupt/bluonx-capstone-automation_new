@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { fromSupabaseError } from '@/lib/api';
 import type { MilestoneStatus } from '@/features/milestones/api/milestone.queries';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -63,15 +63,6 @@ export interface PaginatedMilestoneOverview {
 
 const VIEW = 'v_milestone_overview';
 
-function toApiError(error: { message: string; code?: string }): ApiError {
-  return {
-    message: error.message,
-    code: error.code ?? 'SUPABASE_ERROR',
-    status: 0,
-    details: error,
-  };
-}
-
 // ─── Supabase Direct Reads (RLS via security_invoker view) ────────────
 
 /**
@@ -128,7 +119,7 @@ export async function fetchMilestoneOverview(
   query = query.range(offset, offset + pageSize - 1);
 
   const { data, error, count } = await query;
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
 
   return {
     items: (data ?? []) as unknown as MilestoneOverviewRow[],
@@ -164,7 +155,7 @@ export async function fetchPausedMilestones(
   if (params.limit != null) query = query.limit(params.limit);
 
   const { data, error } = await query;
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return (data ?? []) as unknown as MilestoneOverviewRow[];
 }
 
@@ -185,6 +176,6 @@ export async function fetchPausedMilestonesCount(
   if (params.createdBy) query = query.eq('created_by', params.createdBy);
 
   const { count, error } = await query;
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return count ?? 0;
 }

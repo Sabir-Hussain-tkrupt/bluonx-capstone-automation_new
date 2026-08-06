@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { ApiError } from '@/lib/api';
+import { fromSupabaseError } from '@/lib/api';
 
 /** One row of vendor_performance_reviews — the single review for a contract. */
 export interface VendorPerformanceReview {
@@ -12,15 +12,6 @@ export interface VendorPerformanceReview {
   reviewed_at: string;
   created_at: string;
   updated_at: string;
-}
-
-function toApiError(error: { message: string; code?: string }): ApiError {
-  return {
-    message: error.message,
-    code: error.code ?? 'SUPABASE_ERROR',
-    status: 0,
-    details: error,
-  };
 }
 
 /**
@@ -36,6 +27,6 @@ export async function fetchContractReview(
     .eq('contract_id', contractId)
     .maybeSingle();
 
-  if (error) throw toApiError(error);
+  if (error) throw fromSupabaseError(error);
   return (data as unknown as VendorPerformanceReview | null) ?? null;
 }

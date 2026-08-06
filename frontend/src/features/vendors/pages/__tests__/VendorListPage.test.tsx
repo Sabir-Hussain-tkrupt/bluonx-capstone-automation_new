@@ -14,6 +14,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => navigateMock };
 });
 import { VendorListPage } from '../VendorListPage';
+import { makeApiError } from '@/test/api-error';
 
 const useVendorsMock = vi.fn();
 const createMutateMock = vi.fn();
@@ -58,7 +59,7 @@ describe('VendorListPage load failures', () => {
       ...emptySuccess,
       data: undefined,
       isError: true,
-      error: { message: 'Unable to reach the server. Check your connection.', status: 0 },
+      error: makeApiError('Unable to reach the server. Check your connection.', 0, 'NETWORK_ERROR'),
     });
 
     renderWithRouter(<VendorListPage />);
@@ -77,7 +78,7 @@ describe('VendorListPage load failures', () => {
       ...emptySuccess,
       data: undefined,
       isError: true,
-      error: { message: 'Server error', status: 500 },
+      error: makeApiError('Server error', 500, 'SERVER_ERROR'),
       refetch,
     });
 
@@ -207,7 +208,7 @@ describe('VendorListPage create redirect', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: /create vendor/i }));
 
     const onError = createMutateMock.mock.calls[0][1].onError;
-    onError({ status: 409, message: 'A vendor named that already exists.' });
+    onError(makeApiError('A vendor named that already exists.', 409, 'CONFLICT'));
 
     expect(navigateMock).not.toHaveBeenCalled();
   });

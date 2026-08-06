@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { api, type ApiError } from '@/lib/api';
+import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import type { EmailLogResponse } from '@/features/bids/types';
 
@@ -154,15 +154,7 @@ export async function fetchVendorById(id: string): Promise<VendorDetail> {
     .is('deleted_at', null)
     .single();
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: error.code === 'PGRST116' ? 404 : 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error, error.code === 'PGRST116' ? 404 : 0);
 
   return data as unknown as VendorDetail;
 }
@@ -178,15 +170,7 @@ export async function fetchTrades(): Promise<Trade[]> {
     .order('phase')
     .order('name');
 
-  if (error) {
-    const apiError: ApiError = {
-      message: error.message,
-      code: error.code,
-      status: 0,
-      details: error,
-    };
-    throw apiError;
-  }
+  if (error) throw fromSupabaseError(error);
 
   return (data ?? []) as unknown as Trade[];
 }
