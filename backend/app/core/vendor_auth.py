@@ -26,6 +26,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
+from app.core.logging_config import set_actor
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,7 @@ async def get_vendor_context(
         # Read via .get() and never raise on absence.
         revision_raw = payload.get("bid_revision_request_id")
         bid_revision_request_id = UUID(revision_raw) if revision_raw else None
+        set_actor(vendor_id=payload.get("vendor_id"), actor_kind="vendor")
         return VendorContext(
             vendor_id=UUID(payload["vendor_id"]),
             vendor_contact_id=UUID(payload["vendor_contact_id"]),
@@ -197,6 +199,7 @@ async def get_milestone_context(
         )
 
     try:
+        set_actor(vendor_id=payload.get("vendor_id"), actor_kind="vendor")
         return VendorContext(
             vendor_id=UUID(payload["vendor_id"]),
             vendor_contact_id=UUID(payload["vendor_contact_id"]),

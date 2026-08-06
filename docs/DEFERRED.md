@@ -3,14 +3,6 @@
 Items intentionally deferred during implementation. Reference this file when moving to production or starting later phases.
 
 
-## Task 2.6 — FastAPI Backend Scaffold
-
-- **CORS production origin:** Currently `http://localhost:5173`. Add Vercel/production domain to `CORS_ORIGINS` in `backend/.env` before deploy.
-- **Frontend type alignment:** Frontend placeholder types (`Vendor`, `Project` in `frontend/src/features/`) don't match actual DB schema columns. Update when building Phase 3 CRUD pages.
-- **ECS/Lambda deployment config:** Dockerfile is ready, but no AWS-specific deployment manifests. Depends on Task 1.9.
-- **Request logging middleware:** Not added to scaffold. Add structured logging (correlation IDs, request timing) during production hardening.
-- **Test infrastructure:** No pytest setup, fixtures, or test database. Add in testing phase.
-
 ## Past Performance Scoring (Task 8.2 → completed in Phase 10)
 
 `backend/app/services/bid_scoring_service.py::score_performance(vendor_id)` currently returns the module constant `NEUTRAL_PERFORMANCE_SCORE` (75.0) as a placeholder. Every vendor receives 75 because there is no on-time-completion data to derive a real score from yet — which is the intended interim behaviour (every vendor is unproven).
@@ -61,9 +53,23 @@ Related: the same swappable template also carries the schedule/validity clauses 
 
 `user_service.py` follows the existing convention of each service catching `postgrest.exceptions.APIError` (and, elsewhere, PT4xx SQLSTATE codes) and mapping to HTTP status locally, rather than a shared exception handler. The copy-paste `_is_unique_violation` / `_has_pt_code` helper pattern remains duplicated across services (contract_service, award_service, bid_package_service, bid_revision_service, vendor_portal, and now the 23505 backstop in user_service). A single shared APIError -> HTTP translator (or a FastAPI exception handler) is deferred; consolidate when touching the error layer next.
 
-## User Management — no request-logging / correlation-id middleware
+## User Management — no durable audit log for account mutations
 
-The app registers only CORS middleware (`backend/app/main.py`); there is no request-logging or correlation-id middleware. User management mutates accounts (invite / role change / deactivate / soft-delete), so an audit trail of **who changed whom** is desirable and currently absent. `public.users.invited_by` captures invite attribution, but role changes, deactivations, and soft-deletes are not recorded anywhere. Add structured request logging (correlation IDs, actor id, target id, action) during production hardening; a dedicated `user_audit_log` table or append-only event stream would be the durable option.
+*Narrowed 2026-08-06: the request-logging half of this item is now built. Structured
+logging with correlation IDs and actor attribution ships in
+`backend/app/core/logging_config.py` + `backend/app/core/request_logging.py`, so every
+mutation is now attributable in the logs to a `user_id` + `role` and a `request_id`.*
+
+What remains is durability. Log retention is not an audit trail: user management mutates
+accounts (invite / role change / deactivate / soft-delete) and only `public.users.invited_by`
+persists attribution to the database. Role changes, deactivations, and soft-deletes leave no
+queryable record once logs age out of CloudWatch.
+
+The durable option is a dedicated append-only `user_audit_log` table (actor id, target id,
+action, before/after role, timestamp) written from `backend/app/services/user_service.py`
+alongside each mutation. Deferred because it needs a schema migration and a decision on
+whether the same table should cover non-user mutations (awards, contracts) rather than being
+built user-specific and then retrofitted.
 
 ## User Management UI — accept-invite "already-onboarded" detection (Phase 3 frontend)
 

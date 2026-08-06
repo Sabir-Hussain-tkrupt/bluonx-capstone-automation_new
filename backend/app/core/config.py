@@ -32,7 +32,21 @@ class Settings(BaseSettings):
     BUSINESS_TIMEZONE: str = "America/Chicago"
 
     # CORS
+    # Browser origins allowed to call this API. The localhost default is a dev
+    # convenience; production must supply real https origins (enforced in
+    # _validate_cors_origins below) so a deploy that forgets this var fails at
+    # startup rather than at the first browser call.
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+
+    # Logging
+    # LOG_LEVEL is the root logger level. LOG_FORMAT selects the handler
+    # formatter: "console" (human-readable, for local dev) or "json" (one JSON
+    # object per line, for CloudWatch Logs Insights). Left unset, LOG_FORMAT
+    # resolves to "json" under APP_ENV=production and "console" otherwise, so a
+    # production deploy gets structured logs without anyone remembering to set
+    # it. See app/core/logging_config.py.
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str | None = None
 
     # Google Maps
     GOOGLE_MAPS_API_KEY: str | None = None
@@ -153,6 +167,69 @@ class Settings(BaseSettings):
                     f"APP_ENV=production (got '{self.FRONTEND_BASE_URL}'); refusing "
                     "to start so invite links do not point at a dev host."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_cors_origins(self) -> "Settings":
+        """Fail fast on unsafe CORS origins in production.
+
+        Without this, a deploy that forgets CORS_ORIGINS boots cleanly and then
+        fails every browser call with an opaque CORS error that looks like a
+        frontend bug. Mirrors _validate_frontend_base_url: refuse to start so the
+        misconfiguration surfaces at deploy time.
+        """
+        if self.APP_ENV.lower() != "production":
+            return self
+
+        if not self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must list at least one origin when "
+                "APP_ENV=production; refusing to start so the frontend does not "
+                "fail every request with an opaque CORS error."
+            )
+
+        for origin in self.CORS_ORIGINS:
+            value = origin.strip()
+            if value == "*":
+                raise ValueError(
+                    "CORS_ORIGINS must not contain '*' when APP_ENV=production; "
+                    "name the exact frontend origin(s) instead."
+                )
+            if "localhost" in value or "127.0.0.1" in value:
+                raise ValueError(
+                    f"CORS_ORIGINS contains a localhost origin ('{origin}') while "
+                    "APP_ENV=production; refusing to start so a dev origin is not "
+                    "trusted in production."
+                )
+            if not value.startswith("https://"):
+                raise ValueError(
+                    f"CORS_ORIGINS entry '{origin}' must be an https:// origin when "
+                    "APP_ENV=production."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_log_format(self) -> "Settings":
+        """Default LOG_FORMAT from APP_ENV, then validate the logging knobs.
+
+        Deriving the default means production gets JSON logs without a separate
+        env var to forget; an explicit LOG_FORMAT still wins.
+        """
+        if self.LOG_FORMAT is None:
+            self.LOG_FORMAT = "json" if self.APP_ENV.lower() == "production" else "console"
+
+        self.LOG_FORMAT = self.LOG_FORMAT.strip().lower()
+        if self.LOG_FORMAT not in ("console", "json"):
+            raise ValueError(
+                f"LOG_FORMAT must be 'console' or 'json' (got '{self.LOG_FORMAT}')."
+            )
+
+        self.LOG_LEVEL = self.LOG_LEVEL.strip().upper()
+        if self.LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            raise ValueError(
+                "LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL "
+                f"(got '{self.LOG_LEVEL}')."
+            )
         return self
 
 

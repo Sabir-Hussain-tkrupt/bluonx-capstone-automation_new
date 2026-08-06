@@ -37,9 +37,11 @@ def test_production_with_ses_and_creds_ok():
         EMAIL_PROVIDER="ses",
         AWS_ACCESS_KEY_ID="ak",
         AWS_SECRET_ACCESS_KEY="sk",
-        # Production also requires a real staff-frontend URL (separate validator);
-        # supply one so this test isolates the email-provider rule.
+        # Production also requires a real staff-frontend URL and real CORS
+        # origins (separate validators); supply both so this test isolates the
+        # email-provider rule.
         FRONTEND_BASE_URL="https://app.example.com",
+        CORS_ORIGINS=["https://app.example.com"],
     )
     assert s.EMAIL_PROVIDER == "ses"
 

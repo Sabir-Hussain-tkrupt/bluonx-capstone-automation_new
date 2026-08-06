@@ -6,6 +6,68 @@ bottom; check each item in the deploy PR or release notes.
 
 ---
 
+## Environment Variables
+
+Vars whose absence or wrong value breaks production. Two of the three now refuse
+to boot rather than failing quietly at first use.
+
+- [ ] **`CORS_ORIGINS`** set to the production frontend origin(s), e.g.
+  `["https://app.bluonx.com"]`. Startup **refuses to boot** under `APP_ENV=production`
+  on an empty list, `"*"`, a localhost/127.0.0.1 origin, or a non-https origin
+  (`backend/app/core/config.py::_validate_cors_origins`). One origin is enough while the
+  vendor portal is served by the same Vite app as the staff dashboard (`/bid/*` routes);
+  add a second only if the portal gets its own domain.
+
+- [ ] **`LOG_LEVEL`** (default `INFO`) and **`LOG_FORMAT`**. Leave `LOG_FORMAT` unset:
+  it resolves to `json` under `APP_ENV=production` and `console` elsewhere, so structured
+  logs are automatic. Set it explicitly only to override.
+
+- [ ] **`SES_CONFIGURATION_SET`**, **`FRONTEND_BASE_URL`** — covered in their own sections
+  below.
+
+---
+
+## Container Image and ECS Service
+
+The Dockerfile is production-shaped (multi-stage, non-root, single worker) but there are
+no deployment manifests. Nothing below is code; it is all infra to stand up.
+
+- [ ] **Run on ECS Fargate with `desiredCount = 1`.** Lambda is **not** a viable target:
+  APScheduler runs in-process and needs a long-lived process, so all eight scheduled jobs
+  would simply never fire. See the Scheduler section below.
+
+- [ ] **Set the deployment strategy to `minimumHealthyPercent = 0` /
+  `maximumPercent = 100`.** The default ECS rolling deploy briefly runs the old and new
+  task together, which means two APScheduler instances, which double-sends every email in
+  that window. The Scheduler section covers steady state; this covers the deploy
+  transient.
+
+- [ ] **Ship the DocuSign private key into the container.** `DOCUSIGN_PRIVATE_KEY_PATH`
+  defaults to `secrets/docusign_private_key.pem`, but `backend/secrets/` is gitignored and
+  the Dockerfile copies only `app/`, so the key is **not** in the image and JWT mint will
+  fail at runtime. Either inject the PEM from Secrets Manager to that path at task start,
+  or change the config to accept the key material directly from an env var.
+
+- [ ] **ALB target group health check to `/health`.** Unauthenticated, returns 200, and is
+  logged at DEBUG so continuous polling does not bury real traffic.
+
+- [ ] **Create the CloudWatch log group.** The app writes JSON (one object per line) to
+  **stdout**, with `request_id`, `method`, `path`, `route`, `status`, `duration_ms`, and
+  the acting `user_id`/`role` (or `vendor_id`) as top-level fields, queryable directly in
+  Logs Insights.
+
+- [ ] **Push the image to ECR** and wire the task definition secrets (Supabase keys, both
+  JWT secrets, AWS creds, DocuSign creds) through Secrets Manager rather than plain env.
+
+### Verification after deploy
+
+- [ ] `curl -i https://<prod-api>/health` returns 200 and an `X-Request-ID` response
+  header.
+- [ ] A CloudWatch Logs Insights query on `status >= 500` parses cleanly as JSON, and one
+  known request can be traced end to end by its `request_id`.
+
+---
+
 ## User Management
 
 The admin User Management feature (invite / list / change-role / deactivate /
@@ -143,3 +205,33 @@ every holiday. Nothing alerts on this, so it has to be seeded at deploy.
   remembering. It is deliberately excluded from the staleness self-check — a
   one-year interval is meaningless to that math — so the seed above is the only
   thing standing between deploy and the first January run.
+
+---
+
+## Frontend Build
+
+- [ ] **`VITE_DEMO_MODE=false`.** Already the value in `frontend/.env.production`; confirm
+  the production build actually picks that file up, because demo mode serves an in-memory
+  mock portal API and would put mock data in front of real vendors.
+
+- [ ] **`VITE_API_BASE_URL`** points at the production API origin, and
+  **`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`** at the production project.
+
+- [ ] **Regenerate `frontend/src/types/database.types.ts`.** It is still the placeholder
+  whose `Tables` carries `[key: string]: any`, so every direct Supabase read outside
+  `users` is typed `any` and the read half of the hybrid data-access pattern has no type
+  safety. Run
+  `npx supabase gen types typescript --project-id <id> > src/types/database.types.ts`.
+  Expect this to surface type errors that `any` was masking, so do it in its own PR rather
+  than on deploy day.
+
+---
+
+## CI
+
+- [ ] **Add a GitHub Actions workflow.** `.github/` does not exist, so the backend suite
+  (160 test files) and the frontend typecheck only run when someone remembers. At minimum:
+  `pytest` for the backend and `tsc --noEmit` plus `vitest` for the frontend, on every PR.
+  Note the backend suite currently requires live Supabase credentials and a
+  `TEST_ADMIN_EMAIL` / `TEST_ADMIN_PASSWORD` pair (see `backend/tests/conftest.py`), so CI
+  needs either those secrets or a dedicated test project.

@@ -22,6 +22,7 @@ from jwt import PyJWKClient
 from supabase import Client
 
 from app.core.config import settings
+from app.core.logging_config import set_actor
 from app.core.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,10 @@ async def get_current_user(
             detail="Invalid token payload",
         )
 
+    # Attribute this request in the logs. Covers endpoints that stop at the fast
+    # path; get_current_active_user adds the role on top.
+    set_actor(user_id=user_id)
+
     return {"user_id": user_id, "email": payload.get("email", "")}
 
 
@@ -155,6 +160,8 @@ async def get_current_active_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated",
         )
+
+    set_actor(user_id=profile["id"], role=profile["role"])
 
     return {
         "user_id": profile["id"],

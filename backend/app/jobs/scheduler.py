@@ -17,9 +17,12 @@ See docs/adr/0001-scheduler-single-instance.md.
 
 import functools
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from app.core.logging_config import request_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -98,21 +101,36 @@ def tracked_job(job_id: str):
     failure, but NEVER re-raised — a failing job must not crash the
     scheduler. Structured logging is the production safety net (no Sentry
     today).
+
+    Each run also gets its own correlation id, so every line the job body emits
+    (via any logger, at any depth) can be gathered into one run. Without it a
+    failed nightly job is scattered across dozens of unattributable lines.
     """
 
     def decorator(fn):
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
-            logger.info("%s job started", job_id)
+            token = request_id_var.set(uuid.uuid4().hex)
+            logger.info("%s job started", job_id, extra={"job_id": job_id})
             try:
                 result = await fn(*args, **kwargs)
                 record_last_run(job_id, status="success", result=result)
-                logger.info("%s job complete: %s", job_id, result)
+                logger.info(
+                    "%s job complete: %s", job_id, result, extra={"job_id": job_id}
+                )
                 return result
             except Exception as exc:  # noqa: BLE001 — must not escape the scheduler
-                logger.error("%s job failed: %s", job_id, exc, exc_info=True)
+                logger.error(
+                    "%s job failed: %s",
+                    job_id,
+                    exc,
+                    exc_info=True,
+                    extra={"job_id": job_id},
+                )
                 record_last_run(job_id, status="failure", error=str(exc))
                 return None
+            finally:
+                request_id_var.reset(token)
 
         return wrapper
 
