@@ -3,34 +3,6 @@
 Items intentionally deferred during implementation. Reference this file when moving to production or starting later phases.
 
 
-## Per-document "missing docs" warning (Task 8.4)
-
-Task 8.4's warning-flag set ships with `onboarding_incomplete`, which covers the MVP need: a single signal that the vendor's onboarding paperwork is not fully in place. A finer-grained per-document warning ("missing W-9", "missing COI", etc.) was considered and deferred. It would require:
-
-1. Plumbing the per-document checklist from `vendor_documents` (and the onboarding requirement table that drives it) into `scoring_metadata.inputs` so the recommendation builder can derive truthful per-doc flags.
-2. UI surface in 8.3's flag-chip layer to display N codes per vendor.
-
-`onboarding_incomplete` is intentionally labeled by the *enum status*, not by "missing docs," to stay truthful to the data the metadata snapshot actually carries today. Revisit when vendor-document plumbing reaches the scoring inputs.
-
-## Manual score adjustment (Task 8.4)
-
-The `bid_scores.scored_by` column was provisioned in Phase 8.2 as a dormant seam: NULL means the row is system-generated; non-NULL would mark a manual adjustment. Task 8.4 confirmed it remains dormant for MVP — manual override is **not** built.
-
-Rationale: PM discretion is exercised at award time (Phase 9), where `awards.override_justification` captures the reason for picking against the recommendation. There is no second discretionary lever needed at scoring time, and adding one would split judgment across two surfaces.
-
-If a manual-adjustment write path is ever added, the orchestrator at `backend/app/services/bid_scoring_service.py` already preserves manual rows on recompute (rows where `scored_by IS NOT NULL` are filtered before upsert), so no further change to scoring is required.
-
-## Contract payment terms — placeholder text (Task 9.x)
-
-**MUST be replaced with the client's real subcontract payment terms before production.** The contract PDF currently ships a placeholder: `DEFAULT_PAYMENT_TERMS` in `backend/app/services/contract_pdf.py` ("Net 30 days ... [Placeholder — client subcontract terms pending.]"). It fills the PAYMENT TERMS clause whenever no `payment_terms` value is supplied on the contract, which is the case today (the contract row is born with `payment_terms = NULL`), so **every generated contract renders the placeholder**. Shipping this to a real vendor would put unverified, non-authoritative payment language into a signed legal document.
-
-**Touchpoints to finalize:**
-1. `DEFAULT_PAYMENT_TERMS` in `backend/app/services/contract_pdf.py` — replace with the client-approved terms text (or remove the "[Placeholder ...]" tag once approved).
-2. `backend/app/templates/contracts/firm_terms.txt.j2` — the whole terms body is the ISOLATED, SWAPPABLE template flagged for the client's own boilerplate (decision #2); swap it wholesale when the client provides subcontract language.
-3. If terms should vary per contract rather than being firm-wide boilerplate, populate `contracts.payment_terms` at envelope-send in `contract_envelope_service.send_contract_envelope` (currently left NULL, which is why the default fires).
-
-Related: the same swappable template also carries the schedule/validity clauses and the dormant "Date of signed scope of work" seam — see Task 9.8.
-
 ## User Management — invite rate limiter is per-process (Phase 3 / user management)
 
 `POST /api/v1/users/invite` reuses the in-memory sliding-window limiter in `backend/app/core/rate_limit.py` (`validate_token_rate_limit`, 10 req / 60s / IP). State is per worker process, not cluster-wide. This is acceptable today because production runs a single Fargate task (desiredCount=1), so per-process is effectively cluster-wide. Before scaling horizontally past one instance, move the limiter to a shared store (Redis or a DB-backed counter) so the bound holds across workers. Touchpoint: `backend/app/core/rate_limit.py` (swap the module-level `_buckets` dict for a shared backend); the invite endpoint dependency wiring stays the same.
