@@ -88,6 +88,8 @@ These patterns recur across phases. They are stated once here so the phase secti
 
 **Scheduling is in-process.** All scheduled jobs run inside the FastAPI process via APScheduler. There is no separate orchestration service.
 
+**Database errors are mapped to HTTP per service, not centrally.** Each service catches `postgrest.exceptions.APIError` (and PT4xx SQLSTATE codes) and chooses its own status, rather than routing through a shared translator or a FastAPI exception handler. The `_is_unique_violation` / `_has_pt_code` helpers are therefore duplicated across nine modules by convention, not oversight. Consolidate only when the error layer is next touched for another reason.
+
 ---
 
 ## D. Phase-by-phase status
@@ -403,3 +405,5 @@ Consolidated list of where the build diverged from the plan. This grows as later
 | 17 | Staff alerts via n8n email workflows and PM/admin email digests (Phase 7) | Staff alerts are in-app notifications via the `notifications` table; only the three vendor bid-reminder email templates ship; the two admin digest templates were dropped | Vendors still receive email; internal users use the bell/notification UI. Channel split by recipient type. |
 | 18 | Bid normalization engine (Task 8.1) | Not built; unnecessary because one template per package makes bids structurally comparable. 8.1 became template freeze guards | Comparable numbers are already snapshotted into `bid_line_items` at submission. See entry 11 for the freeze mechanism. |
 | 19 | PM can manually adjust individual scores (Task 8.4) | Not built; `bid_scores.scored_by` stays a dormant seam | PM discretion is exercised at award time via override justification (Phase 9). See `DEFERRED.md`. |
+| 20 | Accept-invite recognises an already-onboarded user | Not built; any live session shows the set-password form | The Supabase client `Session`/`User` carries no reliable "has a password" signal, so the path is idempotent instead. Re-setting a password is harmless. Only two states are reliably detectable: no session (invalid/expired link) and session (set-password form). |
+| 21 | Role rendered as a badge/pill in the user roster | Plain text ("Admin" / "Project Manager") | No design-token convention exists for role pills, unlike `StatusBadge` which owns account status. Kept as text rather than inventing an ad hoc palette. |
