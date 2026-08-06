@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.6
--- Date:     August 2, 2026
+-- Version:  3.7
+-- Date:     August 5, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   33
 -- Engine:   PostgreSQL via Supabase
@@ -2339,6 +2339,99 @@ $$ LANGUAGE plpgsql;
 
 REVOKE ALL   ON FUNCTION fn_mark_contract_complete(UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION fn_mark_contract_complete(UUID) TO service_role;
+
+
+-- Insert a multi-day holiday shutdown atomically.
+--
+-- The obvious implementation — one multi-row INSERT — is quietly wrong. A
+-- multi-row INSERT is ONE SQL command, and Postgres does not increment the
+-- command counter between the rows of a single command, so a BEFORE ... FOR
+-- EACH ROW trigger cannot see the siblings being inserted alongside it.
+-- fn_holidays_guardrails would evaluate every row against the pre-batch state:
+-- the 25/year cap would count as if none of the batch existed, and the
+-- 14-consecutive walk would never see the run the batch is itself creating. A
+-- bulk range could create exactly the closure the guardrails exist to prevent,
+-- and report success.
+--
+-- Looping row-by-row fixes it: each INSERT is its own SPI command, plpgsql
+-- increments the command counter between statements, and row N's trigger sees
+-- rows 1..N-1. One implicit transaction, so any rejection rolls the whole range
+-- back — there is no partial import to clean up.
+CREATE OR REPLACE FUNCTION fn_create_holiday_range(
+  p_start      DATE,
+  p_end        DATE,
+  p_name       TEXT,
+  p_created_by UUID
+)
+RETURNS SETOF holidays AS $$
+DECLARE
+  v_cursor DATE    := p_start;
+  v_row    holidays;
+  v_count  INTEGER := 0;
+BEGIN
+  IF p_start IS NULL OR p_end IS NULL THEN
+    RAISE EXCEPTION 'A holiday range needs both a start and an end date.'
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  IF p_end < p_start THEN
+    RAISE EXCEPTION 'The end date (%) cannot be before the start date (%).', p_end, p_start
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  -- Sanity ceiling only. The 14-consecutive guardrail is the real limit and will
+  -- reject anything close to this; this exists so a fat-fingered decade-long
+  -- range fails immediately instead of looping thousands of times first.
+  IF (p_end - p_start) > 30 THEN
+    RAISE EXCEPTION 'A holiday range cannot span more than 31 days (got % days).',
+      (p_end - p_start) + 1 USING ERRCODE = 'PT422';
+  END IF;
+
+  IF btrim(COALESCE(p_name, '')) = '' THEN
+    RAISE EXCEPTION 'A holiday needs a name.' USING ERRCODE = 'PT422';
+  END IF;
+
+  WHILE v_cursor <= p_end LOOP
+    -- Weekends are skipped SILENTLY rather than rejected. They are already
+    -- non-working days, storing them would inflate the contiguous-run count
+    -- against its own cap, and "mark the shutdown week Mon-Sun" should do the
+    -- obvious thing instead of erroring.
+    IF EXTRACT(DOW FROM v_cursor) NOT IN (0, 6) THEN
+
+      -- Named up front so the admin gets the offending DATE. Falling through to
+      -- the UNIQUE constraint would surface Postgres' raw index text instead.
+      IF EXISTS (SELECT 1 FROM holidays WHERE holiday_date = v_cursor) THEN
+        RAISE EXCEPTION '% is already marked as a holiday. Remove it first, or pick a range that does not include it.',
+          v_cursor USING ERRCODE = 'PT409';
+      END IF;
+
+      -- One statement per row: this is the whole point of the function. The
+      -- guardrail trigger fires here and sees every row inserted above it.
+      INSERT INTO holidays (holiday_date, name, source, created_by)
+      VALUES (v_cursor, btrim(p_name), 'manual', p_created_by)
+      RETURNING * INTO v_row;
+
+      RETURN NEXT v_row;
+      v_count := v_count + 1;
+    END IF;
+
+    v_cursor := v_cursor + 1;
+  END LOOP;
+
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'That range contains only weekends, which are already non-working days.'
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION fn_create_holiday_range(DATE, DATE, TEXT, UUID) IS
+  'Insert every weekday in [p_start, p_end] as one manual holiday, atomically. Loops row-by-row so the BEFORE-ROW guardrail trigger sees earlier rows of the same call (a multi-row INSERT would not). Weekends are skipped silently. Any guardrail rejection rolls the entire range back.';
+
+REVOKE ALL   ON FUNCTION fn_create_holiday_range(DATE, DATE, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_create_holiday_range(DATE, DATE, TEXT, UUID) TO service_role;
 
 
 -- ============================================================================

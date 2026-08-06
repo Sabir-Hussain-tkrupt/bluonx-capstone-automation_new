@@ -43,11 +43,8 @@ export interface ResolvedEntityLabel {
 }
 
 interface CrumbConfig {
-  /**
-   * Parent route pattern. A function receives the viewer's role so a route can
-   * skip a parent it is not allowed to visit.
-   */
-  parent?: string | ((ctx: TrailContext) => string | undefined);
+  /** Parent route pattern. */
+  parent?: string;
   label: string | EntityLabel;
   /**
    * Query string identifying the tab of the parent page that contains this
@@ -56,10 +53,6 @@ interface CrumbConfig {
    * default tab, which is what the browser back button already does.
    */
   parentQuery?: string;
-}
-
-export interface TrailContext {
-  isAdmin: boolean;
 }
 
 export interface CrumbDescriptor {
@@ -131,13 +124,7 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
   [ROUTES.SETTINGS]: { parent: ROUTES.DASHBOARD, label: 'Settings' },
   [ROUTES.SETTINGS_TRADES]: { parent: ROUTES.SETTINGS, label: 'Trades' },
   [ROUTES.SETTINGS_USERS]: { parent: ROUTES.SETTINGS, label: 'Users' },
-  // The calendar is the one /settings child open to non-admins, so for a PM its
-  // parent crumb would link to an admin-gated route that bounces them to the
-  // dashboard. Skip the rung instead of shipping a dead end.
-  [ROUTES.SETTINGS_CALENDAR]: {
-    parent: (ctx) => (ctx.isAdmin ? ROUTES.SETTINGS : ROUTES.DASHBOARD),
-    label: 'Holiday Calendar',
-  },
+  [ROUTES.SETTINGS_CALENDAR]: { parent: ROUTES.SETTINGS, label: 'Holiday Calendar' },
 };
 
 /**
@@ -162,7 +149,7 @@ const RANKED_PATTERNS = Object.keys(CRUMB_CONFIG).sort((a, b) => {
  * Pure: entity labels come back as descriptors, and useBreadcrumbs resolves
  * them against the query cache.
  */
-export function resolveTrail(pathname: string, ctx: TrailContext): CrumbDescriptor[] {
+export function resolveTrail(pathname: string): CrumbDescriptor[] {
   const pattern = RANKED_PATTERNS.find((p) => matchPath(p, pathname));
   if (!pattern) return [];
 
@@ -174,10 +161,7 @@ export function resolveTrail(pathname: string, ctx: TrailContext): CrumbDescript
     // A cycle in the config would otherwise hang the render.
     if (chain.includes(current)) break;
     chain.unshift(current);
-    // Annotated: without it the inference of `parent` runs through `current`,
-    // which is assigned from `parent`, and tsc reports a circular initializer.
-    const parent: CrumbConfig['parent'] = CRUMB_CONFIG[current]?.parent;
-    current = typeof parent === 'function' ? parent(ctx) : parent;
+    current = CRUMB_CONFIG[current]?.parent;
   }
 
   return chain.map((p, i) => {

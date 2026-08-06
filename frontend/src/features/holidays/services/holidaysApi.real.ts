@@ -1,49 +1,98 @@
 /**
- * Real-backend implementation of the holiday calendar — NOT WIRED YET.
+ * Holiday calendar data layer.
  *
  * Never import from this file directly — import from `holidaysApi.ts`.
  *
- * The `holidays` table and its FastAPI endpoints land in a later phase. Until
- * then every method throws a clear error, and the router (`holidaysApi.ts`)
- * points at the mock. When the backend exists, fill in the four methods below
- * and flip `USE_MOCK_HOLIDAYS` in the router — no component, hook, or type
- * change is required, because both impls satisfy the same `HolidaysApi`.
+ * Follows the app's read/write split:
+ *   - listHolidays  → Supabase directly, protected by the
+ *     `holidays_select_authenticated` RLS policy (any active user may read).
+ *   - create/update/delete → FastAPI, which enforces admin in application code.
+ *     Those handlers hold the service_role key and bypass RLS, so that check is
+ *     the real gate.
  *
- * Intended shape, following the app's read/write split:
- *   - listHolidays → direct Supabase read (RLS-protected), e.g.
- *       supabase.from('holidays').select('*')
- *         .gte('date', `${year}-01-01`).lte('date', `${year}-12-31`)
- *         .order('date', { ascending: true })
- *     mapped to `Holiday[]`, rejecting with the shared `ApiError` shape.
- *   - create/update/delete → FastAPI writes via `api` + `API_ENDPOINTS.HOLIDAYS`.
- *     The server enforces the same rules and returns `HolidayValidationError`.
+ * The DB column is `holiday_date`; the UI type calls it `date`. The mapping
+ * lives here, at the seam, so no component or hook has to know.
+ *
+ * Validation messages are NOT reproduced here. The past-date freeze and the two
+ * caps come from the DB guardrail trigger as PT422, the weekend rule from the
+ * API, and duplicates as a 409 — all of them worded server-side and passed
+ * through by the axios interceptor, which preserves `detail` verbatim on 409 and
+ * on a 422 whose detail is a string.
  */
-import type { ApiError } from '@/lib/api';
-import type { HolidaysApi } from './holidaysApi.types';
+import { supabase } from '@/lib/supabase';
+import { api, type ApiError } from '@/lib/api';
+import { API_ENDPOINTS } from '@/constants/api';
+import type { Holiday, HolidaysApi } from './holidaysApi.types';
 
-function notWired(): never {
-  const error: ApiError = {
-    message: 'The holiday calendar backend is not wired up yet.',
-    code: 'NOT_IMPLEMENTED',
-    status: 501,
+/** The `holidays` row shape as it comes back from Supabase. */
+interface HolidayRow {
+  id: string;
+  holiday_date: string;
+  name: string;
+  source: Holiday['source'];
+  created_at: string;
+  updated_at: string;
+}
+
+function toHoliday(row: HolidayRow): Holiday {
+  return {
+    id: row.id,
+    date: row.holiday_date,
+    name: row.name,
+    source: row.source,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
-  throw error;
 }
 
 export const realHolidaysApi: HolidaysApi = {
-  async listHolidays() {
-    return notWired();
+  async listHolidays(year) {
+    const { data, error } = await supabase
+      .from('holidays')
+      .select('id, holiday_date, name, source, created_at, updated_at')
+      .gte('holiday_date', `${year}-01-01`)
+      .lte('holiday_date', `${year}-12-31`)
+      .order('holiday_date', { ascending: true });
+
+    if (error) {
+      const apiError: ApiError = {
+        message: error.message,
+        code: error.code,
+        status: 0,
+        details: error,
+      };
+      throw apiError;
+    }
+
+    return ((data ?? []) as unknown as HolidayRow[]).map(toHoliday);
   },
-  async createHoliday() {
-    return notWired();
+
+  async createHoliday(input) {
+    const { data } = await api.post(API_ENDPOINTS.HOLIDAYS, {
+      holiday_date: input.date,
+      name: input.name,
+    });
+    return toHoliday(data as HolidayRow);
   },
-  async createHolidayRange() {
-    return notWired();
+
+  async createHolidayRange(input) {
+    const { data } = await api.post(API_ENDPOINTS.HOLIDAYS_RANGE, {
+      start_date: input.startDate,
+      end_date: input.endDate,
+      name: input.name,
+    });
+    return (data as HolidayRow[]).map(toHoliday);
   },
-  async updateHoliday() {
-    return notWired();
+
+  async updateHoliday(input) {
+    const { data } = await api.patch(API_ENDPOINTS.HOLIDAY(input.id), {
+      holiday_date: input.date,
+      name: input.name,
+    });
+    return toHoliday(data as HolidayRow);
   },
-  async deleteHoliday() {
-    return notWired();
+
+  async deleteHoliday(id) {
+    await api.delete(API_ENDPOINTS.HOLIDAY(id));
   },
 };
