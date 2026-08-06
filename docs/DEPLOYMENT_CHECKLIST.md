@@ -235,3 +235,16 @@ every holiday. Nothing alerts on this, so it has to be seeded at deploy.
   Note the backend suite currently requires live Supabase credentials and a
   `TEST_ADMIN_EMAIL` / `TEST_ADMIN_PASSWORD` pair (see `backend/tests/conftest.py`), so CI
   needs either those secrets or a dedicated test project.
+
+
+
+## Contract payment terms — placeholder text (Task 9.x)
+
+**MUST be replaced with the client's real subcontract payment terms before production.** The contract PDF currently ships a placeholder: `DEFAULT_PAYMENT_TERMS` in `backend/app/services/contract_pdf.py` ("Net 30 days ... [Placeholder — client subcontract terms pending.]"). It fills the PAYMENT TERMS clause whenever no `payment_terms` value is supplied on the contract, which is the case today (the contract row is born with `payment_terms = NULL`), so **every generated contract renders the placeholder**. Shipping this to a real vendor would put unverified, non-authoritative payment language into a signed legal document.
+
+**Touchpoints to finalize:**
+1. `DEFAULT_PAYMENT_TERMS` in `backend/app/services/contract_pdf.py` — replace with the client-approved terms text (or remove the "[Placeholder ...]" tag once approved).
+2. `backend/app/templates/contracts/firm_terms.txt.j2` — the whole terms body is the ISOLATED, SWAPPABLE template flagged for the client's own boilerplate (decision #2); swap it wholesale when the client provides subcontract language.
+3. If terms should vary per contract rather than being firm-wide boilerplate, populate `contracts.payment_terms` at envelope-send in `contract_envelope_service.send_contract_envelope` (currently left NULL, which is why the default fires).
+
+Related: the same swappable template also carries the schedule/validity clauses and the dormant "Date of signed scope of work" seam — see Task 9.8.
