@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ProjectContextPanel } from '../ProjectContextPanel';
-import type { PortalBidPackage, PortalProject, PortalTask } from '../../types/portal';
+import type { PortalProject, PortalTask } from '../../types/portal';
+import { makePortalBidPackage as pkg } from '../../test/fixtures';
 
 const project: PortalProject = {
   id: 'p1',
@@ -16,17 +17,6 @@ const task: PortalTask = {
   description: 'Bring pads to subgrade.',
   trade_name: 'Earthwork',
 };
-
-function pkg(overrides: Partial<PortalBidPackage> = {}): PortalBidPackage {
-  return {
-    id: 'pkg1',
-    round_number: 1,
-    deadline: '2026-09-01T17:00:00Z',
-    instructions: '',
-    desired_start_date: null,
-    ...overrides,
-  };
-}
 
 describe('ProjectContextPanel — desired_start_date', () => {
   it('renders the desired-start row when the package has one', () => {

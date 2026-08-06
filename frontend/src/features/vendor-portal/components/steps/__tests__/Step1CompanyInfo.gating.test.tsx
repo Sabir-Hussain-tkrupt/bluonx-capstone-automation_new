@@ -2,32 +2,19 @@ import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Step1CompanyInfo } from '../Step1CompanyInfo';
 import type { VendorBidContext } from '../../../types/portal';
+import {
+  makePortalBidPackage,
+  makePortalVendor,
+  makeVendorBidContext,
+} from '../../../test/fixtures';
 
 function buildCtx(desired: string | null): VendorBidContext {
-  return {
-    vendor: {
-      id: 'v1',
-      company_name: 'Apex',
-      primary_contact_name: 'Jane',
-      email: 'jane@a.example',
-      phone: null,
-    },
-    project: { id: 'p1', name: 'Phoenix', location: 'AZ', address: '1 Main' },
-    task: { id: 't1', name: 'Mass Grading', description: '', trade_name: 'EW' },
-    bid_package: {
-      id: 'pkg1',
-      round_number: 1,
-      deadline: '2026-09-01T17:00:00Z',
-      instructions: '',
-      desired_start_date: desired,
-      scope_of_work_document_id: null,
-      scope_of_work_file_name: null,
-    },
-    bid_template: { id: 'tpl', name: 'T', is_lump_sum: true, items: [] },
-    project_documents: [],
-    existing_draft: null,
-    revision_context: null,
-  };
+  return makeVendorBidContext({
+    // The SoW attestation is only valid when it matches company_name, and the
+    // tests below sign by typing 'Apex'. Set explicitly so the two stay in step.
+    vendor: makePortalVendor({ company_name: 'Apex' }),
+    bid_package: makePortalBidPackage({ desired_start_date: desired }),
+  });
 }
 
 const ctxRef: { current: VendorBidContext } = { current: buildCtx(null) };

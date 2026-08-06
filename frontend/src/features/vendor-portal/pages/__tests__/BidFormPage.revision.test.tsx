@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import { renderWithRouter } from '@/test/test-utils';
 import { BidFormPage } from '../BidFormPage';
 import type { VendorBidContext } from '../../types/portal';
+import { makePortalBidPackage, makeVendorBidContext } from '../../test/fixtures';
 
 const getRevisionPrefill = vi.fn();
 const listSubmissionAttachments = vi.fn();
@@ -24,27 +25,13 @@ vi.mock('@/features/vendor-portal/hooks/useBidContext', () => ({
 function baseContext(
   revision: VendorBidContext['revision_context'],
 ): VendorBidContext {
-  return {
-    vendor: {
-      id: 'v1',
-      company_name: 'Summit',
-      primary_contact_name: 'Marcus',
-      email: 'm@x.com',
-      phone: null,
-    },
-    project: { id: 'p1', name: 'Phoenix', location: 'AZ', address: 'a' },
-    task: { id: 't1', name: 'Grading', description: '', trade_name: 'EW' },
-    bid_package: {
-      id: 'bp1',
-      round_number: 1,
+  return makeVendorBidContext({
+    // A deadline a week out, so the form is not in its past-deadline state.
+    bid_package: makePortalBidPackage({
       deadline: new Date(Date.now() + 7 * 86400000).toISOString(),
-      instructions: '',
-    },
-    bid_template: { id: 'tpl', name: 'T', is_lump_sum: true, items: [] },
-    project_documents: [],
-    existing_draft: null,
+    }),
     revision_context: revision,
-  };
+  });
 }
 
 describe('BidFormPage revision mode', () => {

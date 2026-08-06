@@ -5,6 +5,11 @@ import { renderWithRouter } from '@/test/test-utils';
 import { RevisionLandingPage } from '../RevisionLandingPage';
 import type { VendorBidContext } from '../../types/portal';
 import { PortalApiError } from '../../types/portal';
+import {
+  makePortalBidPackage,
+  makePortalBidTemplate,
+  makeVendorBidContext,
+} from '../../test/fixtures';
 
 const navigateMock = vi.fn();
 
@@ -34,22 +39,11 @@ vi.mock('../../hooks/useBidContext', () => ({
 function baseContext(
   revision: VendorBidContext['revision_context'],
 ): VendorBidContext {
-  return {
-    vendor: {
-      id: 'v1',
-      company_name: 'Summit Earthworks',
-      primary_contact_name: 'Marcus',
-      email: 'm@x.com',
-      phone: null,
-    },
-    project: { id: 'p1', name: 'Phoenix Park', location: 'AZ', address: 'addr' },
-    task: { id: 't1', name: 'Grading', description: '', trade_name: 'Earthwork' },
-    bid_package: { id: 'bp1', round_number: 1, deadline: '', instructions: '' },
-    bid_template: { id: 'tpl', name: 'T', is_lump_sum: false, items: [] },
-    project_documents: [],
-    existing_draft: null,
+  return makeVendorBidContext({
+    bid_package: makePortalBidPackage({ deadline: '' }),
+    bid_template: makePortalBidTemplate({ name: 'T', is_lump_sum: false }),
     revision_context: revision,
-  };
+  });
 }
 
 describe('RevisionLandingPage', () => {
