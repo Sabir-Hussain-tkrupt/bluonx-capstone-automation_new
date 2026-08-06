@@ -3,12 +3,6 @@
 Items intentionally deferred during implementation. Reference this file when moving to production or starting later phases.
 
 
-## Task 1.9 — AWS Infrastructure
-- **Blocked:** Awaiting AWS credentials from client.
-- ECS task definitions / Lambda configuration
-- CI/CD pipeline (GitHub Actions → AWS)
-- Production environment variable management (Secrets Manager / Parameter Store)
-
 ## Task 2.6 — FastAPI Backend Scaffold
 
 - **CORS production origin:** Currently `http://localhost:5173`. Add Vercel/production domain to `CORS_ORIGINS` in `backend/.env` before deploy.
