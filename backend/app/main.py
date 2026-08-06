@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.logging_config import configure_logging
+from app.core.request_logging import RequestLoggingMiddleware
 from app.core.supabase_client import init_supabase
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.routers import (
@@ -41,6 +43,10 @@ from app.routers import (
     webhooks,
 )
 
+
+# Install the root logging configuration before anything else logs, so lifespan
+# and startup lines already carry the configured formatter.
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +82,22 @@ app = FastAPI(
 )
 
 # ── CORS Middleware ───────────────────────────────────────────────────────
+# allow_credentials is deliberately omitted: both auth paths are
+# `Authorization: Bearer` (Supabase JWT for staff, custom JWT for vendors) and
+# nothing sets or reads a cookie, so credentialed CORS is surface we don't use.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ── Request Logging Middleware ────────────────────────────────────────────
+# Registered AFTER CORS on purpose: add_middleware() inserts at position 0, so
+# the last one added is the OUTERMOST layer. Outermost is what we want — it
+# times the full request including CORS handling, and assigns a correlation id
+# to preflight and CORS-rejected requests too.
+app.add_middleware(RequestLoggingMiddleware)
 
 # ── Health (root-level, no prefix) ───────────────────────────────────────
 app.include_router(health.router)
