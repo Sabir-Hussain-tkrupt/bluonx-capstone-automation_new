@@ -3,7 +3,6 @@ import { useLocation } from 'react-router-dom';
 import { skipToken, useQueries } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import { resolveTrail, type EntityKind, type ResolvedEntityLabel } from '@/lib/breadcrumbs';
-import { useAuth } from '@/contexts/AuthContext';
 import type { BreadcrumbItem } from '@/components/ui/Breadcrumbs';
 
 /** Where each entity's display name lives in the query cache. */
@@ -51,10 +50,8 @@ const ENTITY_SOURCES: Record<
  */
 export function useBreadcrumbs(): BreadcrumbItem[] {
   const { pathname } = useLocation();
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
 
-  const trail = useMemo(() => resolveTrail(pathname, { isAdmin }), [pathname, isAdmin]);
+  const trail = useMemo(() => resolveTrail(pathname), [pathname]);
 
   const entityCrumbs = useMemo(
     () => trail.filter((c): c is { label: ResolvedEntityLabel; href?: string } =>

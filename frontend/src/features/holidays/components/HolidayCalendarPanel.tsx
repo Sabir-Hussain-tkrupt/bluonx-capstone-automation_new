@@ -8,7 +8,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
-import { useAuth } from '@/contexts/AuthContext';
 import { errorMessage } from '@/lib/api';
 import { formatDateOnly } from '@/lib/format';
 import { cn } from '@/utils/cn';
@@ -23,16 +22,16 @@ const currentYear = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 6 }, (_, i) => currentYear - 1 + i);
 
 export function HolidayCalendarPanel() {
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
   const { toast } = useToast();
 
   const [year, setYear] = useState(currentYear);
   const { data: holidays, isLoading, isError, error, refetch } = useHolidays(year);
 
-  // Every date in a past year is unaddable, so offering "Add" there would only
-  // ever error. Show the affordance solely where a holiday could actually land.
-  const canAdd = isAdmin && year >= currentYear;
+  // No role check here: /settings/calendar is admin-gated at the route, so every
+  // viewer of this panel can write. Every date in a past year is unaddable
+  // though, so offering "Add" there would only ever error — show the affordance
+  // solely where a holiday could actually land.
+  const canAdd = year >= currentYear;
 
   // Badge only the manual exceptions, and only in a year that also has a seeded
   // baseline. A badge on every row (or on an all-manual year) carries no signal.
@@ -150,7 +149,8 @@ export function HolidayCalendarPanel() {
           <ul className="divide-y divide-secondary-100">
             {holidays.map((holiday) => {
               const past = isPastYmd(holiday.date);
-              const canManage = isAdmin && !past;
+              // The DB freezes past dates, so edit/delete would always fail.
+              const canManage = !past;
               return (
                 <li
                   key={holiday.id}

@@ -28,9 +28,57 @@ SENT_FRI = "2026-07-10T12:00:00+00:00"
 SENT_MON = "2026-07-13T12:00:00+00:00"  # Mon -> Wed = 2 working days (not due)
 
 
+class FakeCalendar:
+    """Stand-in for BusinessCalendar with a configurable holiday list.
+
+    The real class talks to the database. This suite's FakeDB has a single
+    rpc_result and cannot dispatch by function name, so a live BusinessCalendar
+    would collide with the transition_milestone stubbing. The arithmetic itself
+    is covered against the real database in tests/holidays/.
+    """
+
+    holidays: list = []
+
+    def __init__(self, db=None):
+        self.db = db
+
+    def prime_holidays(self, start, end):
+        self.primed = (start, end)
+
+    def holidays_in(self, start, end):
+        return [h for h in self.holidays if start < h.date <= end]
+
+    def business_days_since(self, sent, today):
+        if today <= sent:
+            return 0
+        from datetime import timedelta
+
+        holiday_dates = {h.date for h in self.holidays}
+        count = 0
+        cursor = sent + timedelta(days=1)
+        while cursor <= today:
+            if cursor.weekday() < 5 and cursor not in holiday_dates:
+                count += 1
+            cursor += timedelta(days=1)
+        return count
+
+    def add_business_days(self, start, days):
+        from datetime import timedelta
+
+        holiday_dates = {h.date for h in self.holidays}
+        cursor, remaining = start, days
+        while remaining > 0:
+            cursor += timedelta(days=1)
+            if cursor.weekday() < 5 and cursor not in holiday_dates:
+                remaining -= 1
+        return cursor
+
+
 @pytest.fixture(autouse=True)
 def _patch_clock_and_side_effects(monkeypatch):
     monkeypatch.setattr(job, "business_today", lambda: TODAY)
+    FakeCalendar.holidays = []
+    monkeypatch.setattr(job, "BusinessCalendar", FakeCalendar)
     esc = MagicMock(return_value={"id": "ms"})
     pm_email = AsyncMock(return_value=True)
     notify = MagicMock(return_value={"id": "notif"})
@@ -317,3 +365,62 @@ async def test_bounced_checkin_is_not_escalated_end_to_end(
     assert counts["escalated"] == 0
     assert counts["bounce_notified"] == 1
     _patch_clock_and_side_effects["escalate"].assert_not_called()
+
+
+# ── The reason string ───────────────────────────────────────────────────────
+#
+# milestone_events.note is the ONLY place the working-day rule is ever visible
+# to a PM: the check-in email carries no reply-by date, and the milestone date
+# picker gives no holiday warning. So the note has to explain the timing, not
+# just assert a number.
+
+
+async def test_note_explains_the_timing_with_no_holidays(
+    make_db, _patch_clock_and_side_effects
+):
+    db = _db(make_db, [_alert()])
+    await _run(db)
+
+    note = _patch_clock_and_side_effects["escalate"].call_args.kwargs["note"]
+
+    # The pre-holiday sentence is preserved verbatim, so old log greps still hit.
+    assert note.startswith("No vendor response to progress check after 3 working days.")
+    assert "Check-in sent Jul 10, 2026" in note
+    assert "a reply was due by end of Jul 15, 2026" in note
+    assert "No holidays fell in this window." in note
+
+
+async def test_note_names_the_holiday_that_moved_the_deadline(
+    make_db, _patch_clock_and_side_effects
+):
+    """Sent Fri Jul 10 with Mon Jul 13 a holiday: only Tue and Wed count, so the
+    milestone is not yet due and the deadline has moved to Thursday."""
+    from app.core.time import Holiday
+
+    FakeCalendar.holidays = [Holiday(date(2026, 7, 13), "Planted Holiday")]
+
+    db = _db(make_db, [_alert()])
+    counts = await _run(db)
+
+    # 2 working days, not 3 — the holiday bought the vendor another day.
+    assert counts["escalated"] == 0
+    assert counts["skipped_not_due"] == 1
+
+
+async def test_note_lists_holidays_when_the_window_is_long_enough(
+    make_db, _patch_clock_and_side_effects
+):
+    """Sent Wed Jul 8 with Fri Jul 10 a holiday: Thu + Mon + Tue = 3 working
+    days by Wed Jul 15, so it escalates and the note has to say why it took
+    five calendar days."""
+    from app.core.time import Holiday
+
+    FakeCalendar.holidays = [Holiday(date(2026, 7, 10), "Planted Holiday")]
+
+    db = _db(make_db, [_alert(created_at="2026-07-08T12:00:00+00:00")])
+    counts = await _run(db)
+
+    assert counts["escalated"] == 1
+    note = _patch_clock_and_side_effects["escalate"].call_args.kwargs["note"]
+    assert "1 holiday excluded from the count: Planted Holiday on Jul 10, 2026." in note
+    assert "No holidays fell in this window." not in note

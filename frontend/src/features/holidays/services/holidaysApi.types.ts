@@ -1,15 +1,14 @@
 /**
  * Contract for the holiday-calendar data layer.
  *
- * The mock (`holidaysApi.mock.ts`) and the future real backend
- * (`holidaysApi.real.ts`) both implement `HolidaysApi`. Because both are typed
- * against this one interface, they cannot drift without a compile error — the
- * same drift-prevention net the vendor portal uses.
+ * `holidaysApi.real.ts` implements `HolidaysApi`; consumers import the resolved
+ * functions from `holidaysApi.ts` only, never from the implementation.
  *
- * Consumers import the resolved functions from `holidaysApi.ts` only, never
- * from a specific implementation.
+ * Rule violations arrive as the app-wide `ApiError` and are surfaced through
+ * `errorMessage()`, which shows the server's `message` verbatim. There is no
+ * holiday-specific error type: the axios interceptor derives `code` from the
+ * HTTP status, so a client-side rule enum could only ever be fiction.
  */
-import type { ApiError } from '@/lib/api';
 
 /** `'seeded'` rows come from the annual federal-holiday job; `'manual'` rows were added by an admin. Both are ordinary, editable, deletable rows. */
 export type HolidaySource = 'seeded' | 'manual';
@@ -43,28 +42,6 @@ export interface CreateHolidayRangeInput {
   /** Inclusive end, "YYYY-MM-DD". */
   endDate: string;
   name: string;
-}
-
-/**
- * The business rules the calendar enforces. The mock rejects with these codes
- * today; the real backend will return the same `{ code, message }` shape, so
- * the UI's error handling needs no change when the swap happens.
- */
-export type HolidayErrorCode =
-  | 'PAST_DATE'
-  | 'WEEKEND'
-  | 'YEAR_LIMIT'
-  | 'CONSECUTIVE_LIMIT'
-  | 'DUPLICATE_DATE'
-  | 'EMPTY_RANGE';
-
-/**
- * A rule violation. Extends the app-wide `ApiError` so `errorMessage()` and the
- * existing toast/alert paths surface `message` verbatim, while `code` lets
- * callers branch if they ever need to.
- */
-export interface HolidayValidationError extends ApiError {
-  code: HolidayErrorCode;
 }
 
 export interface HolidaysApi {

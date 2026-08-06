@@ -88,9 +88,10 @@ resource ARNs are in [`ses-sns-event-tracking.md`](ses-sns-event-tracking.md).
 
 ## Scheduler (single-instance constraint)
 
-All seven scheduled jobs (bid reminders, insurance expiration, revision expiry,
-post-deadline escalation, the two milestone jobs, and the self-check) run in-process
-via APScheduler. Every running instance runs its own scheduler, so a second instance
+All eight scheduled jobs (bid reminders, insurance expiration, revision expiry,
+post-deadline escalation, the two milestone jobs, the annual holiday seed, and the
+self-check) run in-process via APScheduler. Every running instance runs its own
+scheduler, so a second instance
 double-sends every email and double-applies every state transition. There is no
 distributed lock. Rationale and revisit thresholds:
 [`adr/0001-scheduler-single-instance.md`](adr/0001-scheduler-single-instance.md).
@@ -110,3 +111,35 @@ distributed lock. Rationale and revisit thresholds:
 - [ ] Confirm the external canary (UptimeRobot per the ADR) is actually polling
   that endpoint and alerting to a monitored inbox. A total scheduler outage has no
   other automated catch — ECS auto-restart and Sentry are deferred infra.
+
+---
+
+## Holiday Calendar
+
+Vendor responsiveness counts 3 **working** days, skipping weekends and the
+org-wide `holidays` table. An empty table is not an error — the clock silently
+falls back to weekends-only, and vendors start getting flagged a day early over
+every holiday. Nothing alerts on this, so it has to be seeded at deploy.
+
+- [ ] **Seed the calendar.** From `backend/`, with the venv, run as a MODULE
+  (the path form puts `scripts/` on `sys.path` instead of `backend/`, so `app`
+  is unimportable):
+
+  ```bash
+  python -m scripts.seed_holidays          # this year + next
+  ```
+
+  Idempotent and additive: it never touches a date already present, whatever its
+  source, so re-running it cannot overwrite an admin's manual rows or renames.
+  Past dates and weekends are skipped. Safe to run more than once.
+
+### Verification after deploy
+
+- [ ] `GET`ing the calendar as an admin at `/settings/calendar` shows ~11 rows
+  for next year, all weekdays. A non-admin hitting that URL is redirected.
+- [ ] The `holiday_seed` job appears in `GET /api/v1/admin/scheduler-health`.
+  It fires annually on January 2 (15:00 UTC / 09:00 America/Chicago) and tops up
+  the following year, so the calendar stays 12 months ahead without anyone
+  remembering. It is deliberately excluded from the staleness self-check — a
+  one-year interval is meaningless to that math — so the seed above is the only
+  thing standing between deploy and the first January run.

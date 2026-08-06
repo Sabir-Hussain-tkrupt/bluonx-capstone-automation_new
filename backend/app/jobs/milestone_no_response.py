@@ -2,13 +2,15 @@
 Milestone no-response escalation job (Phase 10.2).
 
 The inbound half's safety net: a vendor check-in that goes unanswered for 3
-WORKING days (weekends skipped) is escalated. The milestone moves
-scheduled/in_progress → unresponsive via the authoritative transition, which
-pauses its check-in cycle, and the owning PM gets an email + in-app alert so a
-forgotten milestone can't sit frozen.
+WORKING days (weekends AND org holidays skipped) is escalated. The milestone
+moves scheduled/in_progress → unresponsive via the authoritative transition,
+which pauses its check-in cycle, and the owning PM gets an email + in-app alert
+so a forgotten milestone can't sit frozen.
 
 Locked rules:
-  - 3 WORKING days (Mon–Fri) since the check-in was sent (working_days_since).
+  - 3 WORKING days since the check-in was sent, counted by the database
+    (BusinessCalendar → fn_business_days_between), so both weekends and the
+    admin-managed holiday calendar are honoured.
   - Once per check: skip if a no_response_alert row already exists for the
     milestone's current cycle, or the milestone already left scheduled/in_progress.
   - A BOUNCED (or complained/failed) check email is NOT silence: skip escalation
@@ -30,7 +32,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
 from app.core.supabase_client import get_supabase_client
-from app.core.time import business_today, working_days_since
+from app.core.time import BusinessCalendar, Holiday, business_today
 from app.jobs.scheduler import DEFAULT_JOB_KWARGS, tracked_job
 from app.services.email_service import EmailService, create_email_provider
 from app.services.milestone_email_service import send_milestone_pm_alert_email
@@ -89,6 +91,43 @@ def _sent_date(created_at: str | None) -> date | None:
     return dt.astimezone(ZoneInfo(settings.BUSINESS_TIMEZONE)).date()
 
 
+def _fmt_date(d: date) -> str:
+    """'Jul 3, 2026'. Built by hand because %-d is glibc-only and this repo also
+    runs on Windows."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _build_escalation_note(
+    *, label: str, days_silent: int, sent: date, due: date, excluded: list[Holiday]
+) -> str:
+    """The reason written into milestone_events.note.
+
+    This note is the ONLY place the working-day rule is ever visible to a PM —
+    the check-in email carries no reply-by date and the milestone date picker
+    gives no holiday warning — so it has to actually explain the timing rather
+    than assert a number. The first sentence is the pre-holiday note verbatim, so
+    anything grepping for the old text still matches.
+    """
+    parts = [
+        f"No vendor response to {label} after {days_silent} working days.",
+        f"Check-in sent {_fmt_date(sent)}; a reply was due by end of "
+        f"{_fmt_date(due)} ({_WORKING_DAYS_THRESHOLD} working days, weekends "
+        f"excluded).",
+    ]
+    if excluded:
+        listed = "; ".join(f"{h.name} on {_fmt_date(h.date)}" for h in excluded)
+        plural = "" if len(excluded) == 1 else "s"
+        parts.append(
+            f"{len(excluded)} holiday{plural} excluded from the count: {listed}."
+        )
+    else:
+        # Said explicitly rather than left to inference: milestone_events is an
+        # append-only audit ledger, and a PM disputing an escalation should be
+        # able to see that holidays were considered and there were none.
+        parts.append("No holidays fell in this window.")
+    return " ".join(parts)
+
+
 async def run_milestone_no_response_escalation(
     db, email_service, notification_creator=create_notification
 ) -> dict:
@@ -99,6 +138,9 @@ async def run_milestone_no_response_escalation(
     """
     started = time.monotonic()
     today = business_today()
+    # One calendar per run. The memo must not outlive the run: an admin editing
+    # the holiday table between runs has to be picked up on the next pass.
+    cal = BusinessCalendar(db)
     counts = {
         "escalated": 0,
         "bounce_notified": 0,
@@ -127,6 +169,12 @@ async def run_milestone_no_response_escalation(
         counts["duration_seconds"] = round(time.monotonic() - started, 3)
         logger.info("milestone no-response: no vendor check-in alerts — %s", counts)
         return counts
+
+    # Every holiday that could fall in any alert's window, in ONE query, so the
+    # per-alert reason string costs no round trips. The guardrail caps the table
+    # at 25 rows a year, so even a wide window is a handful of rows.
+    sent_dates = [d for d in (_sent_date(a.get("created_at")) for a in alerts) if d]
+    cal.prime_holidays(min(sent_dates, default=today), today)
 
     # ── Bulk pre-queries: answered alerts + already-escalated (milestone,cycle) ──
     alert_ids = [a["id"] for a in alerts]
@@ -178,9 +226,12 @@ async def run_milestone_no_response_escalation(
         if (alert["milestone_id"], ms_cycle) in escalated_pairs:
             counts["skipped_already_escalated"] += 1
             continue
-        # 3 working days of silence.
+        # 3 working days of silence, per the DB calendar (weekends + holidays).
         sent = _sent_date(alert.get("created_at"))
-        if sent is None or working_days_since(sent, today) < _WORKING_DAYS_THRESHOLD:
+        if (
+            sent is None
+            or cal.business_days_since(sent, today) < _WORKING_DAYS_THRESHOLD
+        ):
             counts["skipped_not_due"] += 1
             continue
 
@@ -193,7 +244,7 @@ async def run_milestone_no_response_escalation(
             counts["bounce_notified"] += 1
             continue
 
-        key = await _escalate_one(db, email_service, alert, milestone, today)
+        key = await _escalate_one(db, email_service, alert, milestone, today, sent, cal)
         counts[key] += 1
         # Mark the pair so a duplicate alert in the same batch can't double-fire.
         if key == "escalated":
@@ -237,13 +288,34 @@ def _notify_delivery_failure(
         )
 
 
-async def _escalate_one(db, email_service, alert: dict, milestone: dict, today) -> str:
-    """Escalate one silent check-in. Returns a counter key. Never raises."""
+async def _escalate_one(
+    db,
+    email_service,
+    alert: dict,
+    milestone: dict,
+    today: date,
+    sent: date,
+    cal: BusinessCalendar,
+) -> str:
+    """Escalate one silent check-in. Returns a counter key. Never raises.
+
+    `sent` and `cal` are passed in rather than re-derived: the caller has already
+    parsed the send date and proved it is non-None.
+    """
     milestone_id = alert["milestone_id"]
     cycle = milestone.get("cycle_number")
     label = _CHECK_LABELS.get(alert["alert_type"], "check-in")
-    sent = _sent_date(alert.get("created_at"))
-    days_silent = working_days_since(sent, today) if sent else _WORKING_DAYS_THRESHOLD
+    days_silent = cal.business_days_since(sent, today)
+    # By construction escalation fires exactly when today >= due, so this is the
+    # honest reply-by date rather than a restatement of the threshold.
+    due = cal.add_business_days(sent, _WORKING_DAYS_THRESHOLD)
+    note = _build_escalation_note(
+        label=label,
+        days_silent=days_silent,
+        sent=sent,
+        due=due,
+        excluded=cal.holidays_in(sent, today),
+    )
 
     # 1. Authoritative transition → unresponsive. A PT409 (already moved between
     #    the query and now) means someone else handled it — skip, don't fail.
@@ -251,7 +323,7 @@ async def _escalate_one(db, email_service, alert: dict, milestone: dict, today) 
         escalate_no_response(
             milestone_id,
             milestone_alert_id=alert["id"],
-            note=f"No vendor response to {label} after {days_silent} working days",
+            note=note,
             db=db,
         )
     except MilestoneError as exc:

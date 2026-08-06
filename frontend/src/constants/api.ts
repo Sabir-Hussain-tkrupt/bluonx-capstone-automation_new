@@ -35,6 +35,11 @@ export const API_ENDPOINTS = {
   // Trades
   TRADES: '/trades',
 
+  // Holidays (admin-only writes; reads go direct to Supabase under RLS)
+  HOLIDAYS: '/holidays',
+  HOLIDAYS_RANGE: '/holidays/range',
+  HOLIDAY: (id: string) => `/holidays/${id}`,
+
   // Bid Templates
   BID_TEMPLATES: '/bid-templates',
   BID_TEMPLATE: (id: string) => `/bid-templates/${id}`,

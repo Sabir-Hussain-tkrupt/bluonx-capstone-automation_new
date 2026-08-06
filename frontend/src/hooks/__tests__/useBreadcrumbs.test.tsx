@@ -83,13 +83,12 @@ describe('useBreadcrumbs', () => {
     expect(result.current.at(-1)?.label).toBe('Project');
   });
 
-  it('drops the admin-only Settings rung for a project manager', () => {
-    mockUseAuth.mockReturnValue({ profile: { role: 'project_manager' } });
-
+  it('builds the calendar trail under Settings', () => {
     const { result } = renderAt('/settings/calendar');
 
     expect(result.current).toEqual([
       { label: 'Dashboard', href: '/dashboard' },
+      { label: 'Settings', href: '/settings' },
       { label: 'Holiday Calendar', href: undefined },
     ]);
   });

@@ -678,6 +678,48 @@ GRANT EXECUTE ON FUNCTION private.is_active_user()  TO authenticated;
 GRANT EXECUTE ON FUNCTION private.is_admin()         TO authenticated;
 
 
+
+-- ----------------------------------------------------------------------------
+-- HOLIDAYS  (GROUP 8)
+-- ----------------------------------------------------------------------------
+-- READ: any active user. WRITE: admin-only, mirroring `trades`.
+-- Unlike trades, DELETE IS permitted: a holiday added by mistake should be
+-- removable outright rather than left as dead data. The guardrail trigger
+-- already blocks deleting anything in the past.
+
+ALTER TABLE holidays ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY holidays_select_authenticated
+  ON holidays FOR SELECT
+  TO authenticated
+  USING (
+    (SELECT private.is_active_user())
+  );
+
+CREATE POLICY holidays_insert_admin
+  ON holidays FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    (SELECT private.is_admin())
+  );
+
+CREATE POLICY holidays_update_admin
+  ON holidays FOR UPDATE
+  TO authenticated
+  USING (
+    (SELECT private.is_admin())
+  )
+  WITH CHECK (
+    (SELECT private.is_admin())
+  );
+
+CREATE POLICY holidays_delete_admin
+  ON holidays FOR DELETE
+  TO authenticated
+  USING (
+    (SELECT private.is_admin())
+  );
+
 -- ============================================================================
 -- STEP 6: VERIFICATION QUERY
 -- ============================================================================
@@ -699,16 +741,4 @@ GRANT EXECUTE ON FUNCTION private.is_admin()         TO authenticated;
 
 -- ============================================================================
 -- END OF RLS MIGRATION
--- ============================================================================
--- Summary:
---   Tables with RLS enabled:     30 (all)
---   SELECT policies:             28 (one per table)
---   WRITE policies:               8 (admin-only: users, trades
---                                     + authenticated: vendor_documents
---                                     + self/admin: vendor_flags
---                                     + self-update: users, notifications)
---   Admin-only tables:            1 (magic_link_tokens — SELECT restricted)
---   User-scoped tables:           1 (notifications — see only your own)
---   Anon role:                    ZERO access (revoked on all tables + private schema)
---   Helper functions:             2 (in private schema, security definer)
 -- ============================================================================

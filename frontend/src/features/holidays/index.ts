@@ -13,6 +13,4 @@ export type {
   CreateHolidayInput,
   CreateHolidayRangeInput,
   UpdateHolidayInput,
-  HolidayErrorCode,
-  HolidayValidationError,
 } from './services/holidaysApi';
