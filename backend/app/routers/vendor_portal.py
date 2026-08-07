@@ -790,14 +790,20 @@ async def respond_to_milestone_checkin(
     payload: MilestoneRespondRequest,
     ctx: VendorContext = Depends(get_milestone_context),
     db: Client = Depends(get_supabase),
+    email_service: EmailService = Depends(get_email_service),
 ) -> MilestoneRespondResponse:
     """Record a vendor's Yes/No answer to a milestone check-in.
 
     Milestone-only: `get_milestone_context` rejects bid tokens. The JWT's
     `milestone_alert_id` claim MUST equal the path id — a vendor must not be
-    able to answer another check-in. Identity (`vendor_contact_id`) comes from
-    the JWT, never the body. The authoritative write + concurrency guard live
-    in `fn_record_milestone_response`.
+    able to answer another check-in. Identity (`vendor_contact_id`) and
+    `milestone_id` come from the JWT, never the body. The authoritative write +
+    concurrency guard live in `fn_record_milestone_response`.
+
+    The service also alerts the owning PM when the answer moved the milestone to
+    delayed or completed. That is best-effort and fires only on the winning
+    transition: the vendor's answer is committed either way, so a failed send
+    never reaches this response.
     """
     if str(ctx.milestone_alert_id) != str(milestone_alert_id):
         raise HTTPException(
@@ -805,11 +811,13 @@ async def respond_to_milestone_checkin(
             detail="This token does not match this check-in",
         )
 
-    return record_response(
+    return await record_response(
         db,
         milestone_alert_id=milestone_alert_id,
         value=payload.value,
         vendor_contact_id=ctx.vendor_contact_id,
+        milestone_id=ctx.milestone_id,
+        email_service=email_service,
     )
 
 

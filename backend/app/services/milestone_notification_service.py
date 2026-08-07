@@ -7,8 +7,11 @@ milestone notification types with a `milestones` deep-link reference. Service
 default dedupe (True) applies: a re-emit for the same unread
 (user, type, milestone) is a no-op.
 
-These are callable, tested building blocks. Wiring them into
-`transition_milestone()` / scheduler jobs is Phase 10.2 / 10.3, not here.
+Callers: the no-response scheduler job (`milestone_unresponsive`) and the vendor
+check-in response service (`milestone_delayed` / `milestone_completed`), each
+keyed on the status its transition actually produced. Nothing fires from inside
+`transition_milestone()` itself — the RPC cannot send email or write app
+notifications, so the wiring lives in the Python layer that calls it.
 """
 
 from __future__ import annotations
@@ -21,8 +24,14 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 
-def _fetch_milestone_owner(db, milestone_id: UUID | str) -> dict | None:
-    """Return {'name', 'created_by'} for the milestone, or None if unreadable."""
+def fetch_milestone_owner(db, milestone_id: UUID | str) -> dict | None:
+    """Return {'name', 'created_by'} for the milestone, or None if unreadable.
+
+    Public because the response service needs the same owner to address the PM
+    delay EMAIL to (`send_milestone_pm_alert_email` takes an explicit
+    recipient), and a second hand-rolled query would be one more place for the
+    "who owns this milestone" rule to drift.
+    """
     try:
         resp = (
             db.table("milestones")
@@ -51,7 +60,7 @@ def _notify(
     db, milestone_id: UUID | str, *, notification_type: str, title_prefix: str
 ) -> dict | None:
     """Shared body: resolve the PM owner and create the notification."""
-    owner = _fetch_milestone_owner(db, milestone_id)
+    owner = fetch_milestone_owner(db, milestone_id)
     if owner is None:
         return None
     return create_notification(
