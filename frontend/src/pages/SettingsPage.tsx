@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutGrid, Users } from 'lucide-react';
+import { CalendarDays, FileSignature, LayoutGrid, Users } from 'lucide-react';
 import { SettingsCard } from '@/components/ui/SettingsCard';
 import { ROUTES } from '@/constants/routes';
 
@@ -30,6 +30,12 @@ export function SettingsPage() {
           title="User Management"
           description="Invite team members and manage admin / project manager roles."
           icon={<Users className="h-5 w-5" aria-hidden="true" />}
+        />
+        <SettingsCard
+          to={ROUTES.SETTINGS_CONTRACT_SIGNERS}
+          title="Contract Signers"
+          description="Manage the people authorized to sign contracts on behalf of BluOnX."
+          icon={<FileSignature className="h-5 w-5" aria-hidden="true" />}
         />
       </div>
     </div>

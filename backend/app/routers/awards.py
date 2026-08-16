@@ -90,6 +90,7 @@ async def create_award(
             instructions=award.instructions,
             contract_valid_days=award.contract_valid_days,
             work_duration_days=award.work_duration_days,
+            signer_id=award.signer_id,
             awarded_by=user["user_id"],
             db=db,
         )

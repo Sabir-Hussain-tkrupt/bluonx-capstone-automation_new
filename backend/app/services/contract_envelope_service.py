@@ -121,7 +121,12 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
         db.table("awards")
         .select(
             "id, vendor_id, task_id, award_amount, bid_submission_id, status,"
-            " instructions, contract_valid_days, work_duration_days,"
+            " instructions, contract_valid_days, work_duration_days, signer_id,"
+            # Deliberately NOT !inner: signer_id is nullable, and awards created
+            # before the signer roster existed must still load (they fall back to
+            # the CONTRACT_OWNER_SIGNER_* settings). An inner join would drop them
+            # from the result and surface as a spurious "Award not found".
+            " contract_signers(full_name, email),"
             " bid_submissions!inner(proposed_start_date, sow_attested_at,"
             "   bid_invitations!inner(vendor_contacts!inner(full_name, email))),"
             " vendors!inner(company_name),"
@@ -136,6 +141,45 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
     if row is None:
         raise ContractEnvelopeError(404, "Award not found")
     return row
+
+
+# The last-resort owner identity, used when neither the roster nor config supplies
+# one. Kept as literals (not config) so the send can never fail for want of a value.
+_FALLBACK_SIGNER_NAME = "BluOnX Authorized Signer"
+_FALLBACK_SIGNER_EMAIL = "owner@example.com"
+
+
+def _candidate_signer(ctx: dict) -> tuple[str, str]:
+    """Who BluOnX *would* put on a new contract for this award.
+
+    Steps 2-4 of the resolution order: the award's chosen roster entry, then the
+    CONTRACT_OWNER_SIGNER_* settings (which legacy awards with signer_id NULL
+    still depend on), then the hardcoded fallback. Step 1 — an existing contract's
+    snapshot — is applied by the caller, because it outranks all of these.
+    """
+    roster = _embed_one(ctx.get("contract_signers"))
+    name = roster.get("full_name") or settings.CONTRACT_OWNER_SIGNER_NAME
+    email = roster.get("email") or settings.CONTRACT_OWNER_SIGNER_EMAIL
+    return (name or _FALLBACK_SIGNER_NAME, email or _FALLBACK_SIGNER_EMAIL)
+
+
+def _resolve_owner_signer(ctx: dict, contract: dict) -> tuple[str, str]:
+    """The BluOnX signer for THIS send, snapshot first.
+
+    Once a contract carries `signer_name` / `signer_email`, that pair is the
+    answer forever: `awards.signer_id` records which roster entry was chosen, it
+    is not a live lookup after the first send. An admin correcting a signer's
+    email must not change where an already-issued contract routes, nor what the
+    contract record says about who signed it.
+
+    A contract created before this feature has both columns NULL and falls
+    through to the candidate, so those still send rather than routing nowhere.
+    """
+    name = contract.get("signer_name")
+    email = contract.get("signer_email")
+    if name and email:
+        return (name, email)
+    return _candidate_signer(ctx)
 
 
 def _fetch_sow_exhibits(submission_id: str, *, db: Client) -> list[dict]:
@@ -252,16 +296,25 @@ async def send_contract_envelope(
     sow_signed_date = _date_only(sow_attested_at)
 
     # 2) Contract row (re-entrant) — born in sent_for_signature so the FK holds.
+    #    The candidate signer is frozen onto it in this same write; if the row
+    #    already exists it comes back untouched, snapshot and all.
+    candidate_name, candidate_email = _candidate_signer(ctx)
     contract = await run_in_threadpool(
         lambda: contract_service.create_contract_for_award(
             ctx,
             start_date=start_date,
             end_date=end_date,
             sow_signed_date=sow_signed_date,
+            signer_name=candidate_name,
+            signer_email=candidate_email,
             db=db,
         )
     )
     contract_id = contract["id"]
+
+    # The contract is now authoritative for who signs: a fresh row carries the
+    # candidate we just wrote, an existing one carries whatever it was issued with.
+    owner_signer_name, owner_signer_email = _resolve_owner_signer(ctx, contract)
 
     # 3) Idempotent resend — reuse an existing envelope for this contract.
     existing = await run_in_threadpool(
@@ -280,7 +333,10 @@ async def send_contract_envelope(
         "contract_number": contract.get("contract_number"),
         "vendor_company": vendor.get("company_name"),
         "vendor_contact_name": contact.get("full_name"),
-        "owner_signer_name": settings.CONTRACT_OWNER_SIGNER_NAME,
+        # Same resolved identity as the routingOrder-1 recipient below: the name
+        # printed on the contract and the person DocuSign routes to are one
+        # decision, made once.
+        "owner_signer_name": owner_signer_name,
         "award_amount": ctx.get("award_amount"),
         "start_date": start_date,
         "end_date": end_date,
@@ -320,8 +376,8 @@ async def send_contract_envelope(
     #    tracks the signing order; the anchor tab stays bound to the correct party.
     signers = [
         {
-            "name": settings.CONTRACT_OWNER_SIGNER_NAME or "BluOnX Authorized Signer",
-            "email": settings.CONTRACT_OWNER_SIGNER_EMAIL or "owner@example.com",
+            "name": owner_signer_name,
+            "email": owner_signer_email,
             "recipient_id": "1",
             "routing_order": "1",
             "anchor_string": OWNER_SIGN_ANCHOR,

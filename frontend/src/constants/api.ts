@@ -35,6 +35,10 @@ export const API_ENDPOINTS = {
   // Trades
   TRADES: '/trades',
 
+  // Contract signers (admin-only writes; reads go direct to Supabase under RLS)
+  CONTRACT_SIGNERS: '/contract-signers',
+  CONTRACT_SIGNER: (id: string) => `/contract-signers/${id}`,
+
   // Holidays (admin-only writes; reads go direct to Supabase under RLS)
   HOLIDAYS: '/holidays',
   HOLIDAYS_RANGE: '/holidays/range',

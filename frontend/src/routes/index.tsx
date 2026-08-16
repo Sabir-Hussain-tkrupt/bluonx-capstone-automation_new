@@ -34,6 +34,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { TradesSettingsPage } from '@/features/trades';
 import { UserManagementPage } from '@/features/user-management';
 import { HolidayCalendarPage } from '@/features/holidays';
+import { ContractSignersPage } from '@/features/contract-signers';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
@@ -140,6 +141,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute requiredRole="admin">
               <HolidayCalendarPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.SETTINGS_CONTRACT_SIGNERS}
+          element={
+            <ProtectedRoute requiredRole="admin">
+              <ContractSignersPage />
             </ProtectedRoute>
           }
         />

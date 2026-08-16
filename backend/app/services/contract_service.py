@@ -90,6 +90,8 @@ def create_contract_for_award(
     end_date: Any = None,
     payment_terms: str | None = None,
     sow_signed_date: Any = None,
+    signer_name: str | None = None,
+    signer_email: str | None = None,
     db: Client,
 ) -> dict:
     """INSERT the contract row at `sent_for_signature`. Re-entrant: if a contract
@@ -99,6 +101,13 @@ def create_contract_for_award(
     `award` must carry: id, vendor_id, task_id, award_amount.
     `sow_signed_date` is realized from the awarded submission's sow_attested_at
     and lights the "Date of signed scope of work" line in the contract PDF.
+
+    `signer_name` / `signer_email` are the resolved BluOnX signer, frozen onto
+    the contract here and never touched again. This insert is the ONLY write to
+    those two columns anywhere in the codebase: the re-entrant branch above
+    returns the existing row untouched, so an already-issued contract keeps
+    routing to the address it was issued with even after the roster entry is
+    edited. Enforced here rather than by a database trigger.
     """
     award_id = award["id"]
 
@@ -121,6 +130,8 @@ def create_contract_for_award(
         "payment_terms": payment_terms,
         "sow_signed_date": _date_str(sow_signed_date),
         "status": "sent_for_signature",
+        "signer_name": signer_name,
+        "signer_email": signer_email,
     }
     try:
         resp = db.table("contracts").insert(insert_row).execute()

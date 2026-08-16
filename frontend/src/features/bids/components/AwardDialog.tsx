@@ -5,7 +5,9 @@ import { Alert } from '@/components/ui/Alert';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FormField } from '@/components/ui/FormField';
 import { TextInput } from '@/components/ui/TextInput';
+import { Select } from '@/components/ui/Select';
 import { useAwardValidation } from '@/features/bids/hooks/useAwardValidation';
+import { useActiveContractSigners } from '@/features/contract-signers';
 import { cn } from '@/utils/cn';
 import type { PreAwardCheck, PreAwardSeverity } from '@/features/bids/types';
 
@@ -24,6 +26,7 @@ export interface AwardDialogProps {
     instructions?: string;
     contract_valid_days?: number;
     work_duration_days?: number;
+    signer_id: string;
   }) => void;
   isSubmitting: boolean;
   serverError?: string | null;
@@ -56,6 +59,13 @@ export function AwardDialog({
   // is optional. Kept as strings so the fields can be cleared/edited freely.
   const [contractValidDays, setContractValidDays] = useState('365');
   const [workDurationDays, setWorkDurationDays] = useState('');
+  // Which BluOnX signer countersigns. Required; the server re-validates that the
+  // chosen id is still an active roster entry.
+  const [signerId, setSignerId] = useState('');
+
+  const { data: signers, isLoading: signersLoading } = useActiveContractSigners(isOpen);
+  const activeSigners = signers ?? [];
+  const noActiveSigners = !signersLoading && activeSigners.length === 0;
 
   const hasBlocking = result?.has_blocking ?? false;
   const hasWarnings = result?.has_warnings ?? false;
@@ -78,6 +88,8 @@ export function AwardDialog({
     hasBlocking ||
     justificationMissing ||
     termsInvalid ||
+    signersLoading ||
+    !signerId ||
     isSubmitting;
 
   const handleConfirm = () => {
@@ -90,6 +102,7 @@ export function AwardDialog({
       work_duration_days: workDurationDays.trim()
         ? Number(workDurationDays)
         : undefined,
+      signer_id: signerId,
     });
   };
 
@@ -119,6 +132,13 @@ export function AwardDialog({
         {serverError && (
           <Alert variant="danger" title="Could not create award">
             {serverError}
+          </Alert>
+        )}
+
+        {noActiveSigners && (
+          <Alert variant="danger" title="No BluOnX signer available">
+            No active contract signers are configured. An administrator must add one under
+            Settings before a task can be awarded.
           </Alert>
         )}
 
@@ -180,6 +200,27 @@ export function AwardDialog({
                 <p className="text-right text-xs text-secondary-400">
                   {justification.length}/{JUSTIFICATION_MAX}
                 </p>
+              </FormField>
+            )}
+
+            {!hasBlocking && !noActiveSigners && (
+              <FormField
+                label="BluOnX signer"
+                htmlFor="award-signer"
+                required
+                hint="Signs the contract first (before the vendor) and is named on the contract PDF. Managed under Settings."
+              >
+                <Select
+                  id="award-signer"
+                  value={signerId}
+                  onChange={(e) => setSignerId(e.target.value)}
+                  disabled={signersLoading}
+                  placeholder="Select a signer"
+                  options={activeSigners.map((s) => ({
+                    value: s.id,
+                    label: s.title ? `${s.full_name} (${s.title})` : s.full_name,
+                  }))}
+                />
               </FormField>
             )}
 

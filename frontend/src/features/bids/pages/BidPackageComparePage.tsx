@@ -82,6 +82,7 @@ export function BidPackageComparePage() {
     instructions?: string;
     contract_valid_days?: number;
     work_duration_days?: number;
+    signer_id: string;
   }) => {
     if (!awardTarget) return;
     setAwardError(null);

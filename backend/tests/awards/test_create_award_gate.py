@@ -20,7 +20,15 @@ from uuid import uuid4
 
 from postgrest.exceptions import APIError
 
-from .conftest import PM_USER_ID, SUBMISSION_ID, TASK_ID, VENDOR_ID, award_body
+from .conftest import (
+    PM_USER_ID,
+    SIGNER_ID,
+    SUBMISSION_ID,
+    TASK_ID,
+    VENDOR_ID,
+    award_body,
+    signer_row,
+)
 
 URL = "/api/v1/awards"
 
@@ -99,6 +107,7 @@ def award_row(**over) -> dict:
         "validation_results": {},
         "contract_valid_days": 365,
         "work_duration_days": None,
+        "signer_id": str(SIGNER_ID),
         "status": "pending_acceptance",
         "created_at": now,
         "updated_at": now,
@@ -112,6 +121,7 @@ def clean_spec(**chain_over) -> dict:
     # RPC, so the canned write lives under "rpc", not separate table ops.
     return {
         "bid_submissions": {"select": [chain_row(**chain_over)]},
+        "contract_signers": {"select": [signer_row()]},
         "rpc": {"fn_create_award": [award_row()]},
     }
 
@@ -175,6 +185,76 @@ def test_award_defaults_contract_valid_days_to_365(recording_client_factory):
     params = calls["rpc"]["fn_create_award"]
     assert params["p_contract_valid_days"] == 365
     assert params["p_work_duration_days"] is None
+
+
+# ── BluOnX signer selection ──────────────────────────────────────────────
+
+
+def test_award_passes_signer_id_to_the_rpc(recording_client_factory):
+    """fn_create_award takes p_signer_id as its twelfth parameter and it has no
+    DEFAULT, so the key name must be exact: PostgREST resolves the overload by
+    named-argument set and an 11-key params dict matches nothing."""
+    c, calls = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 201
+    params = calls["rpc"]["fn_create_award"]
+    assert params["p_signer_id"] == str(SIGNER_ID)
+    # All twelve function parameters are supplied.
+    assert set(params) == {
+        "p_task_id",
+        "p_bid_submission_id",
+        "p_vendor_id",
+        "p_awarded_by",
+        "p_award_amount",
+        "p_has_override",
+        "p_override_justification",
+        "p_instructions",
+        "p_contract_valid_days",
+        "p_work_duration_days",
+        "p_validation_results",
+        "p_signer_id",
+    }
+
+
+def test_signer_id_is_required(client_factory):
+    """The PM must choose who signs for BluOnX; there is no server-side default."""
+    body = award_body()
+    del body["signer_id"]
+    c = client_factory(clean_spec())
+    r = c.post(URL, json=body)
+    assert r.status_code == 422
+
+
+def test_unknown_signer_returns_422_and_never_writes(recording_client_factory):
+    """A signer id that matches no roster row must fail loudly at award time.
+    The envelope send is post-commit and swallows every exception, so a signer
+    problem discovered at send time would vanish silently."""
+    spec = clean_spec()
+    spec["contract_signers"] = {"select": []}
+    c, calls = recording_client_factory(spec)
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    assert "signer" in r.json()["detail"].lower()
+    assert "rpc" not in calls
+
+
+def test_inactive_signer_returns_422_and_never_writes(recording_client_factory):
+    """Revocation is is_active=false, so an inactive roster entry is as invalid
+    as a missing one."""
+    spec = clean_spec()
+    spec["contract_signers"] = {"select": [signer_row(is_active=False)]}
+    c, calls = recording_client_factory(spec)
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 422
+    assert "signer" in r.json()["detail"].lower()
+    assert "rpc" not in calls
+
+
+def test_award_response_carries_signer_id(recording_client_factory):
+    c, _ = recording_client_factory(clean_spec())
+    r = c.post(URL, json=award_body())
+    assert r.status_code == 201
+    assert r.json()["signer_id"] == str(SIGNER_ID)
 
 
 # ── warn → override gate ─────────────────────────────────────────────────
