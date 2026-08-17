@@ -20,9 +20,10 @@ import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
 import { TaskForm } from '@/features/tasks/components/TaskForm';
 import { useBidPackagesForTask } from '@/features/bids/hooks/useBidPackagesForTask';
 import { BidPackagesTable } from '@/features/bids/components/BidPackagesTable';
-import { useTaskActiveContract } from '@/features/milestones/hooks/useTaskActiveContract';
+import { useTaskContractState } from '@/features/milestones/hooks/useTaskContractState';
 import { MilestonesCard } from '@/features/milestones/components/MilestonesCard';
 import { ContractPanel } from '@/features/contracts/components/ContractPanel';
+import { ContractNotSentAlert } from '@/features/contracts/components/ContractNotSentAlert';
 
 function formatPhase(phase: string): string {
   return phase === 'due_diligence' ? 'Due Diligence' : 'Development';
@@ -55,7 +56,22 @@ export function TaskDetailPage() {
   const isArchived = !!project?.archived_at;
 
   const { data: bidPackages = [], isLoading: bidPackagesLoading } = useBidPackagesForTask(taskId!);
-  const { data: activeContract } = useTaskActiveContract(taskId!);
+
+  // Award-first, then contract, then envelope. Keying the section off the contract
+  // row alone hides the worst state there is: the envelope send can fail BEFORE
+  // the contract row is written, so the PM sees an award that looks fine, no
+  // panel at all, and no hint that the vendor received nothing.
+  const { data: contractState } = useTaskContractState(taskId!);
+  const activeContract = contractState?.contract ?? null;
+  // Both a healthy in-flight contract and a failed send sit at
+  // 'pending_acceptance'; the envelope row is the only discriminator. Declined and
+  // cancelled awards never reach here — the read filters them out, since those
+  // tasks are freed for re-award and sending would push a contract for an award
+  // the vendor already rejected.
+  const contractSendFailed =
+    !!contractState &&
+    contractState.awardStatus === 'pending_acceptance' &&
+    !contractState.hasEnvelope;
 
   const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -226,6 +242,15 @@ export function TaskDetailPage() {
             />
           </div>
         </Card>
+      )}
+
+      {/* The award stands but the vendor got nothing. Hidden, not disabled, in
+          every other state. */}
+      {contractSendFailed && contractState && (
+        <ContractNotSentAlert
+          awardId={contractState.awardId}
+          vendorCompanyName={contractState.vendorCompanyName}
+        />
       )}
 
       {/* Contract panel — mark-complete gate + vendor rating, once contracted */}

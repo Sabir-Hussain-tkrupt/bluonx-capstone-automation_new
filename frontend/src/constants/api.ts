@@ -78,6 +78,9 @@ export const API_ENDPOINTS = {
   // Awards
   AWARDS: '/awards',
   AWARD_VALIDATE: (bidSubmissionId: string) => `/awards/validate/${bidSubmissionId}`,
+  // Delivers a contract that was never delivered (the post-commit send failed).
+  // Not a resend: an award that already has an envelope is a server-side no-op.
+  AWARD_SEND_CONTRACT: (awardId: string) => `/awards/${awardId}/send-contract`,
 
   // Contracts
   CONTRACT_MARK_COMPLETE: (id: string) => `/contracts/${id}/mark-complete`,

@@ -8,8 +8,14 @@ resend route. It:
   1. loads award → submission → invited contact, vendor, task, project
   2. creates the `contracts` row in `sent_for_signature` (9.5; re-entrant)
   3. returns early if an envelope already exists for the contract (idempotent resend)
+  3b. on a RETRY only (the contract row pre-dated this call), asks DocuSign whether
+     it already holds an envelope stamped with this contract id and reconciles the
+     local row from it instead of sending. Closes the window where the DocuSign
+     call succeeded but our insert did not — locally that looks like "never sent",
+     and re-sending would put a second real contract in front of the vendor.
   4. generates the contract PDF (+ signed SOW exhibit(s) when on file)
-  5. builds + sends the two-signer envelope (BluOnX/owner routingOrder 1, vendor 2)
+  5. builds + sends the two-signer envelope (BluOnX/owner routingOrder 1, vendor 2),
+     stamping `bluonx_contract_id` so step 3b can recognise it next time
   6. persists the `docusign_envelopes` row (status `sent`)
   7. sends the award email (9.4)
 
@@ -28,6 +34,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.config import settings
@@ -254,6 +261,106 @@ def _fetch_sow_exhibits(submission_id: str, *, db: Client) -> list[dict]:
     ]
 
 
+# docusign_envelopes.status is CHECK-constrained to this set. DocuSign's own
+# vocabulary is wider (it also returns `created`), so a remote status is mapped
+# through here before it is written — an unrecognised value would violate the
+# constraint and turn a reconciliation into a hard failure.
+_ENVELOPE_STATUSES = frozenset(
+    {"sent", "delivered", "signed", "completed", "declined", "voided"}
+)
+
+
+def _map_remote_status(status: Any) -> str:
+    """Remote DocuSign status → a value docusign_envelopes.status accepts.
+
+    Falls back to 'sent', which is the one thing we know for certain about an
+    envelope DocuSign is holding: it left here. The Connect webhook corrects it on
+    the next event either way.
+    """
+    normalized = str(status or "").strip().lower()
+    return normalized if normalized in _ENVELOPE_STATUSES else "sent"
+
+
+def _lookup_window_start(contract: dict) -> str:
+    """`from_date` for the envelope lookup: the contract row's creation, less a
+    day of slack for clock skew between us and DocuSign. list_status_changes
+    requires a from_date, and no envelope for this contract can predate the
+    contract itself, so this is the tightest correct window."""
+    created_at = contract.get("created_at")
+    anchor: datetime | None = None
+    if isinstance(created_at, datetime):
+        anchor = created_at
+    elif created_at:
+        try:
+            anchor = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except ValueError:
+            anchor = None
+    if anchor is None:
+        anchor = datetime.now(timezone.utc)
+    return (anchor - timedelta(days=1)).isoformat()
+
+
+async def _reconcile_remote_envelope(
+    contract_id: str, *, contract: dict, ds_client, db: Client
+) -> dict | None:
+    """Return a local `docusign_envelopes` row reconciled from DocuSign, or None
+    when DocuSign is not holding an envelope for this contract.
+
+    Fault tolerance is deliberately one-directional: a lookup that FAILS raises
+    rather than falling through to the send. A failed lookup means unknown state,
+    and sending on unknown state is the exact thing this guard exists to prevent.
+    """
+    try:
+        remote = await ds_client.find_envelope_by_contract_id(
+            str(contract_id), from_date=_lookup_window_start(contract)
+        )
+    except Exception as exc:
+        logger.exception(
+            "DocuSign envelope lookup failed for contract %s; refusing to send",
+            contract_id,
+        )
+        raise ContractEnvelopeError(
+            502,
+            "Could not confirm with DocuSign whether a contract was already sent "
+            "for this award. Nothing was sent — please try again shortly.",
+        ) from exc
+
+    if not remote:
+        return None
+
+    logger.warning(
+        "Envelope %s already exists at DocuSign for contract %s with no local row; "
+        "reconciling instead of sending again",
+        remote.get("envelope_id"),
+        contract_id,
+    )
+    row = {
+        "contract_id": str(contract_id),
+        "envelope_id": remote["envelope_id"],
+        "status": _map_remote_status(remote.get("status")),
+        "sent_at": remote.get("sent_at") or datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        resp = await run_in_threadpool(
+            lambda: db.table("docusign_envelopes").insert(row).execute()
+        )
+    except APIError as exc:
+        # envelope_id is UNIQUE: a concurrent writer got there first. Their row is
+        # as good as ours, so adopt it rather than failing the caller.
+        if not contract_service._is_unique_violation(exc):
+            raise
+        adopted = await run_in_threadpool(
+            lambda: db.table("docusign_envelopes")
+            .select("*")
+            .eq("envelope_id", remote["envelope_id"])
+            .limit(1)
+            .execute()
+        )
+        return _first(adopted.data) or row
+
+    return _first(resp.data) or row
+
+
 async def send_contract_envelope(
     award_id: str,
     *,
@@ -299,7 +406,7 @@ async def send_contract_envelope(
     #    The candidate signer is frozen onto it in this same write; if the row
     #    already exists it comes back untouched, snapshot and all.
     candidate_name, candidate_email = _candidate_signer(ctx)
-    contract = await run_in_threadpool(
+    contract, contract_created = await run_in_threadpool(
         lambda: contract_service.create_contract_for_award(
             ctx,
             start_date=start_date,
@@ -327,6 +434,28 @@ async def send_contract_envelope(
     existing_env = _first(existing.data)
     if existing_env:
         return existing_env
+
+    ds_client = client or get_docusign_client()
+
+    # 3b) Duplicate-envelope guard. The docusign_envelopes insert happens AFTER
+    #     create_envelope returns, so a crash in between leaves a real envelope live
+    #     at DocuSign with no local row — locally indistinguishable from "never
+    #     sent". Sending again there would put a SECOND real contract in front of
+    #     the vendor. Ask DocuSign whether it already holds an envelope stamped with
+    #     this contract id, and reconcile instead of sending if it does.
+    #
+    #     Skipped when the contract row was just inserted: no envelope can reference
+    #     a contract id that did not exist a moment ago, so the lookup could only
+    #     ever come back empty. That keeps the normal award path at zero extra
+    #     DocuSign calls and means a list_status_changes outage cannot block a
+    #     first-time send. Every retry — the only path where the bad state is
+    #     reachable — always performs it.
+    if not contract_created:
+        reconciled = await _reconcile_remote_envelope(
+            contract_id, contract=contract, ds_client=ds_client, db=db
+        )
+        if reconciled:
+            return reconciled
 
     # 4) Contract PDF (+ SOW exhibits if present).
     pdf_context = {
@@ -397,9 +526,11 @@ async def send_contract_envelope(
         email_subject=(
             f"Please sign your BluOnX subcontract for {project.get('name', '')}"
         ).strip(),
+        # Stamps bluonx_contract_id so a future send can recognise this envelope
+        # remotely even if the local insert below never lands.
+        contract_id=str(contract_id),
     )
 
-    ds_client = client or get_docusign_client()
     envelope_id = await ds_client.send_envelope(definition)
 
     # 6) Persist the envelope row (contract stays sent_for_signature).

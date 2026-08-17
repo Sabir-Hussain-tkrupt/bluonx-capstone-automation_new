@@ -240,16 +240,26 @@ async def create_award(
     #    NOT roll back the award — it stays pending_acceptance with no envelope and
     #    is retryable via POST /awards/{id}/send-contract. Local import avoids any
     #    import cycle (the envelope service imports nothing from award_service).
+    #
+    #    The outcome is reported to the caller as `envelope_sent` (AwardResponse).
+    #    Swallowing the exception is what keeps the award, but it also used to make
+    #    the failure invisible: the response looked identical either way, so the PM
+    #    got a success toast for an award whose vendor received nothing. This flag
+    #    is the only in-band signal, and the comparison UI keys its inline recovery
+    #    Alert off it.
+    envelope_sent = False
     try:
         from app.services.contract_envelope_service import send_contract_envelope
 
         await send_contract_envelope(award["id"], db=db)
+        envelope_sent = True
     except Exception:
         logger.exception(
             "Contract envelope send failed for award %s (award stands; resendable)",
             award.get("id"),
         )
 
+    award["envelope_sent"] = envelope_sent
     return award
 
 

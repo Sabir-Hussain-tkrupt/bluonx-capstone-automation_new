@@ -10,6 +10,7 @@ import { useTask } from '@/features/tasks/hooks/useTask';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useCreateAward } from '@/features/bids/hooks/useCreateAward';
 import { AwardDialog } from '@/features/bids/components/AwardDialog';
+import { ContractNotSentAlert } from '@/features/contracts/components/ContractNotSentAlert';
 import { BidAmountBarChart } from '@/features/bids/components/BidAmountBarChart';
 import { BidSubmissionDetailModal } from '@/features/bids/components/BidSubmissionDetailModal';
 import { ComparisonTable } from '@/features/bids/components/ComparisonTable';
@@ -70,6 +71,14 @@ export function BidPackageComparePage() {
     vendorName: string;
   } | null>(null);
   const [awardError, setAwardError] = useState<string | null>(null);
+  // Set when the award succeeded but its contract never left the building. The
+  // award API awaits the send before responding, so the backend already knows
+  // while the PM is still standing here — this is the difference between the
+  // vendor waiting minutes and the vendor waiting days.
+  const [sendFailure, setSendFailure] = useState<{
+    awardId: string;
+    vendorName: string;
+  } | null>(null);
 
   const handleAward = (bidSubmissionId: string, vendorName: string) => {
     setAwardError(null);
@@ -86,14 +95,24 @@ export function BidPackageComparePage() {
   }) => {
     if (!awardTarget) return;
     setAwardError(null);
+    setSendFailure(null);
     awardMutation.mutate(
       { bid_submission_id: awardTarget.bidSubmissionId, ...args },
       {
-        onSuccess: () => {
-          toast({
-            variant: 'success',
-            message: `Awarded ${awardTarget.vendorName}.`,
-          });
+        onSuccess: (award) => {
+          // A clean success toast for an award whose vendor received nothing is
+          // worse than no feedback at all, so the failure takes the toast's place.
+          if (award.envelope_sent === false) {
+            setSendFailure({
+              awardId: award.id,
+              vendorName: awardTarget.vendorName,
+            });
+          } else {
+            toast({
+              variant: 'success',
+              message: `Awarded ${awardTarget.vendorName}.`,
+            });
+          }
           setAwardTarget(null);
         },
         onError: (err) => {
@@ -213,6 +232,18 @@ export function BidPackageComparePage() {
           respondedCount={bp.invitation_summary.submitted}
           invitedCount={bp.invitation_summary.total}
         />
+      )}
+
+      {/* Moment-of-failure catch. NOT the home for this state — the task detail
+          page is the durable surface, and this clears on navigation. */}
+      {sendFailure && (
+        <div data-no-print>
+          <ContractNotSentAlert
+            awardId={sendFailure.awardId}
+            vendorCompanyName={sendFailure.vendorName}
+            onSent={() => setSendFailure(null)}
+          />
+        </div>
       )}
 
       {/* Either the empty CTA OR (recommendation + table + chart). */}

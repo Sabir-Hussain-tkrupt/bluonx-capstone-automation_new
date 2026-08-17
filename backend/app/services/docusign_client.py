@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 # request never races a hard expiry.
 _SAFETY_MARGIN_SECONDS = 60
 
+# Envelope custom-field name carrying our contracts.id. Stamped at send and read
+# back by find_envelope_by_contract_id to recognise an envelope we already sent
+# when the local docusign_envelopes insert failed. Changing this name orphans
+# every envelope already at DocuSign, so treat it as a wire contract.
+ENVELOPE_CONTRACT_ID_FIELD = "bluonx_contract_id"
+
 
 # ── Data classes / errors ─────────────────────────────────────────────────────
 
@@ -274,6 +280,55 @@ class DocuSignClient:
         )
         return summary.envelope_id
 
+    async def find_envelope_by_contract_id(
+        self, contract_id: str, *, from_date: str
+    ) -> dict | None:
+        """Find a live envelope carrying `bluonx_contract_id = contract_id`, if any.
+
+        This is the remote half of the duplicate-envelope guard. The
+        `docusign_envelopes` row is written only AFTER create_envelope returns, so a
+        crash in between leaves a real envelope at DocuSign with no local row — a
+        state locally indistinguishable from "never sent". Asking DocuSign directly
+        is the only way to tell the two apart, and the contract id stamped as an
+        envelope custom field (see build_envelope_definition) is the join key.
+
+        `from_date` is required by the API unless envelope ids are supplied, so the
+        caller passes a window anchored on the contract row.
+
+        Mock short-circuit mirrors send_envelope: under DOCUSIGN_PROVIDER != sandbox
+        there is no remote account to search, so there is by definition nothing to
+        reconcile. Exceptions are deliberately NOT caught — the caller treats a
+        failed lookup as unknown state and refuses to send.
+        """
+        if settings.DOCUSIGN_PROVIDER != "sandbox":
+            logger.info(
+                "[MOCK DOCUSIGN] envelope lookup skipped for contract %s", contract_id
+            )
+            return None
+
+        from docusign_esign import EnvelopesApi
+
+        api_client = await self.get_api_client()
+        envelopes_api = EnvelopesApi(api_client)
+        results = await run_in_threadpool(
+            lambda: envelopes_api.list_status_changes(
+                settings.DOCUSIGN_ACCOUNT_ID,
+                custom_field=f"{ENVELOPE_CONTRACT_ID_FIELD}={contract_id}",
+                from_date=from_date,
+            )
+        )
+
+        envelopes = getattr(results, "envelopes", None) or []
+        if not envelopes:
+            return None
+
+        found = envelopes[0]
+        return {
+            "envelope_id": found.envelope_id,
+            "status": getattr(found, "status", None),
+            "sent_at": getattr(found, "sent_date_time", None),
+        }
+
 
 # ── Envelope builder (pure — no network; unit-testable by field inspection) ───
 
@@ -285,6 +340,7 @@ def build_envelope_definition(
     webhook_url: str | None = None,
     email_subject: str = "Please sign your BluOnX subcontract",
     status: str = "sent",
+    contract_id: str | None = None,
 ):
     """Assemble a `docusign_esign.EnvelopeDefinition` for the contract envelope.
 
@@ -295,10 +351,15 @@ def build_envelope_definition(
     `webhook_url`: when set, an envelope-level `eventNotification` is attached so
                  Connect status callbacks are self-contained (no account-level
                  Connect config needed).
+    `contract_id`: when set, stamped as the `bluonx_contract_id` text custom field
+                 so find_envelope_by_contract_id can recognise this envelope later.
+                 `show="false"` keeps it out of the signer's view — it is our
+                 bookkeeping, not theirs.
 
     Constructing these SDK objects requires no network, so this is unit-testable.
     """
     from docusign_esign import (
+        CustomFields,
         Document,
         EnvelopeDefinition,
         EventNotification,
@@ -307,6 +368,7 @@ def build_envelope_definition(
         SignHere,
         Signer,
         Tabs,
+        TextCustomField,
     )
 
     docs = [
@@ -348,6 +410,18 @@ def build_envelope_definition(
         recipients=Recipients(signers=signer_objs),
         status=status,
     )
+
+    if contract_id:
+        definition.custom_fields = CustomFields(
+            text_custom_fields=[
+                TextCustomField(
+                    name=ENVELOPE_CONTRACT_ID_FIELD,
+                    value=str(contract_id),
+                    show="false",
+                    required="false",
+                )
+            ]
+        )
 
     if webhook_url:
         definition.event_notification = EventNotification(

@@ -83,6 +83,13 @@ class AwardResponse(BluOnXBase):
     status: str
     created_at: datetime
     updated_at: datetime
+    # FALSE means the award was recorded but the contract never reached the vendor:
+    # the post-commit envelope send raised and was swallowed so the award would not
+    # roll back. The award then sits at pending_acceptance with no envelope row and
+    # nothing else in the API distinguishes that from a healthy in-flight contract,
+    # which is why it is reported here — the comparison UI needs to know at the
+    # moment of failure, while the PM is still on the page.
+    envelope_sent: bool
 
 
 # ── pre-award validation (Task 9.1) ──────────────────────────────────────

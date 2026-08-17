@@ -181,6 +181,40 @@ async def test_post_commit_hook_swallows_send_failure(monkeypatch):
     # Award still returned despite the send blowing up.
     assert result["id"] == AID
     assert result["status"] == "pending_acceptance"
+    # ...but the caller is TOLD the vendor got nothing. Swallowing the exception is
+    # what keeps the award; this flag is what keeps the failure visible.
+    assert result["envelope_sent"] is False
+
+
+async def test_post_commit_hook_reports_envelope_sent_on_success(monkeypatch):
+    """The mirror of the above: a clean send reports True, so the comparison UI
+    shows its normal success toast rather than the recovery Alert."""
+    from app.services import award_service
+
+    async def _ok(*_a, **_k):
+        return {"envelope_id": "stub-env-123", "status": "sent"}
+
+    monkeypatch.setattr(
+        "app.services.contract_envelope_service.send_contract_envelope", _ok
+    )
+
+    inserted_award = {
+        "id": AID, "task_id": TID, "bid_submission_id": SID, "vendor_id": VID,
+        "status": "pending_acceptance", "award_amount": "50000.00",
+    }
+    spec = {
+        "bid_submissions": {"select": [_clean_chain_row()]},
+        "contract_signers": {
+            "select": [{"id": SIGNER_ID, "full_name": ROSTER_NAME, "is_active": True}]
+        },
+        "rpc": {"fn_create_award": [inserted_award]},
+    }
+    db = make_db(spec)
+    result = await award_service.create_award(
+        bid_submission_id=SID, has_override=False, override_justification=None,
+        signer_id=SIGNER_ID, awarded_by=str(uuid4()), db=db,
+    )
+    assert result["envelope_sent"] is True
 
 
 async def test_bluonx_signs_first_then_vendor(fake_email, stub_client):

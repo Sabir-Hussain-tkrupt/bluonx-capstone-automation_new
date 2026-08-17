@@ -478,4 +478,11 @@ export interface Award {
   status: string;
   created_at: string;
   updated_at: string;
+  /**
+   * FALSE means the award was recorded but the contract never reached the vendor:
+   * the post-commit envelope send failed and was swallowed so the award would not
+   * roll back. Nothing else in this response distinguishes that from a healthy
+   * in-flight contract.
+   */
+  envelope_sent: boolean;
 }
