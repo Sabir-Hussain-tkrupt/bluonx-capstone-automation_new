@@ -22,7 +22,6 @@ const mockSigners = vi.mocked(fetchActiveContractSigners);
 
 function cleanResult(): PreAwardValidationResult {
   return {
-    bid_submission_id: 'sub-1',
     rubric_version: 'preaward-v1',
     can_award: true,
     has_blocking: false,
