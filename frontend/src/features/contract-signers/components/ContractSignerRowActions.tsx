@@ -10,12 +10,6 @@ import type { ContractSigner } from '../types';
 interface ContractSignerRowActionsProps {
   signer: ContractSigner;
   onEdit: (signer: ContractSigner) => void;
-  /**
-   * Open the menu above the trigger instead of below. Set for the last rows so
-   * the panel is not clipped by the Table's overflow container (the menu has no
-   * collision-flip of its own). Scoped to this feature only.
-   */
-  openUpward?: boolean;
 }
 
 /**
@@ -29,7 +23,6 @@ interface ContractSignerRowActionsProps {
 export function ContractSignerRowActions({
   signer,
   onEdit,
-  openUpward = false,
 }: ContractSignerRowActionsProps) {
   const { toast } = useToast();
   const updateSigner = useUpdateContractSigner();
@@ -83,7 +76,6 @@ export function ContractSignerRowActions({
   return (
     <>
       <DropdownMenu
-        side={openUpward ? 'top' : 'bottom'}
         trigger={
           <IconButton
             icon={<MoreHorizontal className="h-4 w-4" />}
