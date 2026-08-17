@@ -459,6 +459,9 @@ export interface CreateAwardPayload {
   contract_valid_days?: number;
   /** Duration of the awarded work in days (Task 9.8). Optional; realized as the contract end date. */
   work_duration_days?: number;
+  /** The chosen BluOnX contract signer. Required — becomes the DocuSign
+   *  routingOrder-1 recipient and is snapshotted onto the contract at send. */
+  signer_id: string;
 }
 
 export interface Award {
@@ -475,4 +478,11 @@ export interface Award {
   status: string;
   created_at: string;
   updated_at: string;
+  /**
+   * FALSE means the award was recorded but the contract never reached the vendor:
+   * the post-commit envelope send failed and was swallowed so the award would not
+   * roll back. Nothing else in this response distinguishes that from a healthy
+   * in-flight contract.
+   */
+  envelope_sent: boolean;
 }

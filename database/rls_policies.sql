@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Row Level Security (RLS) Migration
 -- ============================================================================
--- Version:  3.2
--- Date:     July 12, 2026
+-- Version:  3.3
+-- Date:     August 13, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Depends:  bluonx_complete_schema.sql (must be applied first)
 -- ============================================================================
@@ -31,6 +31,7 @@
 --   Admin-only writes (enforced at DB level for safety):
 --     • users         — only admin can modify user accounts
 --     • trades        — only admin can modify controlled lookup data
+--     • contract_signers — only admin can modify the signer roster
 --   All other writes: go through FastAPI (service_role), no RLS write
 --   policies needed.
 --
@@ -659,6 +660,7 @@ REVOKE ALL ON TABLE notifications           FROM anon;
 REVOKE ALL ON TABLE bid_revision_requests   FROM anon;
 REVOKE ALL ON TABLE milestone_events        FROM anon;
 REVOKE ALL ON TABLE milestone_checkin_tokens FROM anon;
+REVOKE ALL ON TABLE contract_signers        FROM anon;
 
 -- Also revoke anon access to our private helper functions
 REVOKE ALL ON SCHEMA private FROM anon;
@@ -717,6 +719,41 @@ CREATE POLICY holidays_delete_admin
   ON holidays FOR DELETE
   TO authenticated
   USING (
+    (SELECT private.is_admin())
+  );
+
+
+  -- ----------------------------------------------------------------------------
+-- CONTRACT SIGNERS  (GROUP 8)
+-- ----------------------------------------------------------------------------
+-- READ: any active user. The PM needs this list to populate the signer dropdown
+--       on the award screen, so the read is deliberately not admin-gated.
+-- WRITE: admin-only, mirroring `trades`. No DELETE policy: revocation is the
+--        is_active flag, and awards.signer_id is ON DELETE RESTRICT anyway.
+
+ALTER TABLE contract_signers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY contract_signers_select_authenticated
+  ON contract_signers FOR SELECT
+  TO authenticated
+  USING (
+    (SELECT private.is_active_user())
+  );
+
+CREATE POLICY contract_signers_insert_admin
+  ON contract_signers FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    (SELECT private.is_admin())
+  );
+
+CREATE POLICY contract_signers_update_admin
+  ON contract_signers FOR UPDATE
+  TO authenticated
+  USING (
+    (SELECT private.is_admin())
+  )
+  WITH CHECK (
     (SELECT private.is_admin())
   );
 

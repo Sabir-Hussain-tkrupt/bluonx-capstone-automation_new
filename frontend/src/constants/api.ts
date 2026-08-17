@@ -35,6 +35,10 @@ export const API_ENDPOINTS = {
   // Trades
   TRADES: '/trades',
 
+  // Contract signers (admin-only writes; reads go direct to Supabase under RLS)
+  CONTRACT_SIGNERS: '/contract-signers',
+  CONTRACT_SIGNER: (id: string) => `/contract-signers/${id}`,
+
   // Holidays (admin-only writes; reads go direct to Supabase under RLS)
   HOLIDAYS: '/holidays',
   HOLIDAYS_RANGE: '/holidays/range',
@@ -74,6 +78,9 @@ export const API_ENDPOINTS = {
   // Awards
   AWARDS: '/awards',
   AWARD_VALIDATE: (bidSubmissionId: string) => `/awards/validate/${bidSubmissionId}`,
+  // Delivers a contract that was never delivered (the post-commit send failed).
+  // Not a resend: an award that already has an envelope is a server-side no-op.
+  AWARD_SEND_CONTRACT: (awardId: string) => `/awards/${awardId}/send-contract`,
 
   // Contracts
   CONTRACT_MARK_COMPLETE: (id: string) => `/contracts/${id}/mark-complete`,

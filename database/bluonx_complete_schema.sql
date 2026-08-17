@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.7
--- Date:     August 5, 2026
+-- Version:  3.8
+-- Date:     August 13, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   33
+-- Tables:   34
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -17,7 +17,7 @@
 --   5. Award & Contract          (3 tables)
 --   6. Milestone Tracking        (6 tables)
 --   7. Communication & Audit     (3 tables)
---   8. System Configuration       (1 table)
+--   8. System Configuration       (2 tables)
 --
 -- CONVENTIONS:
 --   • All PKs are UUID (gen_random_uuid)
@@ -524,6 +524,7 @@ CREATE TABLE awards (
   contract_valid_days     INTEGER       NOT NULL DEFAULT 365
                                         CHECK (contract_valid_days >= 0),
   work_duration_days      INTEGER       CHECK (work_duration_days > 0),
+  signer_id               UUID,
   status                  VARCHAR(30)   NOT NULL DEFAULT 'pending_acceptance'
                                         CHECK (status IN ('pending_acceptance', 'accepted',
                                                           'declined_by_vendor', 'cancelled')),
@@ -537,6 +538,8 @@ COMMENT ON COLUMN awards.has_override           IS 'TRUE if PM overrode validati
 COMMENT ON COLUMN awards.validation_results     IS 'JSONB snapshot of all pre-award validation checks at time of award.';
 COMMENT ON COLUMN awards.contract_valid_days    IS 'PM-set contract term length in days (parameter). Default 365 (1-year). Realized onto contracts.valid_until at execution.';
 COMMENT ON COLUMN awards.work_duration_days     IS 'PM-set duration of the awarded work in days (parameter). Realized onto contracts.end_date at envelope-send as proposed_start + duration.';
+COMMENT ON COLUMN awards.signer_id IS 'BluOnX signer chosen by the PM at award time. Becomes DocuSign routingOrder 1. NULL on awards created before this feature; envelope-send falls back to CONTRACT_OWNER_SIGNER_* settings.';
+
 
 -- Contracts: one per accepted award
 CREATE TABLE contracts (
@@ -555,6 +558,8 @@ CREATE TABLE contracts (
                                   CHECK (status IN ('draft', 'sent_for_signature', 'executed',
                                                     'active', 'completed', 'terminated')),
   signed_at         TIMESTAMPTZ,
+  signer_name       VARCHAR(255),
+  signer_email      VARCHAR(255),
   created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -564,6 +569,8 @@ COMMENT ON COLUMN contracts.vendor_id    IS 'Denormalized for query perf. Enforc
 COMMENT ON COLUMN contracts.task_id      IS 'Denormalized for query perf. Enforced = awards.task_id (via bid_submission) by trigger.';
 COMMENT ON COLUMN contracts.valid_until  IS 'Realized contract expiry = signed_at + awards.contract_valid_days. NULL until the DocuSign completed webhook fires (execution-anchored).';
 COMMENT ON COLUMN contracts.sow_signed_date IS 'Realized date the awarded vendor attested to the SoW = awarded bid_submissions.sow_attested_at::date. NULL until envelope-send copies it. Feeds the contract PDF "Date of signed scope of work" line.';
+COMMENT ON COLUMN contracts.signer_name  IS 'Snapshot of the BluOnX signer name at envelope-send. Frozen: editing the contract_signers row later must not rewrite an executed contract.';
+COMMENT ON COLUMN contracts.signer_email IS 'Snapshot of the BluOnX signer email at envelope-send. See signer_name.';
 
 -- DocuSign envelope tracking
 CREATE TABLE docusign_envelopes (
@@ -849,6 +856,28 @@ COMMENT ON COLUMN holidays.source     IS '"seeded" = inserted by the annual rese
 COMMENT ON COLUMN holidays.created_by IS 'NULL for seeded rows (no human actor). SET NULL on user delete: the holiday outlives the admin who added it.';
 
 
+
+CREATE TABLE contract_signers (
+  id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name   VARCHAR(255)  NOT NULL,
+  email       VARCHAR(255)  NOT NULL UNIQUE,
+  title       VARCHAR(100),
+  user_id     UUID          REFERENCES users(id) ON DELETE SET NULL,
+  is_active   BOOLEAN       NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT chk_contract_signers_full_name_not_blank CHECK (btrim(full_name) <> ''),
+  CONSTRAINT chk_contract_signers_email_not_blank     CHECK (btrim(email) <> '')
+);
+
+COMMENT ON TABLE  contract_signers           IS 'Admin-managed roster of people authorized to sign contracts on behalf of BluOnX. The PM selects one per award; that signer becomes DocuSign routingOrder 1. Replaces the single CONTRACT_OWNER_SIGNER_* env pair.';
+COMMENT ON COLUMN contract_signers.email     IS 'Address DocuSign routes the routingOrder-1 signing request to. Need not correspond to any users row.';
+COMMENT ON COLUMN contract_signers.title     IS 'Free text, shown in the award dropdown to disambiguate signers (e.g. "President, Land Division"). Carries the division distinction without modeling divisions.';
+COMMENT ON COLUMN contract_signers.user_id   IS 'Optional link to an internal user account. Nullable and unused today: signers are not required to be system users. Present so a future link needs no migration.';
+COMMENT ON COLUMN contract_signers.is_active IS 'Soft revoke. Inactive signers stay selectable-in-history but are hidden from the award dropdown. No hard delete: awards.signer_id is RESTRICT.';
+
+
 -- ============================================================================
 -- SECTION 3: DEFERRED FOREIGN KEYS
 -- (for tables created before their referenced tables)
@@ -858,6 +887,12 @@ COMMENT ON COLUMN holidays.created_by IS 'NULL for seeded rows (no human actor).
 ALTER TABLE milestone_alerts
   ADD CONSTRAINT fk_milestone_alerts_email_log
   FOREIGN KEY (email_log_id) REFERENCES email_log(id) ON DELETE SET NULL;
+
+
+-- awards -> contract_signers FK (contract_signers created after awards)
+ALTER TABLE awards
+  ADD CONSTRAINT fk_awards_signer
+  FOREIGN KEY (signer_id) REFERENCES contract_signers(id) ON DELETE RESTRICT;
 
 
 -- ============================================================================
@@ -941,6 +976,7 @@ CREATE INDEX idx_bid_packages_sow_document          ON bid_packages (scope_of_wo
 CREATE INDEX idx_awards_task_id                     ON awards (task_id);
 CREATE INDEX idx_awards_vendor_id                   ON awards (vendor_id);
 CREATE INDEX idx_awards_status                      ON awards (status);
+CREATE INDEX idx_awards_signer_id                   ON awards (signer_id);
 CREATE INDEX idx_contracts_vendor_id                ON contracts (vendor_id);
 CREATE INDEX idx_contracts_task_id                  ON contracts (task_id);
 CREATE INDEX idx_contracts_status                   ON contracts (status);
@@ -972,6 +1008,10 @@ CREATE INDEX idx_vendor_flags_unresolved            ON vendor_flags (vendor_id, 
                                                     WHERE is_resolved = FALSE;
 CREATE INDEX idx_notifications_user_unread          ON notifications (user_id, is_read)
                                                     WHERE is_read = FALSE;
+
+-- ---- Group 8: System Configuration ----
+CREATE INDEX idx_contract_signers_active  ON contract_signers (is_active) WHERE is_active = TRUE;
+CREATE INDEX idx_contract_signers_user_id ON contract_signers (user_id) WHERE user_id IS NOT NULL;
 
 
 -- ---- Group 4: Bid Lifecycle additions ----
@@ -1042,6 +1082,9 @@ CREATE TRIGGER trg_milestones_updated_at
 
 CREATE TRIGGER trg_bid_revision_requests_updated_at
   BEFORE UPDATE ON bid_revision_requests FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+CREATE TRIGGER trg_contract_signers_updated_at
+  BEFORE UPDATE ON contract_signers FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -1791,7 +1834,8 @@ CREATE OR REPLACE FUNCTION fn_create_award(
   p_instructions           TEXT,
   p_contract_valid_days    INTEGER,
   p_work_duration_days     INTEGER,
-  p_validation_results     JSONB
+  p_validation_results     JSONB,
+  p_signer_id              UUID
 )
 RETURNS SETOF awards AS $$
 DECLARE
@@ -1800,12 +1844,14 @@ BEGIN
   INSERT INTO awards (
     task_id, bid_submission_id, vendor_id, awarded_by, award_amount,
     instructions, contract_valid_days, work_duration_days,
-    has_override, override_justification, validation_results, status
+    has_override, override_justification, validation_results, status,
+    signer_id
   ) VALUES (
     p_task_id, p_bid_submission_id, p_vendor_id, p_awarded_by, p_award_amount,
     p_instructions, COALESCE(p_contract_valid_days, 365), p_work_duration_days,
     p_has_override, p_override_justification, p_validation_results,
-    'pending_acceptance'
+    'pending_acceptance',
+    p_signer_id
   )
   RETURNING * INTO v_award;
 
@@ -1818,11 +1864,11 @@ $$ LANGUAGE plpgsql;
 -- Writes go through the service_role key (FastAPI write path); not exposed to
 -- the authenticated role, which only ever reads.
 REVOKE ALL ON FUNCTION fn_create_award(
-  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB
+  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB, UUID
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION fn_create_award(
-  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB
+  UUID, UUID, UUID, UUID, NUMERIC, BOOLEAN, TEXT, TEXT, INTEGER, INTEGER, JSONB, UUID
 ) TO service_role;
 
 -- 7.2  fn_create_bid_package_with_invitations — atomic bid-package write

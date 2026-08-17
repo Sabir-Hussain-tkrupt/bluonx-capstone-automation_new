@@ -51,6 +51,11 @@ class AwardCreateRequest(BluOnXBase):
     # that also blocks fat-finger input on a direct API call.
     contract_valid_days: int | None = Field(default=None, gt=0, le=3650)
     work_duration_days: int | None = Field(default=None, gt=0, le=3650)
+    # Which BluOnX signer countersigns this contract. Required: there is no
+    # server-side default, and the choice becomes the DocuSign routingOrder-1
+    # recipient plus the printed name on the contract PDF. Validated against the
+    # live roster before the award is written.
+    signer_id: UUID
 
 
 class AwardUpdate(BluOnXBase):
@@ -71,10 +76,20 @@ class AwardResponse(BluOnXBase):
     instructions: str | None = None
     contract_valid_days: int
     work_duration_days: int | None = None
+    # NULL on awards created before the signer roster existed; those fall back
+    # to the CONTRACT_OWNER_SIGNER_* settings at envelope-send.
+    signer_id: UUID | None = None
     validation_results: dict | None = None
     status: str
     created_at: datetime
     updated_at: datetime
+    # FALSE means the award was recorded but the contract never reached the vendor:
+    # the post-commit envelope send raised and was swallowed so the award would not
+    # roll back. The award then sits at pending_acceptance with no envelope row and
+    # nothing else in the API distinguishes that from a healthy in-flight contract,
+    # which is why it is reported here — the comparison UI needs to know at the
+    # moment of failure, while the PM is still on the page.
+    envelope_sent: bool
 
 
 # ── pre-award validation (Task 9.1) ──────────────────────────────────────

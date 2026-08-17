@@ -23,7 +23,7 @@ vi.mock('@/features/projects/hooks/useProject', () => ({ useProject: () => ({ da
 vi.mock('@/features/tasks/hooks/useUpdateTask', () => ({ useUpdateTask: () => ({ mutate: vi.fn(), isPending: false }) }));
 vi.mock('@/features/tasks/hooks/useDeleteTask', () => ({ useDeleteTask: () => ({ mutate: deleteMutate, isPending: false }) }));
 vi.mock('@/features/bids/hooks/useBidPackagesForTask', () => ({ useBidPackagesForTask: () => ({ data: [], isLoading: false }) }));
-vi.mock('@/features/milestones/hooks/useTaskActiveContract', () => ({ useTaskActiveContract: () => ({ data: undefined }) }));
+vi.mock('@/features/milestones/hooks/useTaskContractState', () => ({ useTaskContractState: () => ({ data: undefined }) }));
 vi.mock('@/features/tasks/components/TaskForm', () => ({ TaskForm: () => null }));
 
 function taskWith(over: Record<string, unknown> = {}) {

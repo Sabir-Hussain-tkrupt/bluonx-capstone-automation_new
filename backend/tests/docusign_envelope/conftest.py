@@ -94,16 +94,31 @@ class FakeEmailService:
 
 
 class StubDocuSignClient:
-    """Stands in for DocuSignClient.send_envelope — records the definition and
-    returns a synthetic envelope id (no SDK, no network)."""
+    """Stands in for DocuSignClient — records send definitions and returns a
+    synthetic envelope id (no SDK, no network).
 
-    def __init__(self, envelope_id: str = "stub-env-123") -> None:
+    `remote_envelope` drives the duplicate-envelope lookup: None means DocuSign
+    holds nothing for that contract (the normal case), a dict means it already
+    holds one, and an Exception is raised to simulate a failed lookup. Every
+    lookup is recorded in `lookups`, so a test can assert the lookup was skipped
+    entirely on the freshly-created-contract path.
+    """
+
+    def __init__(self, envelope_id: str = "stub-env-123", remote_envelope=None) -> None:
         self.envelope_id = envelope_id
         self.sent_definitions: list = []
+        self.remote_envelope = remote_envelope
+        self.lookups: list[str] = []
 
     async def send_envelope(self, envelope_definition) -> str:
         self.sent_definitions.append(envelope_definition)
         return self.envelope_id
+
+    async def find_envelope_by_contract_id(self, contract_id: str, *, from_date: str):
+        self.lookups.append(contract_id)
+        if isinstance(self.remote_envelope, Exception):
+            raise self.remote_envelope
+        return self.remote_envelope
 
 
 @pytest.fixture()

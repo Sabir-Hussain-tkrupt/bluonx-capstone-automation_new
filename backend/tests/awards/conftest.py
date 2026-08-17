@@ -24,6 +24,7 @@ PM_USER_ID = uuid4()
 TASK_ID = uuid4()
 VENDOR_ID = uuid4()
 SUBMISSION_ID = uuid4()
+SIGNER_ID = uuid4()
 
 
 def make_db(spec: dict) -> MagicMock:
@@ -175,8 +176,25 @@ def recording_client_factory(authed_user):
 
 
 def award_body(**overrides) -> dict:
-    """Task 9.2 request payload — only the submission + (optional) override
-    fields. task_id / vendor_id / award_amount are server-derived, never sent."""
-    body: dict = {"bid_submission_id": str(SUBMISSION_ID)}
+    """Task 9.2 request payload — the submission, the chosen BluOnX signer, and
+    the (optional) override fields. task_id / vendor_id / award_amount are
+    server-derived, never sent."""
+    body: dict = {
+        "bid_submission_id": str(SUBMISSION_ID),
+        "signer_id": str(SIGNER_ID),
+    }
     body.update(overrides)
     return body
+
+
+def signer_row(**overrides) -> dict:
+    """The contract_signers row the award-time signer validation looks up."""
+    row = {
+        "id": str(SIGNER_ID),
+        "full_name": "Dana Reyes",
+        "email": "dana@bluonx.dev",
+        "title": "VP of Development",
+        "is_active": True,
+    }
+    row.update(overrides)
+    return row

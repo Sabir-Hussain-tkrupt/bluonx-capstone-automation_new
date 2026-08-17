@@ -77,6 +77,15 @@ export const queryKeys = {
         : queryKeys.trades.lists(),
   },
 
+  contractSigners: {
+    all: ['contract_signers'] as const,
+    lists: () => [...queryKeys.contractSigners.all, 'list'] as const,
+    list: (filters?: Record<string, unknown>) =>
+      filters
+        ? ([...queryKeys.contractSigners.lists(), filters] as const)
+        : queryKeys.contractSigners.lists(),
+  },
+
   vendorContacts: {
     all: (vendorId: string) => ['vendors', vendorId, 'contacts'] as const,
     list: (vendorId: string) => [...queryKeys.vendorContacts.all(vendorId), 'list'] as const,

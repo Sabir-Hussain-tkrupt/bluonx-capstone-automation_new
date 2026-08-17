@@ -6,7 +6,8 @@ is born at ENVELOPE-SEND time in `sent_for_signature` (not at acceptance) so the
 NOT NULL `docusign_envelopes.contract_id` FK is satisfiable. This module owns the
 row's transitions:
 
-  create_contract_for_award  → INSERT at `sent_for_signature` (re-entrant)
+  create_contract_for_award  → INSERT at `sent_for_signature` (re-entrant;
+                               returns (row, created))
   mark_contract_executed     → `executed` + signed_at (Connect `completed`)
   mark_contract_terminated   → `terminated` (decline / void)
 
@@ -90,15 +91,31 @@ def create_contract_for_award(
     end_date: Any = None,
     payment_terms: str | None = None,
     sow_signed_date: Any = None,
+    signer_name: str | None = None,
+    signer_email: str | None = None,
     db: Client,
-) -> dict:
+) -> tuple[dict, bool]:
     """INSERT the contract row at `sent_for_signature`. Re-entrant: if a contract
     already exists for this award (`award_id` is UNIQUE), return it rather than
     re-inserting — so a best-effort resend after a partial failure is safe.
 
+    Returns `(row, created)`. `created` is False on the re-entrant branch and True
+    after a fresh INSERT. The caller needs that distinction to decide whether a
+    remote DocuSign envelope could possibly exist for this contract: a row born in
+    this very call cannot have one, so the duplicate-envelope lookup is skipped.
+    Reported from here rather than re-derived by the caller because the select that
+    answers it already runs below.
+
     `award` must carry: id, vendor_id, task_id, award_amount.
     `sow_signed_date` is realized from the awarded submission's sow_attested_at
     and lights the "Date of signed scope of work" line in the contract PDF.
+
+    `signer_name` / `signer_email` are the resolved BluOnX signer, frozen onto
+    the contract here and never touched again. This insert is the ONLY write to
+    those two columns anywhere in the codebase: the re-entrant branch above
+    returns the existing row untouched, so an already-issued contract keeps
+    routing to the address it was issued with even after the roster entry is
+    edited. Enforced here rather than by a database trigger.
     """
     award_id = award["id"]
 
@@ -108,7 +125,7 @@ def create_contract_for_award(
     )
     found = _first(existing.data)
     if found:
-        return found
+        return found, False
 
     insert_row = {
         "award_id": str(award_id),
@@ -121,6 +138,8 @@ def create_contract_for_award(
         "payment_terms": payment_terms,
         "sow_signed_date": _date_str(sow_signed_date),
         "status": "sent_for_signature",
+        "signer_name": signer_name,
+        "signer_email": signer_email,
     }
     try:
         resp = db.table("contracts").insert(insert_row).execute()
@@ -134,7 +153,7 @@ def create_contract_for_award(
     row = _first(resp.data)
     if not row:
         raise ContractError(500, "Contract creation failed.")
-    return row
+    return row, True
 
 
 def mark_contract_executed(

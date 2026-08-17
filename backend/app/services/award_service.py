@@ -74,6 +74,30 @@ def _has_pending_revision(db: Client, bid_package_id) -> bool:
     return bool(resp.data)
 
 
+def _validate_signer(db: Client, signer_id) -> None:
+    """The BluOnX signer chosen by the PM must be a live roster entry.
+
+    An unknown id would only surface as an FK violation inside fn_create_award;
+    a deactivated one would not surface at all and would quietly route the
+    contract to someone who no longer signs. Both are 422 here instead.
+    """
+    resp = (
+        db.table("contract_signers")
+        .select("id, is_active")
+        .eq("id", str(signer_id))
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        raise AwardError(422, "The selected contract signer does not exist.")
+    if not rows[0].get("is_active"):
+        raise AwardError(
+            422,
+            "The selected contract signer is deactivated. Choose an active signer.",
+        )
+
+
 def _is_unique_violation(err: APIError) -> bool:
     """Heuristic — supabase-py wraps Postgres 23505 in APIError. Same logic as
     bid_revision_service._is_unique_violation."""
@@ -102,6 +126,7 @@ async def create_award(
     instructions: str | None = None,
     contract_valid_days: int | None = None,
     work_duration_days: int | None = None,
+    signer_id: UUID,
     awarded_by: str,
     db: Client,
 ) -> dict:
@@ -154,6 +179,13 @@ async def create_award(
         has_override_final = False
         justification_final = None
 
+    # 3b) The chosen BluOnX signer must exist and still be active. This is
+    #     checked here, at award time, and not at envelope-send: the send is a
+    #     post-commit best-effort hook whose exceptions are all swallowed, so a
+    #     signer problem discovered there would vanish into a log line and leave
+    #     the contract unroutable with nothing surfaced to the PM.
+    await run_in_threadpool(lambda: _validate_signer(db, signer_id))
+
     # 4) Write the award row + flip the task to 'awarded' atomically via the
     #    fn_create_award RPC. A plpgsql function body is one implicit
     #    transaction, so the INSERT and the task UPDATE commit or roll back
@@ -177,6 +209,10 @@ async def create_award(
         "p_contract_valid_days": contract_valid_days if contract_valid_days is not None else 365,
         "p_work_duration_days": work_duration_days,
         "p_validation_results": _json_safe(result),
+        # fn_create_award's twelfth parameter. It has no DEFAULT, and PostgREST
+        # resolves an RPC by its named-argument set, so omitting this key means
+        # no overload matches and the call fails outright.
+        "p_signer_id": str(signer_id),
     }
     try:
         award_resp = await run_in_threadpool(
@@ -204,16 +240,26 @@ async def create_award(
     #    NOT roll back the award — it stays pending_acceptance with no envelope and
     #    is retryable via POST /awards/{id}/send-contract. Local import avoids any
     #    import cycle (the envelope service imports nothing from award_service).
+    #
+    #    The outcome is reported to the caller as `envelope_sent` (AwardResponse).
+    #    Swallowing the exception is what keeps the award, but it also used to make
+    #    the failure invisible: the response looked identical either way, so the PM
+    #    got a success toast for an award whose vendor received nothing. This flag
+    #    is the only in-band signal, and the comparison UI keys its inline recovery
+    #    Alert off it.
+    envelope_sent = False
     try:
         from app.services.contract_envelope_service import send_contract_envelope
 
         await send_contract_envelope(award["id"], db=db)
+        envelope_sent = True
     except Exception:
         logger.exception(
             "Contract envelope send failed for award %s (award stands; resendable)",
             award.get("id"),
         )
 
+    award["envelope_sent"] = envelope_sent
     return award
 
 

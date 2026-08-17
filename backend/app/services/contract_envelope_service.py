@@ -8,8 +8,14 @@ resend route. It:
   1. loads award → submission → invited contact, vendor, task, project
   2. creates the `contracts` row in `sent_for_signature` (9.5; re-entrant)
   3. returns early if an envelope already exists for the contract (idempotent resend)
+  3b. on a RETRY only (the contract row pre-dated this call), asks DocuSign whether
+     it already holds an envelope stamped with this contract id and reconciles the
+     local row from it instead of sending. Closes the window where the DocuSign
+     call succeeded but our insert did not — locally that looks like "never sent",
+     and re-sending would put a second real contract in front of the vendor.
   4. generates the contract PDF (+ signed SOW exhibit(s) when on file)
-  5. builds + sends the two-signer envelope (BluOnX/owner routingOrder 1, vendor 2)
+  5. builds + sends the two-signer envelope (BluOnX/owner routingOrder 1, vendor 2),
+     stamping `bluonx_contract_id` so step 3b can recognise it next time
   6. persists the `docusign_envelopes` row (status `sent`)
   7. sends the award email (9.4)
 
@@ -28,6 +34,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.config import settings
@@ -121,7 +128,12 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
         db.table("awards")
         .select(
             "id, vendor_id, task_id, award_amount, bid_submission_id, status,"
-            " instructions, contract_valid_days, work_duration_days,"
+            " instructions, contract_valid_days, work_duration_days, signer_id,"
+            # Deliberately NOT !inner: signer_id is nullable, and awards created
+            # before the signer roster existed must still load (they fall back to
+            # the CONTRACT_OWNER_SIGNER_* settings). An inner join would drop them
+            # from the result and surface as a spurious "Award not found".
+            " contract_signers(full_name, email),"
             " bid_submissions!inner(proposed_start_date, sow_attested_at,"
             "   bid_invitations!inner(vendor_contacts!inner(full_name, email))),"
             " vendors!inner(company_name),"
@@ -136,6 +148,45 @@ def _load_award_context(award_id: str, *, db: Client) -> dict:
     if row is None:
         raise ContractEnvelopeError(404, "Award not found")
     return row
+
+
+# The last-resort owner identity, used when neither the roster nor config supplies
+# one. Kept as literals (not config) so the send can never fail for want of a value.
+_FALLBACK_SIGNER_NAME = "BluOnX Authorized Signer"
+_FALLBACK_SIGNER_EMAIL = "owner@example.com"
+
+
+def _candidate_signer(ctx: dict) -> tuple[str, str]:
+    """Who BluOnX *would* put on a new contract for this award.
+
+    Steps 2-4 of the resolution order: the award's chosen roster entry, then the
+    CONTRACT_OWNER_SIGNER_* settings (which legacy awards with signer_id NULL
+    still depend on), then the hardcoded fallback. Step 1 — an existing contract's
+    snapshot — is applied by the caller, because it outranks all of these.
+    """
+    roster = _embed_one(ctx.get("contract_signers"))
+    name = roster.get("full_name") or settings.CONTRACT_OWNER_SIGNER_NAME
+    email = roster.get("email") or settings.CONTRACT_OWNER_SIGNER_EMAIL
+    return (name or _FALLBACK_SIGNER_NAME, email or _FALLBACK_SIGNER_EMAIL)
+
+
+def _resolve_owner_signer(ctx: dict, contract: dict) -> tuple[str, str]:
+    """The BluOnX signer for THIS send, snapshot first.
+
+    Once a contract carries `signer_name` / `signer_email`, that pair is the
+    answer forever: `awards.signer_id` records which roster entry was chosen, it
+    is not a live lookup after the first send. An admin correcting a signer's
+    email must not change where an already-issued contract routes, nor what the
+    contract record says about who signed it.
+
+    A contract created before this feature has both columns NULL and falls
+    through to the candidate, so those still send rather than routing nowhere.
+    """
+    name = contract.get("signer_name")
+    email = contract.get("signer_email")
+    if name and email:
+        return (name, email)
+    return _candidate_signer(ctx)
 
 
 def _fetch_sow_exhibits(submission_id: str, *, db: Client) -> list[dict]:
@@ -210,6 +261,106 @@ def _fetch_sow_exhibits(submission_id: str, *, db: Client) -> list[dict]:
     ]
 
 
+# docusign_envelopes.status is CHECK-constrained to this set. DocuSign's own
+# vocabulary is wider (it also returns `created`), so a remote status is mapped
+# through here before it is written — an unrecognised value would violate the
+# constraint and turn a reconciliation into a hard failure.
+_ENVELOPE_STATUSES = frozenset(
+    {"sent", "delivered", "signed", "completed", "declined", "voided"}
+)
+
+
+def _map_remote_status(status: Any) -> str:
+    """Remote DocuSign status → a value docusign_envelopes.status accepts.
+
+    Falls back to 'sent', which is the one thing we know for certain about an
+    envelope DocuSign is holding: it left here. The Connect webhook corrects it on
+    the next event either way.
+    """
+    normalized = str(status or "").strip().lower()
+    return normalized if normalized in _ENVELOPE_STATUSES else "sent"
+
+
+def _lookup_window_start(contract: dict) -> str:
+    """`from_date` for the envelope lookup: the contract row's creation, less a
+    day of slack for clock skew between us and DocuSign. list_status_changes
+    requires a from_date, and no envelope for this contract can predate the
+    contract itself, so this is the tightest correct window."""
+    created_at = contract.get("created_at")
+    anchor: datetime | None = None
+    if isinstance(created_at, datetime):
+        anchor = created_at
+    elif created_at:
+        try:
+            anchor = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except ValueError:
+            anchor = None
+    if anchor is None:
+        anchor = datetime.now(timezone.utc)
+    return (anchor - timedelta(days=1)).isoformat()
+
+
+async def _reconcile_remote_envelope(
+    contract_id: str, *, contract: dict, ds_client, db: Client
+) -> dict | None:
+    """Return a local `docusign_envelopes` row reconciled from DocuSign, or None
+    when DocuSign is not holding an envelope for this contract.
+
+    Fault tolerance is deliberately one-directional: a lookup that FAILS raises
+    rather than falling through to the send. A failed lookup means unknown state,
+    and sending on unknown state is the exact thing this guard exists to prevent.
+    """
+    try:
+        remote = await ds_client.find_envelope_by_contract_id(
+            str(contract_id), from_date=_lookup_window_start(contract)
+        )
+    except Exception as exc:
+        logger.exception(
+            "DocuSign envelope lookup failed for contract %s; refusing to send",
+            contract_id,
+        )
+        raise ContractEnvelopeError(
+            502,
+            "Could not confirm with DocuSign whether a contract was already sent "
+            "for this award. Nothing was sent — please try again shortly.",
+        ) from exc
+
+    if not remote:
+        return None
+
+    logger.warning(
+        "Envelope %s already exists at DocuSign for contract %s with no local row; "
+        "reconciling instead of sending again",
+        remote.get("envelope_id"),
+        contract_id,
+    )
+    row = {
+        "contract_id": str(contract_id),
+        "envelope_id": remote["envelope_id"],
+        "status": _map_remote_status(remote.get("status")),
+        "sent_at": remote.get("sent_at") or datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        resp = await run_in_threadpool(
+            lambda: db.table("docusign_envelopes").insert(row).execute()
+        )
+    except APIError as exc:
+        # envelope_id is UNIQUE: a concurrent writer got there first. Their row is
+        # as good as ours, so adopt it rather than failing the caller.
+        if not contract_service._is_unique_violation(exc):
+            raise
+        adopted = await run_in_threadpool(
+            lambda: db.table("docusign_envelopes")
+            .select("*")
+            .eq("envelope_id", remote["envelope_id"])
+            .limit(1)
+            .execute()
+        )
+        return _first(adopted.data) or row
+
+    return _first(resp.data) or row
+
+
 async def send_contract_envelope(
     award_id: str,
     *,
@@ -252,16 +403,25 @@ async def send_contract_envelope(
     sow_signed_date = _date_only(sow_attested_at)
 
     # 2) Contract row (re-entrant) — born in sent_for_signature so the FK holds.
-    contract = await run_in_threadpool(
+    #    The candidate signer is frozen onto it in this same write; if the row
+    #    already exists it comes back untouched, snapshot and all.
+    candidate_name, candidate_email = _candidate_signer(ctx)
+    contract, contract_created = await run_in_threadpool(
         lambda: contract_service.create_contract_for_award(
             ctx,
             start_date=start_date,
             end_date=end_date,
             sow_signed_date=sow_signed_date,
+            signer_name=candidate_name,
+            signer_email=candidate_email,
             db=db,
         )
     )
     contract_id = contract["id"]
+
+    # The contract is now authoritative for who signs: a fresh row carries the
+    # candidate we just wrote, an existing one carries whatever it was issued with.
+    owner_signer_name, owner_signer_email = _resolve_owner_signer(ctx, contract)
 
     # 3) Idempotent resend — reuse an existing envelope for this contract.
     existing = await run_in_threadpool(
@@ -275,12 +435,37 @@ async def send_contract_envelope(
     if existing_env:
         return existing_env
 
+    ds_client = client or get_docusign_client()
+
+    # 3b) Duplicate-envelope guard. The docusign_envelopes insert happens AFTER
+    #     create_envelope returns, so a crash in between leaves a real envelope live
+    #     at DocuSign with no local row — locally indistinguishable from "never
+    #     sent". Sending again there would put a SECOND real contract in front of
+    #     the vendor. Ask DocuSign whether it already holds an envelope stamped with
+    #     this contract id, and reconcile instead of sending if it does.
+    #
+    #     Skipped when the contract row was just inserted: no envelope can reference
+    #     a contract id that did not exist a moment ago, so the lookup could only
+    #     ever come back empty. That keeps the normal award path at zero extra
+    #     DocuSign calls and means a list_status_changes outage cannot block a
+    #     first-time send. Every retry — the only path where the bad state is
+    #     reachable — always performs it.
+    if not contract_created:
+        reconciled = await _reconcile_remote_envelope(
+            contract_id, contract=contract, ds_client=ds_client, db=db
+        )
+        if reconciled:
+            return reconciled
+
     # 4) Contract PDF (+ SOW exhibits if present).
     pdf_context = {
         "contract_number": contract.get("contract_number"),
         "vendor_company": vendor.get("company_name"),
         "vendor_contact_name": contact.get("full_name"),
-        "owner_signer_name": settings.CONTRACT_OWNER_SIGNER_NAME,
+        # Same resolved identity as the routingOrder-1 recipient below: the name
+        # printed on the contract and the person DocuSign routes to are one
+        # decision, made once.
+        "owner_signer_name": owner_signer_name,
         "award_amount": ctx.get("award_amount"),
         "start_date": start_date,
         "end_date": end_date,
@@ -320,8 +505,8 @@ async def send_contract_envelope(
     #    tracks the signing order; the anchor tab stays bound to the correct party.
     signers = [
         {
-            "name": settings.CONTRACT_OWNER_SIGNER_NAME or "BluOnX Authorized Signer",
-            "email": settings.CONTRACT_OWNER_SIGNER_EMAIL or "owner@example.com",
+            "name": owner_signer_name,
+            "email": owner_signer_email,
             "recipient_id": "1",
             "routing_order": "1",
             "anchor_string": OWNER_SIGN_ANCHOR,
@@ -341,9 +526,11 @@ async def send_contract_envelope(
         email_subject=(
             f"Please sign your BluOnX subcontract for {project.get('name', '')}"
         ).strip(),
+        # Stamps bluonx_contract_id so a future send can recognise this envelope
+        # remotely even if the local insert below never lands.
+        contract_id=str(contract_id),
     )
 
-    ds_client = client or get_docusign_client()
     envelope_id = await ds_client.send_envelope(definition)
 
     # 6) Persist the envelope row (contract stays sent_for_signature).

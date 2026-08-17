@@ -20,6 +20,25 @@ export async function markContractComplete(contractId: string): Promise<TaskActi
   return data;
 }
 
+export interface SendContractResult {
+  envelope_id: string | null;
+  status: string | null;
+  contract_id: string | null;
+}
+
+/**
+ * Send the contract for an award whose post-commit send failed. Takes no body —
+ * the award id in the path is the whole request, and everything else is derived
+ * server-side. Safe to call on an award that already has an envelope: the service
+ * returns the existing one rather than sending twice.
+ */
+export async function sendContractForAward(awardId: string): Promise<SendContractResult> {
+  const { data } = await api.post<SendContractResult>(
+    API_ENDPOINTS.AWARD_SEND_CONTRACT(awardId),
+  );
+  return data;
+}
+
 /** Create the one vendor performance review for a completed contract. */
 export async function createReview(
   contractId: string,
