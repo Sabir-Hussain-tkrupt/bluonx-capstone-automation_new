@@ -144,10 +144,10 @@ def _fetch_bid_package(db, bid_package_id: UUID) -> dict | None:
         db.table("bid_packages")
         .select("*, tasks(name), bid_templates(*)")
         .eq("id", str(bid_package_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    return _unwrap_one(resp.data)
+    return _unwrap_one(resp.data if resp else None)
 
 
 def _fetch_user(db, user_id) -> dict | None:
@@ -684,10 +684,10 @@ async def update_invitation_status(
         db.table("bid_invitations")
         .select("*")
         .eq("id", str(invitation_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    existing_row = _unwrap_one(existing.data)
+    existing_row = _unwrap_one(existing.data if existing else None)
     if existing_row is None:
         raise InvitationNotFoundError()
 

@@ -137,11 +137,11 @@ async def get_current_active_user(
         db.table("users")
         .select("id, email, full_name, role, is_active, deleted_at")
         .eq("id", user["user_id"])
-        .single()
+        .maybe_single()
         .execute()
     )
 
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found",

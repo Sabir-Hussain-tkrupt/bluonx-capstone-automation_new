@@ -129,10 +129,10 @@ async def validate_magic_link_token(
             " bid_packages(id, status, task_id)"
         )
         .eq("id", token_row["bid_invitation_id"])
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not invitation_resp.data:
+    if not invitation_resp or not invitation_resp.data:
         # Orphaned token — invitation was deleted after issuance. Treat as
         # invalid, not expired, so the user lands on the right error page.
         logger.warning(

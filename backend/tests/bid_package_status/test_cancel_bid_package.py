@@ -46,6 +46,7 @@ def _make_db(
         chain.select.return_value = chain
         chain.eq.return_value = chain
         chain.single.return_value = chain
+        chain.maybe_single.return_value = chain
         chain.limit.return_value = chain
         chain.in_.return_value = chain
         chain.order.return_value = chain

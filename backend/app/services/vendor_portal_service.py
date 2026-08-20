@@ -169,10 +169,10 @@ def _fetch_invitation_tree(db, bid_invitation_id: UUID) -> dict:
             " )"
         )
         .eq("id", str(bid_invitation_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         # This should be unreachable: the caller has already validated the
         # invitation exists. Raise a plain error — the router wraps it.
         raise RuntimeError(f"Bid invitation not found: {bid_invitation_id}")
@@ -244,10 +244,10 @@ def _fetch_revision_context(
         db.table("bid_revision_requests")
         .select("id, pm_note, revision_deadline, original_submission_id")
         .eq("id", str(bid_revision_request_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not rev_resp.data:
+    if not rev_resp or not rev_resp.data:
         raise RuntimeError(
             f"Bid revision request not found: {bid_revision_request_id}"
         )
@@ -257,10 +257,10 @@ def _fetch_revision_context(
         db.table("bid_submissions")
         .select("revision_number")
         .eq("id", rev["original_submission_id"])
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not orig_resp.data:
+    if not orig_resp or not orig_resp.data:
         raise RuntimeError(
             f"Original submission not found: {rev['original_submission_id']}"
         )
@@ -465,10 +465,10 @@ def assert_package_open_and_before_deadline(db, bid_package_id: UUID) -> None:
         db.table("bid_packages")
         .select("status, deadline")
         .eq("id", str(bid_package_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         # Unreachable via vendor JWT: the package is pinned at token-issue
         # time. Treat as 404 defensively.
         raise HTTPException(
@@ -548,10 +548,10 @@ def fetch_template_metadata(db, bid_template_id: str | UUID) -> dict:
         db.table("bid_templates")
         .select("id, is_lump_sum")
         .eq("id", str(bid_template_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Bid template not found",
@@ -669,10 +669,10 @@ def load_draft_response(db, bid_submission_id: str) -> BidDraftModel:
             " bid_invitations!inner(bid_packages!inner(bid_template_id))"
         )
         .eq("id", bid_submission_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not sub_resp.data:
+    if not sub_resp or not sub_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Submission not found",
@@ -733,10 +733,10 @@ def fetch_submission_detail(db, bid_submission_id: str) -> SubmissionResponse:
             " submitted_at, updated_at, proposed_start_date"
         )
         .eq("id", bid_submission_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not sub_resp.data:
+    if not sub_resp or not sub_resp.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Submission not found",
