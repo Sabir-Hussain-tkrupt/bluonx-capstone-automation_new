@@ -44,10 +44,10 @@ def _resolve_primary_contact_id(db: Client, milestone_id: str) -> str:
         db.table("milestones")
         .select("id, contracts!inner(vendor_id)")
         .eq("id", milestone_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not ms_resp.data:
+    if not ms_resp or not ms_resp.data:
         raise MilestoneError(422, "Milestone not found for check-in token")
     contract = ms_resp.data.get("contracts") or {}
     vendor_id = contract.get("vendor_id")

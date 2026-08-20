@@ -549,10 +549,10 @@ async def submit_bid(
         db.table("bid_packages")
         .select("desired_start_date")
         .eq("id", str(ctx.bid_package_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    pkg_data = pkg_resp.data or {}
+    pkg_data = (pkg_resp.data if pkg_resp else None) or {}
     if isinstance(pkg_data, list):
         pkg_data = pkg_data[0] if pkg_data else {}
     package_has_desired_date = bool(pkg_data.get("desired_start_date"))
@@ -1036,10 +1036,10 @@ async def _fetch_template_id_for_invitation(
         db.table("bid_invitations")
         .select("bid_packages(bid_template_id)")
         .eq("id", str(bid_invitation_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    pkg = (resp.data or {}).get("bid_packages") or {}
+    pkg = ((resp.data if resp else None) or {}).get("bid_packages") or {}
     template_id = pkg.get("bid_template_id")
     if not template_id:
         raise HTTPException(
@@ -1073,10 +1073,10 @@ def _fetch_submission_email_context(db: Client, submission_id: UUID) -> dict:
             " )"
         )
         .eq("id", str(submission_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not resp.data:
+    if not resp or not resp.data:
         # Unreachable: caller just updated this row. Defensive 404.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

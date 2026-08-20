@@ -128,10 +128,10 @@ def validate_milestone_token(
             " contracts!inner(vendor_id, vendors(company_name))"
         )
         .eq("id", token_row["milestone_id"])
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not ms_resp.data:
+    if not ms_resp or not ms_resp.data:
         # Orphaned token — milestone deleted after issuance. Treat as invalid.
         logger.warning(
             "Milestone token %s references missing milestone %s",
@@ -180,10 +180,10 @@ def validate_milestone_token(
         db.table("milestone_alerts")
         .select("alert_type")
         .eq("id", token_row["milestone_alert_id"])
-        .single()
+        .maybe_single()
         .execute()
     )
-    alert_type = (alert_resp.data or {}).get("alert_type")
+    alert_type = ((alert_resp.data if alert_resp else None) or {}).get("alert_type")
     check_type = _ALERT_TYPE_TO_CHECK.get(alert_type or "")
     if check_type is None:
         # Not a vendor check-in alert — shouldn't happen for a minted token.
