@@ -164,7 +164,7 @@ async def run_daily_bid_reminders(db, email_service) -> dict:
             "id, vendor_id, vendor_contact_id, bid_package_id, status, "
             "bid_packages!inner(deadline, status, created_by, "
             "tasks!inner(name, projects!inner(name)), "
-            "users!inner(full_name, email)), "
+            "users!created_by!inner(full_name, email)), "
             "vendor_contacts!inner(full_name, email), "
             "vendors!inner(company_name)"
         )
