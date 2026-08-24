@@ -11,8 +11,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from postgrest.exceptions import APIError
 
 from app.core.config import settings
+from app.core.db_errors import api_error_handler
 from app.core.logging_config import configure_logging
 from app.core.request_logging import RequestLoggingMiddleware
 from app.core.supabase_client import init_supabase
@@ -99,6 +101,17 @@ app.add_middleware(
 # times the full request including CORS handling, and assigns a correlation id
 # to preflight and CORS-rejected requests too.
 app.add_middleware(RequestLoggingMiddleware)
+
+# ── Exception Handlers ────────────────────────────────────────────────────
+# Net under every write path that does not catch APIError itself: a unique
+# violation becomes a 409 instead of a bare 500. Routers and services that
+# already catch APIError are unaffected, since a local except consumes the
+# exception before it can reach here. Registered as an exception handler
+# rather than middleware on purpose: handlers run inside ExceptionMiddleware,
+# BELOW RequestLoggingMiddleware, so the response passes back through the
+# send wrapper that stamps x-request-id. ServerErrorMiddleware's default 500
+# sits above that wrapper, which is why the uncaught response had no id.
+app.add_exception_handler(APIError, api_error_handler)
 
 # ── Health (root-level, no prefix) ───────────────────────────────────────
 app.include_router(health.router)
