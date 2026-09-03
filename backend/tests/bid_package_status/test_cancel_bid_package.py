@@ -38,7 +38,14 @@ def _make_db(
     awards: list | None = None,
 ):
     """Mock supabase client. Captures every update payload with its table so
-    ordering and targeting can be asserted."""
+    ordering and targeting can be asserted.
+
+    The package flip is an RPC (fn_cancel_bid_package) rather than a table
+    update, so it is captured under the pseudo-table "rpc:fn_cancel_bid_package"
+    and lands in the same ordered `captured` list. Ordering assertions stay
+    meaningful, and this is the only place write ORDER is observable at all: the
+    real-DB suite next door can see final state only.
+    """
     client = MagicMock()
 
     def _table(name):
@@ -73,6 +80,16 @@ def _make_db(
         return chain
 
     client.table.side_effect = _table
+
+    def _rpc(name, params):
+        captured.append({"table": f"rpc:{name}", "payload": params})
+        rpc_chain = MagicMock()
+        rpc_chain.execute.return_value = MagicMock(
+            data=[{**package, "status": "cancelled"}]
+        )
+        return rpc_chain
+
+    client.rpc.side_effect = _rpc
     return client
 
 
@@ -86,6 +103,10 @@ def _pkg(status: str = "open") -> dict:
 
 def _updates_for(captured: list, table: str) -> list[dict]:
     return [c["payload"] for c in captured if c["table"] == table]
+
+
+# The package flip is an RPC, so it is captured under this pseudo-table name.
+CANCEL_RPC = "rpc:fn_cancel_bid_package"
 
 
 @pytest.fixture()
@@ -107,7 +128,9 @@ class TestAllowedStatuses:
         )
 
         assert result["status"] == "cancelled"
-        assert _updates_for(captured, "bid_packages")[0]["status"] == "cancelled"
+        # The flip is delegated to fn_cancel_bid_package, which also reconciles
+        # the parent task inside the same transaction.
+        assert _updates_for(captured, CANCEL_RPC)[0]["p_bid_package_id"] == str(PKG)
 
     async def test_cancels_from_evaluating(self, no_revisions):
         """The escape hatch for a round closed early by mistake."""
@@ -273,17 +296,22 @@ class TestInvitationConvergence:
 
 
 class TestAttributionAndOrdering:
-    async def test_stamps_cancelled_by_and_at(self, no_revisions):
+    async def test_passes_canceller_to_the_rpc(self, no_revisions):
+        """Attribution is the caller's to supply; cancelled_at is the database's.
+
+        cancelled_by rides through as an RPC parameter. The timestamp is now
+        NOW() inside fn_cancel_bid_package rather than a Python string, so there
+        is no payload to assert it on here; the real-DB suite checks that
+        cancelled_at lands non-null alongside cancelled_by.
+        """
         captured: list = []
         db = _make_db(_pkg("open"), captured)
 
         await cancel_bid_package(bid_package_id=PKG, cancelled_by=USER, db=db)
 
-        payload = _updates_for(captured, "bid_packages")[0]
-        assert payload["cancelled_by"] == str(USER)
-        assert payload["cancelled_at"]
-        # cancelled_at and updated_at share one timestamp.
-        assert payload["cancelled_at"] == payload["updated_at"]
+        payload = _updates_for(captured, CANCEL_RPC)[0]
+        assert payload["p_cancelled_by"] == str(USER)
+        assert payload["p_bid_package_id"] == str(PKG)
 
     async def test_invitations_converge_before_package_flip(self, no_revisions):
         """The flip goes last so a mid-way failure leaves a still-open package
@@ -295,4 +323,4 @@ class TestAttributionAndOrdering:
         await cancel_bid_package(bid_package_id=PKG, cancelled_by=USER, db=db)
 
         tables = [c["table"] for c in captured]
-        assert tables.index("bid_invitations") < tables.index("bid_packages")
+        assert tables.index("bid_invitations") < tables.index(CANCEL_RPC)

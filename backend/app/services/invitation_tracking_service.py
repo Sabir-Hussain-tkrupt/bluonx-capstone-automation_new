@@ -22,6 +22,9 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
+
 # Single source of truth for the award statuses that block a new revision
 # request. Imported (not redefined) so this read-path visibility flag can
 # never diverge from the create_revision_request backend guard.
@@ -101,6 +104,28 @@ _TERMINAL_PACKAGE_STATUSES = frozenset({"closed", "cancelled"})
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _has_pt_code(err: APIError, pt: str) -> bool:
+    """True when the RPC raised SQLSTATE `pt` (e.g. 'PT409').
+
+    supabase-py surfaces a raised SQLSTATE on APIError.code; the stringified
+    error is scanned as a backstop in case a client version tucks it into the
+    message instead.
+
+    Deliberately duplicated from milestone_service rather than imported: those
+    copies are module-private, and reaching for them would pull the whole
+    milestone service (and its holiday/business-day chain) into the bid path for
+    six lines of predicate. If a third caller appears, both belong in
+    app/core/db_errors.py next to _is_unique_violation.
+    """
+    code = str(getattr(err, "code", "") or "")
+    return code == pt or pt in str(err)
+
+
+def _err_message(err: APIError) -> str | None:
+    msg = getattr(err, "message", None)
+    return str(msg) if msg else None
 
 
 def _parse_deadline(raw) -> datetime | None:
@@ -496,6 +521,15 @@ async def cancel_bid_package(
     so a mid-way failure leaves a still-open package that the deadline sweep
     reconciles, never a cancelled package with live revision tokens.
 
+    That last step is fn_cancel_bid_package, which also returns the parent task
+    to 'draft' when this was its LAST live round. The two belong in one
+    transaction because a cancelled sole round with the task still in 'bidding'
+    is the broken state this whole path used to leave behind: nothing to bid on,
+    project archive and delete blocked, and no UI route back out. Everything
+    before it stays in Python on purpose — those writes are not what produced
+    the inconsistency, and absorbing them would widen the pre-existing
+    non-atomicity rather than close it.
+
     NOTE: the 'no_response' rows this writes belong to a round the PM voided, not
     to vendors who ignored an invitation. Any future vendor response-rate metric
     must exclude invitations whose package is 'cancelled'.
@@ -544,17 +578,40 @@ async def cancel_bid_package(
         bid_package_id=bid_package_id, db=db, now=now
     )
 
-    (
-        db.table("bid_packages")
-        .update({
-            "status": "cancelled",
-            "cancelled_by": str(cancelled_by),
-            "cancelled_at": now,
-            "updated_at": now,
-        })
-        .eq("id", str(bid_package_id))
-        .execute()
-    )
+    # Package flip + parent-task reconciliation, atomically. The task returns to
+    # 'draft' only when this was its last live round; see fn_cancel_bid_package
+    # (schema section 7.2b) for why 'draft' and not 'cancelled'.
+    #
+    # The guards above already rejected every status the RPC would PT409 on, so
+    # a PT code arriving here means a concurrent writer beat us to the row. They
+    # are mapped rather than swallowed so that race surfaces as the same 404/409
+    # a serial caller would have seen.
+    try:
+        package_resp = await run_in_threadpool(
+            lambda: db.rpc(
+                "fn_cancel_bid_package",
+                {
+                    "p_bid_package_id": str(bid_package_id),
+                    "p_cancelled_by": str(cancelled_by),
+                },
+            ).execute()
+        )
+    except APIError as exc:
+        if _has_pt_code(exc, "PT404"):
+            raise BidPackageNotFoundError() from exc
+        if _has_pt_code(exc, "PT409"):
+            raise InvitationTrackingError(
+                409, _err_message(exc) or "The bid package can no longer be cancelled."
+            ) from exc
+        raise
+
+    package_data = package_resp.data
+    package_row = (
+        package_data[0] if isinstance(package_data, list) else package_data
+    ) or None
+    if not package_row:
+        raise InvitationTrackingError(500, "Bid package cancellation failed.")
+
     return {
         "id": str(bid_package_id),
         "status": "cancelled",
