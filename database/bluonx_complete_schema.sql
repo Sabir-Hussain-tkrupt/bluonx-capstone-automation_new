@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  3.8
--- Date:     August 13, 2026
+-- Version:  3.9
+-- Date:     September 2, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Tables:   34
 -- Engine:   PostgreSQL via Supabase
@@ -1978,6 +1978,95 @@ REVOKE ALL ON FUNCTION fn_create_bid_package_with_invitations(
 GRANT EXECUTE ON FUNCTION fn_create_bid_package_with_invitations(
   UUID, TIMESTAMPTZ, UUID, UUID, TEXT, DATE, UUID, UUID[], JSONB
 ) TO service_role;
+
+
+-- ----------------------------------------------------------------------------
+-- 7.2b fn_cancel_bid_package() — atomic round void + parent-task reconciliation
+-- ----------------------------------------------------------------------------
+-- Flips the package to 'cancelled' and, when that was the task's LAST live
+-- round, returns the task to 'draft' — in ONE transaction. Previously these were
+-- two facts and only the first was ever written: a cancelled sole round left the
+-- task in 'bidding' with nothing to bid on, which blocks project archive and
+-- delete and hides the "Start New Round" button (gated on status = 'draft').
+--
+-- 'draft' is the target because fn_create_bid_package_with_invitations (7.2
+-- above) advances the task only WHERE status = 'draft'. Any other resting value
+-- makes a later rebid a silent no-op, which is exactly how the old state looked
+-- self-consistent without ever having been repaired.
+--
+-- NOTE: ALLOWED_TRANSITIONS in backend/app/routers/tasks.py has no
+-- bidding -> draft edge. That map gates the PATCH endpoint only; nothing on the
+-- cancel path reads it, and this bypass is deliberate. 'draft' is safe to land
+-- on because every transition out of it is legal.
+--
+-- The revision cancel, token revoke and bid_invitations convergence stay in
+-- Python ahead of this call (invitation_tracking_service.cancel_bid_package).
+-- They are not the pair that produced the wrong state, and folding them in would
+-- widen a pre-existing non-atomicity rather than close it.
+--
+-- The status guard mirrors the Python one exactly (open | evaluating), so
+-- 'closed' is rejected here too, not only 'cancelled'. In practice the Python
+-- guard rejects first and these PT codes are a concurrency backstop.
+
+CREATE OR REPLACE FUNCTION fn_cancel_bid_package(
+  p_bid_package_id UUID,
+  p_cancelled_by   UUID
+)
+RETURNS SETOF bid_packages AS $$
+DECLARE
+  v_package   bid_packages;
+  v_live_left INTEGER;
+BEGIN
+  SELECT * INTO v_package
+    FROM bid_packages
+   WHERE id = p_bid_package_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Bid package % not found', p_bid_package_id
+      USING ERRCODE = 'PT404';
+  END IF;
+
+  IF v_package.status NOT IN ('open', 'evaluating') THEN
+    RAISE EXCEPTION
+      'Cannot cancel: the package is ''%''. Only open or evaluating packages can be cancelled.',
+      v_package.status
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  UPDATE bid_packages
+     SET status       = 'cancelled',
+         cancelled_by = p_cancelled_by,
+         cancelled_at = NOW(),
+         updated_at   = NOW()
+   WHERE id = p_bid_package_id
+   RETURNING * INTO v_package;
+
+  -- Siblings only: the row above is already 'cancelled', so it cannot count
+  -- itself as the live round that keeps the task in 'bidding'.
+  SELECT count(*) INTO v_live_left
+    FROM bid_packages
+   WHERE task_id = v_package.task_id
+     AND status <> 'cancelled';
+
+  -- The status = 'bidding' predicate is load-bearing: never stomp 'awarded',
+  -- 'in_progress', or a value a PM set by hand.
+  IF v_live_left = 0 THEN
+    UPDATE tasks
+       SET status     = 'draft',
+           updated_at = NOW()
+     WHERE id = v_package.task_id
+       AND status = 'bidding';
+  END IF;
+
+  RETURN NEXT v_package;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL ON FUNCTION fn_cancel_bid_package(UUID, UUID)
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION fn_cancel_bid_package(UUID, UUID) TO service_role;
 
 
 
