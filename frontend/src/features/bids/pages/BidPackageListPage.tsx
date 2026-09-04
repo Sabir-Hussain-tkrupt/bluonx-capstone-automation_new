@@ -155,8 +155,8 @@ export function BidPackageListPage() {
       {
         id: 'project_task',
         header: 'Project / Task',
-        // Inline spans (not block elements) so the same cell is valid markup
-        // whether it renders in a <td>, a mobile-card title <p>, or a <dd>.
+        // Inline spans keep the two-line stack tidy in every place this cell
+        // renders: a <td>, the mobile-card title, or a <dd>.
         accessor: (row) => (
           <span className="block min-w-0">
             <span className="block truncate font-medium text-secondary-900">

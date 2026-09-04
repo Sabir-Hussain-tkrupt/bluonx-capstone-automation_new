@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { Skeleton } from '../Skeleton';
@@ -51,6 +52,30 @@ function getCellValue<T>(row: T, accessor: Column<T>['accessor']): React.ReactNo
   return String(value);
 }
 
+/**
+ * True when an event came from a control nested inside the row, rather than
+ * from the row itself. Row action buttons are owned by the call site, not by
+ * Table, so the guard lives on the row: it works for every consumer, including
+ * the ones that never call stopPropagation. Covers keydown as well as click —
+ * Enter on a focused action used to fire the action and the row click both.
+ *
+ * The three cases that must be told apart, or a plain row click is swallowed:
+ *   - no interactive ancestor at all (a plain <td>)      → not nested
+ *   - the interactive ancestor IS the row (the card's    → not nested
+ *     own role="button")
+ *   - an interactive ancestor the row contains           → nested
+ */
+function isFromNestedControl(e: React.SyntheticEvent): boolean {
+  const target = e.target as HTMLElement | null;
+  if (!target) return false;
+  const control = target.closest('button, a, input, select, textarea, [role="button"]');
+  return (
+    !!control &&
+    control !== e.currentTarget &&
+    (e.currentTarget as HTMLElement).contains(control)
+  );
+}
+
 function SortIcon({ direction }: { direction?: 'asc' | 'desc' }) {
   const className = 'ml-1 inline-block h-4 w-4';
   if (direction === 'asc') return <ArrowUp className={className} aria-hidden="true" />;
@@ -72,12 +97,15 @@ function MobileCard<T>({
 }) {
   const titleCol = columns.find((c) => c.id === titleColumnId) ?? columns[0];
   const detailCols = columns.filter((c) => c.id !== titleCol.id);
+  const titleId = useId();
 
   const content = (
     <>
-      <p className="text-sm font-semibold text-secondary-900">
+      {/* A div, not a p: accessors are free to return block elements, and the
+          title column routinely does (a badge next to the name). */}
+      <div id={titleId} className="text-sm font-semibold text-secondary-900">
         {getCellValue(row, titleCol.accessor)}
-      </p>
+      </div>
       {detailCols.length > 0 && (
         <dl className="mt-2 space-y-1">
           {detailCols.map((col) => (
@@ -92,14 +120,32 @@ function MobileCard<T>({
   );
 
   if (onRowClick) {
+    // A div with role="button", not a real <button>: detail cells commonly
+    // hold row action buttons, and a button inside a button is neither valid
+    // markup nor describable by a screen reader. The name comes from the
+    // mobileTitle column rather than the card's full contents, which would
+    // otherwise read as every label and value run together.
     return (
-      <button
-        type="button"
-        onClick={() => onRowClick(row)}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-labelledby={titleId}
+        onClick={(e) => {
+          if (isFromNestedControl(e)) return;
+          onRowClick(row);
+        }}
+        onKeyDown={(e) => {
+          if (isFromNestedControl(e)) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            // Space scrolls the page unless it is cancelled.
+            e.preventDefault();
+            onRowClick(row);
+          }
+        }}
         className="w-full rounded-lg border border-secondary-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-secondary-50 active:bg-secondary-100"
       >
         {content}
-      </button>
+      </div>
     );
   }
 
@@ -362,14 +408,21 @@ export function Table<T>({
             {data.map((row) => (
               <tr
                 key={keyExtractor(row)}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                // A click-only row is unreachable by keyboard. The mobile card
-                // view already renders a real <button>; this gives the desktop
-                // row the same reachability.
+                onClick={
+                  onRowClick
+                    ? (e) => {
+                        if (isFromNestedControl(e)) return;
+                        onRowClick(row);
+                      }
+                    : undefined
+                }
+                // A click-only row is unreachable by keyboard. This gives the
+                // desktop row the same reachability as the mobile card.
                 tabIndex={onRowClick ? 0 : undefined}
                 onKeyDown={
                   onRowClick
                     ? (e) => {
+                        if (isFromNestedControl(e)) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           onRowClick(row);
