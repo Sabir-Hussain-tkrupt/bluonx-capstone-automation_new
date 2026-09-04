@@ -22,15 +22,26 @@ export function LineItemsTable({ items, onUpdate, fieldErrors }: LineItemsTableP
       <div className="hidden overflow-x-auto rounded-lg border border-secondary-200 md:block">
         <table className="min-w-full divide-y divide-secondary-200 text-sm">
           {/* Explicit column widths prevent input cells from being squeezed */}
+          {/* Comments go above each col, never after it: a same-line comment
+              leaves the whitespace before it as a text node, and a colgroup
+              may contain nothing but col elements. */}
           <colgroup>
-            <col className="w-10" />     {/* # */}
-            <col />                       {/* Description — fills remaining space */}
-            <col className="w-28" />     {/* Type */}
-            <col className="w-14" />     {/* UoM */}
-            <col className="w-32" />     {/* Qty */}
-            <col className="w-36" />     {/* Unit Price ($) */}
-            <col className="w-36" />     {/* Lump Sum ($) */}
-            <col className="w-32" />     {/* Line Total */}
+            {/* # */}
+            <col className="w-10" />
+            {/* Description — fills remaining space */}
+            <col />
+            {/* Type */}
+            <col className="w-28" />
+            {/* UoM */}
+            <col className="w-14" />
+            {/* Qty */}
+            <col className="w-32" />
+            {/* Unit Price ($) */}
+            <col className="w-36" />
+            {/* Lump Sum ($) */}
+            <col className="w-36" />
+            {/* Line Total */}
+            <col className="w-32" />
           </colgroup>
           <thead className="bg-secondary-50">
             <tr className="text-left text-xs font-semibold tracking-wide text-secondary-600 uppercase">
