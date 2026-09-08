@@ -2,15 +2,19 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Storage Bucket RLS Policies
 -- ============================================================================
--- Version:  1.0
--- Date:     February 24, 2026
+-- Version:  1.1
+-- Date:     September 9, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Depends:  Buckets must be created first via Supabase Dashboard
+-- Depends:  Buckets must exist first (created empty via Supabase Dashboard)
 -- ============================================================================
 --
 -- PREREQUISITE:
 --   Create these three PRIVATE buckets in the Supabase Dashboard → Storage
---   BEFORE running this script:
+--   BEFORE running this script. Create them with the DEFAULT settings: leave
+--   the "Allowed MIME types" field and the file size limit alone. This script
+--   configures both (see BUCKET CONFIGURATION below); setting them by hand in
+--   the Dashboard is what let the bucket config drift out of step with the
+--   application's allow-list.
 --     1. vendor-documents   (W-9, insurance certs, master trade agreements)
 --     2. project-documents  (civil plans, drawings, specs, photos)
 --     3. bid-attachments    (docs vendors upload with bid submissions)
@@ -28,6 +32,49 @@
 --
 -- ============================================================================
 
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- BUCKET CONFIGURATION
+-- Runs after bucket creation, before the policies. Idempotent, safe to re-run.
+--
+-- allowed_mime_types is deliberately NULL: there is NO bucket-level MIME
+-- enforcement. MIME/extension validation lives in the application layer, in
+-- BUCKET_CONFIGS[...]["allowed_extensions"] in
+-- backend/app/core/file_validation.py, which is the single gate. Uploads are
+-- extension-first because CAD (.dwg/.dxf/.dwf/.dgn) and some Office files
+-- arrive as application/octet-stream, and a bucket-level MIME list cannot
+-- express that. When such a list drifted narrower than the app's allow-list, DOCX /
+-- XLSX / CAD uploads passed app validation and then failed at storage as an
+-- opaque 500. Do not reintroduce it.
+--
+-- DEV (Supabase free tier: 50 MB is a hard cap on that tier):
+-- ────────────────────────────────────────────────────────────────────────────
+
+UPDATE storage.buckets
+   SET allowed_mime_types = NULL,
+       file_size_limit    = 52428800          -- 50 MB
+ WHERE id IN ('vendor-documents', 'project-documents');
+
+UPDATE storage.buckets
+   SET allowed_mime_types = NULL,
+       file_size_limit    = 10485760          -- 10 MB, matches
+                                              -- MAX_ATTACHMENT_BYTES in
+                                              -- backend/app/routers/vendor_portal.py
+ WHERE id = 'bid-attachments';
+
+-- PRODUCTION (Pro plan): raise the global limit in Storage → Settings first,
+-- then run these two INSTEAD OF the pair above. bid-attachments stays at 10 MB
+-- in every environment, because that is a product rule, not a plan limit.
+--
+--   UPDATE storage.buckets
+--      SET allowed_mime_types = NULL,
+--          file_size_limit    = 209715200    -- 200 MB
+--    WHERE id IN ('vendor-documents', 'project-documents');
+--
+--   UPDATE storage.buckets
+--      SET allowed_mime_types = NULL,
+--          file_size_limit    = 10485760     -- 10 MB
+--    WHERE id = 'bid-attachments';
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- VENDOR-DOCUMENTS BUCKET
@@ -121,11 +168,19 @@ USING ( bucket_id = 'bid-attachments' );
 --    AND tablename = 'objects'
 --  ORDER BY policyname;
 --
+-- And to confirm the bucket configuration applied:
+--
+-- SELECT id, file_size_limit, allowed_mime_types
+--   FROM storage.buckets
+--  WHERE id IN ('vendor-documents','project-documents','bid-attachments');
+--
+-- Expect allowed_mime_types NULL on all three.
+--
 -- ============================================================================
 -- END OF STORAGE RLS POLICIES
 -- ============================================================================
 -- Summary:
---   Buckets:           3 (all private)
+--   Buckets:           3 (all private, MIME list NULL by design)
 --   Policies:         12 (4 operations × 3 buckets)
 --   Authenticated:    Full CRUD on all buckets
 --   Anonymous:        ZERO access

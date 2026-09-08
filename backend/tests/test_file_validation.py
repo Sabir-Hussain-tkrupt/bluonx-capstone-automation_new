@@ -8,10 +8,12 @@ through), and magic-byte sniffing keyed by extension.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 
-from app.core.file_validation import validate_upload
+from app.core.file_validation import BUCKET_CONFIGS, validate_upload
 
 # Office Open XML content types (hardcoded here to keep the test independent of
 # the module's internal constants).
@@ -101,3 +103,53 @@ class TestVendorDocuments:
 
     def test_rejects_txt(self):
         _assert_rejected(self.BUCKET, "notes.txt", "text/plain", TXT)
+
+
+class TestBucketConfigShape:
+    """Guards the two things that let bucket config drift out of step before.
+
+    `allowed_mimes` was a parallel MIME allow-list nothing read. Its
+    project-documents value listed zero CAD types against four CAD extensions,
+    so copying it into a Supabase bucket reproduced the exact bug it was
+    supposed to document. It is gone; these keep it gone.
+    """
+
+    def test_no_bucket_carries_a_mime_allow_list(self):
+        for bucket, config in BUCKET_CONFIGS.items():
+            assert "allowed_mimes" not in config, (
+                f"{bucket} reintroduced allowed_mimes. Extensions are the single "
+                "gate (see the module docstring and storage_rls_policies.sql)."
+            )
+
+    def test_allowed_mimes_is_referenced_nowhere_in_app(self):
+        app_dir = Path(__file__).resolve().parents[1] / "app"
+        offenders = [
+            str(path.relative_to(app_dir))
+            for path in app_dir.rglob("*.py")
+            if "allowed_mimes" in path.read_text(encoding="utf-8")
+        ]
+        assert offenders == [], f"allowed_mimes came back in: {offenders}"
+
+    def test_every_bucket_has_extensions_and_a_size(self):
+        for bucket, config in BUCKET_CONFIGS.items():
+            assert config["allowed_extensions"], bucket
+            assert config["max_size_bytes"] > 0, bucket
+
+    def test_bid_attachment_size_matches_the_router(self):
+        """The router enforces 10 MB and rejects first; the config is the backstop.
+
+        Stated in two files, so assert they agree rather than trusting a comment.
+        """
+        from app.routers.vendor_portal import MAX_ATTACHMENT_BYTES
+
+        assert (
+            BUCKET_CONFIGS["bid-attachments"]["max_size_bytes"] == MAX_ATTACHMENT_BYTES
+        )
+
+    def test_oversize_bid_attachment_rejected_at_the_config_limit(self):
+        limit = BUCKET_CONFIGS["bid-attachments"]["max_size_bytes"]
+        oversize = PDF + b"0" * limit
+        with pytest.raises(HTTPException) as raised:
+            _validate("bid-attachments", "big.pdf", "application/pdf", oversize)
+        assert raised.value.status_code == 422
+        assert "10MB" in raised.value.detail

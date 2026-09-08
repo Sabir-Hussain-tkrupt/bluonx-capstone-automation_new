@@ -115,6 +115,46 @@ dashboard configuration that must be done before the feature works in production
 
 ---
 
+## Storage Buckets
+
+All three buckets are private and every upload goes through FastAPI on the `service_role`
+key. Bucket **configuration** is not code and does not travel with the image, so it has to
+be applied per environment or uploads fail at the storage layer with the app none the wiser.
+
+- [ ] **Create the three private buckets** (`vendor-documents`, `project-documents`,
+  `bid-attachments`) in **Supabase Dashboard -> Storage**, with the **default** settings.
+  Leave the "Allowed MIME types" field and the file size limit alone; the script below sets
+  both.
+
+- [ ] **Run `database/storage_rls_policies.sql`** in the production SQL Editor. It applies
+  the BUCKET CONFIGURATION block (sets `allowed_mime_types` and `file_size_limit`) and then
+  creates the 12 RLS policies (4 ops x 3 buckets). For production, run the **PRODUCTION**
+  `UPDATE storage.buckets` pair commented near the top of that file *instead of* the DEV
+  pair, after raising the global limit in **Storage -> Settings** (the free tier caps files
+  at 50 MB).
+
+- [ ] **Leave `allowed_mime_types` NULL.** MIME/extension validation is application-layer,
+  in `BUCKET_CONFIGS[...]["allowed_extensions"]`
+  (`backend/app/core/file_validation.py`), because CAD (`.dwg/.dxf/.dwf/.dgn`) and some
+  Office files arrive as `application/octet-stream` and no bucket-level list can express
+  that. A bucket list narrower than the app's allow-list is the original defect: DOCX / XLSX
+  / CAD uploads pass validation and then fail at storage. Do not set one in the Dashboard.
+
+### Verification after deploy
+
+- [ ] ```sql
+      SELECT id, file_size_limit, allowed_mime_types
+        FROM storage.buckets
+       WHERE id IN ('vendor-documents','project-documents','bid-attachments');
+      ```
+      Expect 3 rows, `allowed_mime_types` **NULL** on all three, and `bid-attachments` at
+      `10485760` (10 MB, matching `MAX_ATTACHMENT_BYTES`).
+
+- [ ] Upload a `.docx` and a `.dwg` to a project through the app, and a `.pdf` attachment
+  through the vendor portal. All three should return 201, not 500.
+
+---
+
 ## Transactional Email Delivery Tracking (SES / SNS)
 
 The `email_log` delivery lifecycle (`delivered` / `bounced` / `complained`) is

@@ -8,9 +8,23 @@ import logging
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from storage3.exceptions import StorageApiError
 from supabase import Client
 
 logger = logging.getLogger(__name__)
+
+# Storage-API statuses that mean "this file was rejected", not "storage broke".
+# The Supabase storage API answers a bucket-level rejection with a 4xx and a
+# usable message ("mime type X is not supported"); collapsing that into a 500
+# threw the reason away and made a caller error look like an outage. Any other
+# 4xx degrades to 400. 5xx, and anything that is not a StorageApiError at all
+# (network, auth, quota), stay 500 with generic copy and a logged cause.
+_STORAGE_REJECTION_STATUSES = {
+    400: status.HTTP_400_BAD_REQUEST,
+    409: status.HTTP_409_CONFLICT,
+    413: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    415: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+}
 
 
 def unique_object_path(prefix: str, filename: str) -> str:
@@ -34,7 +48,10 @@ def upload_file(
     """Upload a file to Supabase Storage.
 
     Returns the storage path on success.
-    Raises HTTPException(500) on failure.
+
+    Raises HTTPException(415/413/409/400) when the storage API *rejects* the
+    file, carrying its reason through to the caller, and HTTPException(500) for
+    every other failure.
     """
     try:
         db.storage.from_(bucket).upload(
@@ -43,6 +60,35 @@ def upload_file(
             {"content-type": content_type},
         )
         return path
+    except StorageApiError as exc:
+        # .status comes off the wire as a str ('415'), so coerce defensively:
+        # an unparseable value falls through to the 500 branch.
+        try:
+            api_status = int(exc.status)
+        except (TypeError, ValueError):
+            api_status = 0
+        if 400 <= api_status < 500:
+            http_status = _STORAGE_REJECTION_STATUSES.get(
+                api_status, status.HTTP_400_BAD_REQUEST
+            )
+            reason = (getattr(exc, "message", None) or str(exc)).strip()
+            logger.warning(
+                "Storage rejected upload for %s/%s (%s %s): %s",
+                bucket,
+                path,
+                api_status,
+                getattr(exc, "code", None),
+                reason,
+            )
+            raise HTTPException(
+                status_code=http_status,
+                detail=f"Storage rejected the file: {reason}",
+            ) from exc
+        logger.error("Storage upload failed for %s/%s: %s", bucket, path, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload file to storage.",
+        ) from exc
     except Exception as exc:
         logger.error("Storage upload failed for %s/%s: %s", bucket, path, exc)
         raise HTTPException(

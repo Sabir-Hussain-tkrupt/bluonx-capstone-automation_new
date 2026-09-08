@@ -16,34 +16,23 @@ from fastapi import HTTPException, status
 _OOXML_MIME_WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _OOXML_MIME_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+# `allowed_extensions` is the single MIME/type gate for uploads. The Supabase
+# buckets deliberately carry no allowed_mime_types list (see the BUCKET
+# CONFIGURATION block in database/storage_rls_policies.sql). A bucket-level
+# MIME list cannot express CAD and Office files that arrive as
+# application/octet-stream, and when one drifted narrower than this list those
+# uploads passed validation here and then failed at storage. Do not add a
+# parallel MIME allow-list back to these entries.
 BUCKET_CONFIGS: dict[str, dict] = {
     "vendor-documents": {
         # Compliance paperwork: W-9, insurance cert, master trade agreement.
         # PDFs, scanned images, or a Word agreement — no CAD/spreadsheets.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
-        "allowed_mimes": {
-            "application/pdf",
-            "image/jpeg",
-            "image/png",
-            "application/msword",
-            _OOXML_MIME_WORD,
-        },
         "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"},
     },
     "project-documents": {
         # Plans, specs, budgets, notes: images, PDF/TIFF, TXT, Office, and CAD.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
-        "allowed_mimes": {
-            "application/pdf",
-            "image/jpeg",
-            "image/png",
-            "image/tiff",
-            "text/plain",
-            "application/msword",
-            "application/vnd.ms-excel",
-            _OOXML_MIME_WORD,
-            _OOXML_MIME_EXCEL,
-        },
         "allowed_extensions": {
             ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff",
             ".txt", ".doc", ".docx", ".xls", ".xlsx",
@@ -51,12 +40,11 @@ BUCKET_CONFIGS: dict[str, dict] = {
         },
     },
     "bid-attachments": {
-        "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
-        "allowed_mimes": {
-            "application/pdf",
-            "image/jpeg",
-            "image/png",
-        },
+        # 10 MB, matching MAX_ATTACHMENT_BYTES in app/routers/vendor_portal.py,
+        # which is the enforced per-attachment cap. The router checks first, so
+        # this is the backstop for any other caller of this bucket. Keep the
+        # two in step (asserted in tests/test_file_validation.py).
+        "max_size_bytes": 10 * 1024 * 1024,  # 10 MB
         "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png"},
     },
 }
