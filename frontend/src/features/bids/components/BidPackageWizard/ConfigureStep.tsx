@@ -107,7 +107,8 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
   // Safe view for reads while documentIds is still null (pre-seed render).
   const selectedIds = data.documentIds ?? [];
 
-  const templates = templatesData?.items ?? [];
+  // Memoized so the fallback array does not defeat the grouping memo below.
+  const templates = useMemo(() => templatesData?.items ?? [], [templatesData]);
 
   // Group templates: Recommended (trade match), General (null trade), Other
   const { recommended, general, other } = useMemo(() => {

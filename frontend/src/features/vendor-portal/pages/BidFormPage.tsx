@@ -5,7 +5,8 @@ import { ROUTES } from '@/constants/routes';
 import { BidDeadlineCountdown } from '../components/BidDeadlineCountdown';
 import { DeadlineExpiredModal } from '../components/DeadlineExpiredModal';
 import { DraftIndicator } from '../components/DraftIndicator';
-import { PORTAL_STEPS, ProgressStepper } from '../components/ProgressStepper';
+import { ProgressStepper } from '../components/ProgressStepper';
+import { PORTAL_STEPS } from '../constants/portalSteps';
 import { Step1CompanyInfo } from '../components/steps/Step1CompanyInfo';
 import { Step2Pricing } from '../components/steps/Step2Pricing';
 import { Step3Documents } from '../components/steps/Step3Documents';
@@ -375,7 +376,6 @@ export function BidFormPage() {
           message: 'This bid has already been submitted.',
         });
       } else {
-        // eslint-disable-next-line no-console
         console.error('[BidFormPage] submit failed', err);
         const detail =
           err instanceof PortalApiError

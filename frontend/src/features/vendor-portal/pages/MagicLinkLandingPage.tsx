@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { ROUTES } from '@/constants/routes';
-import { useVendorPortal } from '../context/VendorPortalContext';
+import { useVendorPortal } from '../context/useVendorPortal';
 import { validateToken } from '../services/portalApi';
 import { PortalApiError } from '../types/portal';
 

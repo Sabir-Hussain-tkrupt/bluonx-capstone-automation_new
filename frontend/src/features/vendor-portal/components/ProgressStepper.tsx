@@ -1,19 +1,7 @@
 import { Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { PORTAL_STEPS } from '../constants/portalSteps';
 import type { StepIndex } from '../types/portal';
-
-export interface StepperStep {
-  index: StepIndex;
-  label: string;
-  shortLabel: string;
-}
-
-export const PORTAL_STEPS: StepperStep[] = [
-  { index: 1, label: 'Info & Docs', shortLabel: 'Info' },
-  { index: 2, label: 'Pricing', shortLabel: 'Pricing' },
-  { index: 3, label: 'Notes & Uploads', shortLabel: 'Notes' },
-  { index: 4, label: 'Review & Submit', shortLabel: 'Review' },
-];
 
 export interface ProgressStepperProps {
   currentStep: StepIndex;

@@ -219,7 +219,6 @@ async function createDraft(payload: DraftPayload): Promise<BidDraft> {
     proposed_start_date: payload.proposed_start_date,
     sow_attested_name: payload.sow_attested_name,
   };
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] createDraft →', draft);
   return draft;
 }
@@ -236,7 +235,6 @@ async function updateDraft(id: string, payload: DraftPayload): Promise<BidDraft>
     proposed_start_date: payload.proposed_start_date,
     sow_attested_name: payload.sow_attested_name,
   };
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] updateDraft →', id, draft);
   return draft;
 }
@@ -251,7 +249,6 @@ async function submitBid(submissionId: string): Promise<SubmitBidResult> {
     )}`,
     submitted_at: new Date().toISOString(),
   };
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] submitBid →', result);
   return result;
 }
@@ -271,7 +268,6 @@ async function uploadAttachment(
     size: file.size,
     uploadedAt: new Date().toISOString(),
   };
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] uploadAttachment →', submissionId, attachment.id, file.name);
   return attachment;
 }
@@ -281,7 +277,6 @@ async function deleteAttachment(
   attachmentId: string,
 ): Promise<void> {
   await delay(150);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] deleteAttachment →', submissionId, attachmentId);
 }
 
@@ -290,7 +285,6 @@ async function getRevisionPrefill(
   originalSubmissionId: string,
 ): Promise<RevisionPrefillResponse> {
   await delay(400);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] getRevisionPrefill →', originalSubmissionId);
   return {
     total_amount: '52800.0',
@@ -319,7 +313,6 @@ async function listSubmissionAttachments(
   submissionId: string,
 ): Promise<SubmissionAttachmentMeta[]> {
   await delay(200);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] listSubmissionAttachments →', submissionId);
   return [
     {
@@ -344,7 +337,6 @@ async function declineRevisionRequest(
   decline_reason?: string,
 ): Promise<BidRevisionRequestResponse> {
   await delay(300);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] declineRevisionRequest →', revisionRequestId);
   const now = new Date().toISOString();
   const reason = decline_reason?.trim() || null;
@@ -367,7 +359,6 @@ async function declineRevisionRequest(
 // ─── Project document download stub ─────────────────────────────────
 async function downloadProjectDocument(documentId: string): Promise<string> {
   await delay(200);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] downloadProjectDocument →', documentId);
   // In Task 5.3 this will return a signed URL from Supabase Storage.
   return `#mock-download/${documentId}`;
@@ -428,7 +419,6 @@ async function respondToMilestone(
   value: 'yes' | 'no',
 ): Promise<MilestoneRespondResult> {
   await delay(300);
-  // eslint-disable-next-line no-console
   console.log('[portalApi:mock] respondToMilestone →', milestoneAlertId, value);
   return {
     outcome: 'recorded',

@@ -4,7 +4,6 @@ import { renderWithRouter } from '@/test/test-utils';
 import { AuthCallbackPage } from '../AuthCallbackPage';
 
 // Mock Supabase client
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const mockOnAuthStateChange = vi.fn((_cb: (event: string) => void) => ({
   data: { subscription: { unsubscribe: vi.fn() } },
 }));

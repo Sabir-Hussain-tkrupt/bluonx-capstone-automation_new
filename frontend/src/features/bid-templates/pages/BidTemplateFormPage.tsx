@@ -96,7 +96,8 @@ export function BidTemplateFormPage() {
     isFetching: isRefetchingTemplate,
   } = useBidTemplate(id);
   const { data: tradesData } = useTrades();
-  const trades = tradesData ?? [];
+  // Memoized so the fallback array does not defeat the tradeOptions memo.
+  const trades = useMemo(() => tradesData ?? [], [tradesData]);
 
   const createMutation = useCreateBidTemplate();
   const updateMutation = useUpdateBidTemplate();
