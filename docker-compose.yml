@@ -23,3 +23,34 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  # Runs the backend test suite. tests/ and pytest.ini are deliberately NOT in
+  # the image (see backend/.dockerignore), which keeps the image that ships to
+  # Fargate lean, so this service mounts them instead.
+  #
+  #   docker compose run --rm api-test                       # hermetic suite
+  #   docker compose run --rm api-test pytest -m requires_db  # live Supabase
+  #
+  # The "test" profile keeps this out of `docker compose up`; `docker compose
+  # run` enables the target service's profile on its own, so no --profile flag.
+  api-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    profiles: ["test"]
+    env_file:
+      - ./backend/.env
+    environment:
+      # /app is root-owned and the container runs as appuser, so pytest cannot
+      # create its default <rootdir>/.pytest_cache. Redirected here rather than
+      # in pytest.ini, where an absolute /tmp path would become C:\tmp\... for
+      # everyone running the suite locally on Windows. pytest orders args as
+      # ini addopts -> PYTEST_ADDOPTS -> command line, so a -m passed on the
+      # command line still overrides the ini default.
+      PYTEST_ADDOPTS: -o cache_dir=/tmp/pytest_cache
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/tests:/app/tests:ro
+      - ./backend/pytest.ini:/app/pytest.ini:ro
+    command: pytest
