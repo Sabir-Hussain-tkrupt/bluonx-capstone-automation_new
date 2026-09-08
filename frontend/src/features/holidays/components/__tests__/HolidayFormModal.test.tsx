@@ -19,6 +19,16 @@ vi.mock('../../hooks/useUpdateHoliday', () => ({
   useUpdateHoliday: () => ({ mutate: updateHolidayMutate, isPending: false }),
 }));
 
+// The form sets min={today} on the date input, so jsdom's constraint
+// validation refuses to submit any date before today and handleSubmit never
+// fires. Pin "today" ahead of the fixtures below so they stay submittable.
+// Only todayYmd is overridden: isWeekendYmd and hasWeekdayInRange from the
+// same module drive the validation the other cases assert on.
+vi.mock('../../utils/date', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/date')>()),
+  todayYmd: () => '2026-09-01',
+}));
+
 // 2026-09-07 is a Monday, 2026-09-11 a Friday, 2026-09-05/06 the weekend before.
 const MONDAY = '2026-09-07';
 const FRIDAY = '2026-09-11';
