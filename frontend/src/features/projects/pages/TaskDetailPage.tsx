@@ -195,7 +195,6 @@ export function TaskDetailPage() {
               <Field label="Bid Type" value={formatBidType(task.bid_type)} />
               <Field label="Status" value={<StatusBadge status={task.status} size="sm" />} />
               <Field label="Budget Estimate" value={formatCurrency(task.budget_estimate)} />
-              <Field label="Sort Order" value={task.sort_order} />
             </dl>
           </div>
         </Card>

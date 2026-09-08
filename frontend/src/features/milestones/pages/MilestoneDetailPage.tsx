@@ -16,6 +16,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { TextInput } from '@/components/ui/TextInput';
+import { Field } from '@/components/ui/Field';
 import { FormField } from '@/components/ui/FormField';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -34,15 +35,6 @@ import { todayStr } from '../utils/today';
 
 const TERMINAL_STATUSES = new Set(['completed', 'cancelled']);
 const RESCHEDULABLE_STATUSES = new Set(['in_progress', 'delayed', 'unresponsive']);
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 py-2 text-sm">
-      <dt className="shrink-0 text-secondary-500">{label}</dt>
-      <dd className="text-right text-secondary-900">{value ?? '—'}</dd>
-    </div>
-  );
-}
 
 export function MilestoneDetailPage() {
   const { id: projectId, taskId, milestoneId } = useParams<{
@@ -253,8 +245,8 @@ export function MilestoneDetailPage() {
                 Timeline
               </h3>
               <dl className="divide-y divide-secondary-100">
-                <InfoRow label="Planned Start" value={formatMilestoneDate(milestone.start_date)} />
-                <InfoRow
+                <Field label="Planned Start" value={formatMilestoneDate(milestone.start_date)} />
+                <Field
                   label="Planned End"
                   value={
                     endDrifted ? (
@@ -269,11 +261,11 @@ export function MilestoneDetailPage() {
                     )
                   }
                 />
-                <InfoRow
+                <Field
                   label="Actual Start"
                   value={formatMilestoneDate(milestone.actual_start_date)}
                 />
-                <InfoRow label="Actual End" value={formatMilestoneDate(milestone.actual_end_date)} />
+                <Field label="Actual End" value={formatMilestoneDate(milestone.actual_end_date)} />
               </dl>
             </section>
 

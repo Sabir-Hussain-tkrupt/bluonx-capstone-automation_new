@@ -351,7 +351,7 @@ export function VendorDetailPage() {
                   <Field
                     label="Address"
                     value={
-                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      <span className="inline-flex flex-wrap items-center gap-2">
                         {vendor.address}
                         <AddressNotLocatableBadge
                           address={vendor.address}
