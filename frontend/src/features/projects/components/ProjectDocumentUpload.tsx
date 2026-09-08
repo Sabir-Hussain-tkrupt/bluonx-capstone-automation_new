@@ -4,6 +4,11 @@ import { Button } from '@/components/ui/Button';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useUploadProjectDocument } from '@/features/projects/hooks/useProjectDocuments';
+import {
+  PROJECT_DOCUMENT_ACCEPT,
+  PROJECT_DOCUMENT_HINT,
+  PROJECT_DOCUMENT_MAX_MB,
+} from '@/constants/uploads';
 
 interface ProjectDocumentUploadProps {
   projectId: string;
@@ -75,8 +80,8 @@ export function ProjectDocumentUpload({ projectId, isOpen, onClose }: ProjectDoc
           File <span className="text-danger-500">*</span>
         </label>
         <FileUpload
-          accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.dwf,.dgn"
-          maxSizeMB={50}
+          accept={PROJECT_DOCUMENT_ACCEPT}
+          maxSizeMB={PROJECT_DOCUMENT_MAX_MB}
           onFilesSelected={(files) => {
             setSelectedFile(files[0] ?? null);
             setFileError('');
@@ -84,7 +89,7 @@ export function ProjectDocumentUpload({ projectId, isOpen, onClose }: ProjectDoc
           onError={setFileError}
           error={fileError}
           uploading={uploadMutation.isPending}
-          hint="PDF, images, Office docs, TXT, or CAD (DWG/DXF/DWF/DGN) up to 50MB"
+          hint={PROJECT_DOCUMENT_HINT}
           onRemoveFile={() => setSelectedFile(null)}
         />
       </div>

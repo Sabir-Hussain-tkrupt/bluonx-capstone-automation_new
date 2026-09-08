@@ -8,12 +8,18 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { FileUpload } from '@/components/ui/FileUpload';
 import { useBidTemplates } from '@/features/bid-templates/hooks/useBidTemplates';
 import { useProjectDocuments } from '@/features/bids/hooks/useProjectDocuments';
 import { uploadProjectDocument } from '@/features/projects/api/project-documents.mutations';
 import type { Task } from '@/features/tasks/api/task.queries';
 import type { WizardData } from '@/features/bids/types';
 import type { BidTemplate } from '@/features/bid-templates/api/bid-template.queries';
+import {
+  PROJECT_DOCUMENT_ACCEPT,
+  PROJECT_DOCUMENT_HINT,
+  PROJECT_DOCUMENT_MAX_MB,
+} from '@/constants/uploads';
 import { cn } from '@/utils/cn';
 
 interface ConfigureStepProps {
@@ -39,11 +45,17 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
     {},
   );
   const [sowUploading, setSowUploading] = useState(false);
+  // Replacing an existing SoW is behind a toggle so the uploaded state stays a
+  // compact summary line rather than a permanent dropzone.
+  const [replacingSow, setReplacingSow] = useState(false);
+
+  const setSowError = (message: string | undefined) =>
+    setErrors((prev) => ({ ...prev, sow: message }));
 
   const handleSowSelect = async (file: File | undefined) => {
     if (!file) return;
     setSowUploading(true);
-    setErrors((prev) => ({ ...prev, sow: undefined }));
+    setSowError(undefined);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -53,12 +65,35 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
         file_name: string;
       };
       onUpdate({ scopeOfWorkDocumentId: doc.id, scopeOfWorkFileName: doc.file_name });
+      setReplacingSow(false);
     } catch {
       setErrors((prev) => ({ ...prev, sow: 'Failed to upload the Scope of Work. Try again.' }));
     } finally {
       setSowUploading(false);
     }
   };
+
+  /**
+   * One dropzone definition for both the initial upload and the replace, so the
+   * two cannot drift apart again. They previously carried different accept
+   * lists (5 extensions vs 15) against the same bucket, which made a first
+   * .dwg scope of work unselectable while replacing one with that same file
+   * worked. Neither had a size cap.
+   */
+  const sowUpload = (label: string) => (
+    <FileUpload
+      accept={PROJECT_DOCUMENT_ACCEPT}
+      maxSizeMB={PROJECT_DOCUMENT_MAX_MB}
+      label={label}
+      hint={PROJECT_DOCUMENT_HINT}
+      uploading={sowUploading}
+      onFilesSelected={(files) => handleSowSelect(files[0])}
+      onError={setSowError}
+      // The summary box above already names the uploaded file; the component's
+      // own list would show it a second time.
+      showFileList={false}
+    />
+  );
 
   // Seed document IDs on first load (all pre-checked). Guard on `null`
   // (not-yet-seeded), NOT on length: an empty array means the user
@@ -213,42 +248,31 @@ export function ConfigureStep({ projectId, task, data, onUpdate, onNext }: Confi
           )}
 
           {data.scopeOfWorkDocumentId ? (
-            <div className="flex items-center justify-between rounded-lg border border-success-200 bg-success-50 px-4 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-secondary-900">
-                  {data.scopeOfWorkFileName ?? 'Scope of Work uploaded'}
-                </p>
-                <p className="text-xs text-success-700">Uploaded</p>
-              </div>
-              <label className="shrink-0 cursor-pointer text-xs font-medium text-primary-600 hover:text-primary-700">
-                Replace
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.dwf,.dgn"
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-success-200 bg-success-50 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-secondary-900">
+                    {data.scopeOfWorkFileName ?? 'Scope of Work uploaded'}
+                  </p>
+                  <p className="text-xs text-success-700">Uploaded</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplacingSow((v) => !v);
+                    setSowError(undefined);
+                  }}
                   disabled={sowUploading}
-                  onChange={(e) => handleSowSelect(e.target.files?.[0])}
-                />
-              </label>
+                  aria-expanded={replacingSow}
+                  className="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {replacingSow ? 'Cancel' : 'Replace'}
+                </button>
+              </div>
+              {replacingSow && sowUpload('Drop a replacement here or click to browse')}
             </div>
           ) : (
-            <label
-              className={cn(
-                'flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-sm',
-                sowUploading
-                  ? 'border-secondary-200 text-secondary-400'
-                  : 'border-secondary-300 text-secondary-600 hover:border-primary-400 hover:text-primary-600',
-              )}
-            >
-              {sowUploading ? 'Uploading…' : 'Click to upload a Scope of Work document'}
-              <input
-                type="file"
-                className="hidden"
-                accept=".pdf,.jpg,.jpeg,.png,.tiff"
-                disabled={sowUploading}
-                onChange={(e) => handleSowSelect(e.target.files?.[0])}
-              />
-            </label>
+            sowUpload('Click to upload a Scope of Work document')
           )}
         </div>
       </Card>

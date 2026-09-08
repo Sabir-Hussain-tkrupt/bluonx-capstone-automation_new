@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { Check, FileText, X } from 'lucide-react';
 import { Alert, Button, Card, FileUpload, FormField, useToast } from '@/components/ui';
 import {
+  BID_ATTACHMENT_ACCEPT,
+  BID_ATTACHMENT_HINT,
+  BID_ATTACHMENT_MAX_MB,
+} from '@/constants/uploads';
+import {
   deleteAttachment,
   uploadAttachment,
 } from '../../services/portalApi';
@@ -12,8 +17,6 @@ import type {
 } from '../../types/portal';
 import { PortalApiError } from '../../types/portal';
 
-const ACCEPT_TYPES = 'application/pdf,image/jpeg,image/png';
-const MAX_FILE_SIZE_MB = 10;
 const MAX_NOTES_LENGTH = 2000;
 
 function formatBytes(bytes: number): string {
@@ -196,13 +199,13 @@ export function Step3Documents({
         )}
 
         <FileUpload
-          accept={ACCEPT_TYPES}
-          maxSizeMB={MAX_FILE_SIZE_MB}
+          accept={BID_ATTACHMENT_ACCEPT}
+          maxSizeMB={BID_ATTACHMENT_MAX_MB}
           multiple
           onFilesSelected={handleFilesSelected}
           onError={(msg) => setUploadError(msg)}
           label="Drag and drop files here, or click to browse"
-          hint="PDF, JPEG, or PNG · up to 10 MB each"
+          hint={BID_ATTACHMENT_HINT}
           // Step 3 renders its own attachment list below; suppress the
           // component's internal list so files aren't shown twice.
           showFileList={false}
