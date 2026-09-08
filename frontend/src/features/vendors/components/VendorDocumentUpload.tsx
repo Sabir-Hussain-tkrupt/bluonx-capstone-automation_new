@@ -7,6 +7,11 @@ import { DatePicker } from '@/components/ui/DatePicker';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { errorMessage } from '@/lib/api';
+import {
+  VENDOR_DOCUMENT_ACCEPT,
+  VENDOR_DOCUMENT_HINT,
+  VENDOR_DOCUMENT_MAX_MB,
+} from '@/constants/uploads';
 import { useUploadVendorDocument } from '@/features/vendors/hooks/useVendorDocuments';
 import type { VendorDocument } from '@/features/vendors/api/vendor.queries';
 
@@ -169,8 +174,8 @@ export function VendorDocumentUpload({
             File <span className="text-danger-500">*</span>
           </label>
           <FileUpload
-            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-            maxSizeMB={50}
+            accept={VENDOR_DOCUMENT_ACCEPT}
+            maxSizeMB={VENDOR_DOCUMENT_MAX_MB}
             onFilesSelected={(files) => {
               setSelectedFile(files[0] ?? null);
               setFileError('');
@@ -178,7 +183,7 @@ export function VendorDocumentUpload({
             onError={setFileError}
             error={fileError}
             uploading={uploadMutation.isPending}
-            hint="PDF, JPEG, PNG, or Word up to 50MB"
+            hint={VENDOR_DOCUMENT_HINT}
             onRemoveFile={() => setSelectedFile(null)}
           />
         </div>

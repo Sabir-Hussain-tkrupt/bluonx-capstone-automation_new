@@ -29,7 +29,12 @@ describe('ProjectDocumentUpload file-type validation', () => {
   });
 
   it('accepts PDF, CAD, and Office types for projects', () => {
-    for (const name of ['plans.pdf', 'site.dwg', 'spec.docx', 'budget.xlsx', 'notes.txt']) {
+    // .tif and .tiff stay together: the SoW input shipped .tiff without .tif,
+    // which made a .tif scope of work unselectable.
+    for (const name of [
+      'plans.pdf', 'site.dwg', 'spec.docx', 'budget.xlsx', 'notes.txt',
+      'survey.tif', 'survey.tiff',
+    ]) {
       const { unmount } = renderWithRouter(
         <ProjectDocumentUpload projectId="p1" isOpen onClose={() => {}} />,
       );
