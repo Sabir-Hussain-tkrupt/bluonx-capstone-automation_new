@@ -127,12 +127,19 @@ The app opens on **http://localhost:5173**. Log in with a Supabase user for the 
 | View backend logs | `docker compose logs -f api` |
 | Start frontend | `cd frontend && npm run dev` |
 | Frontend production build | `cd frontend && npm run build` |
-| Run backend tests | `docker compose run --rm api pytest` |
+| Run backend tests | `docker compose run --rm api-test` |
 
 ### Backend tests
 
-`pytest` runs the hermetic suite: no database, no credentials, no network. This
-is the default and it is what you should get green before pushing.
+```bash
+docker compose run --rm api-test
+```
+
+That runs the hermetic suite: no database, no credentials, no network. It is the
+default and it is what you should get green before pushing. (Note: the command
+this file used to document, `docker compose run --rm api pytest`, collected
+**zero** tests and exited without an error, which looked exactly like a pass.
+The `api` image does not contain `tests/`. The `api-test` service mounts them.)
 
 A small number of tests exercise SQL triggers, business-day functions and RPC
 grants, which cannot be meaningfully mocked. They are marked `requires_db` and
@@ -140,14 +147,19 @@ are **deselected by default**:
 
 | Command | Runs |
 |---------|------|
-| `pytest` | the hermetic suite (default) |
-| `pytest -m requires_db` | only the live-database tests |
-| `pytest -m ""` | everything |
+| `docker compose run --rm api-test` | the hermetic suite (default) |
+| `docker compose run --rm api-test pytest -m requires_db` | only the live-database tests |
+| `docker compose run --rm api-test pytest -m ""` | everything |
 
-To run the `requires_db` set you need `TEST_ADMIN_EMAIL` and
-`TEST_ADMIN_PASSWORD` in `backend/.env` (see `backend/.env.example`), pointing at
-an admin user in the same Supabase project as `SUPABASE_URL`. Leave them blank
-and those tests skip rather than fail.
+Working in a local virtualenv instead of Docker? Drop the prefix and run
+`pytest`, `pytest -m requires_db` or `pytest -m ""` from `backend/`.
+
+The `requires_db` set talks to a real Supabase project, so it needs live
+credentials in `backend/.env`: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+(already there if the app runs at all), plus `TEST_ADMIN_EMAIL` and
+`TEST_ADMIN_PASSWORD` (see `backend/.env.example`) pointing at an admin user in
+that same project. Leave the two `TEST_ADMIN_*` blank and the tests that need a
+signed-in admin skip rather than fail.
 
 Two cautions while the team shares one Supabase project: these tests write real
 rows (they clean up after themselves), and two people running `-m requires_db`
