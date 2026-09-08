@@ -65,10 +65,13 @@ export function ContractSignerModal({ isOpen, onClose, signer }: ContractSignerM
   });
 
   // The modal is mounted once and reused for every row, so the form has to be
-  // re-seeded whenever the target changes rather than on mount alone.
+  // re-seeded whenever the target changes rather than on mount alone. Only
+  // `reset` belongs here, since it drives react-hook-form, an external store.
+  // `submitError` is cleared by handleClose and again at the top of onSubmit,
+  // and every close path (Cancel, Escape, overlay, post-save) routes through
+  // handleClose, so a stale error cannot survive into the next open.
   useEffect(() => {
     if (!isOpen) return;
-    setSubmitError(null);
     reset(
       signer
         ? {

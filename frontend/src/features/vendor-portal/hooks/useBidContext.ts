@@ -1,4 +1,4 @@
-import { useVendorPortal } from '../context/VendorPortalContext';
+import { useVendorPortal } from '../context/useVendorPortal';
 import type { VendorBidContext } from '../types/portal';
 
 /**

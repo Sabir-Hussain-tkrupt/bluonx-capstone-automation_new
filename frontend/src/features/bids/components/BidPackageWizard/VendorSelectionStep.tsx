@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -7,7 +7,11 @@ import { Alert } from '@/components/ui/Alert';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Modal } from '@/components/ui/Modal';
 import { useQualifiedVendors } from '@/features/bids/hooks/useQualifiedVendors';
-import type { QualifiedVendor, VendorSelection } from '@/features/bids/types';
+import type {
+  QualifiedVendor,
+  QualifiedVendorsResponse,
+  VendorSelection,
+} from '@/features/bids/types';
 import { cn } from '@/utils/cn';
 
 interface VendorSelectionStepProps {
@@ -19,6 +23,32 @@ interface VendorSelectionStepProps {
 }
 
 type SortKey = 'distance' | 'company' | 'capacity';
+
+/**
+ * Prior selections win: the PM came back to this step and their choices have
+ * to survive. With none, pre-check every qualified vendor that has a primary
+ * contact to address the invitation to.
+ */
+function buildInitialSelection(
+  vendorData: QualifiedVendorsResponse,
+  priorSelections: VendorSelection[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+
+  if (priorSelections.length > 0) {
+    for (const s of priorSelections) {
+      map.set(s.vendor_id, s.vendor_contact_id);
+    }
+    return map;
+  }
+
+  for (const v of vendorData.qualified_vendors) {
+    if (v.primary_contact) {
+      map.set(v.vendor_id, v.primary_contact.id);
+    }
+  }
+  return map;
+}
 
 function formatDate(value: string | null): string {
   if (!value) return '\u2014';
@@ -61,31 +91,31 @@ export function VendorSelectionStep({
   // Validation error
   const [validationError, setValidationError] = useState('');
 
-  // Initialize selections from qualified vendors on first load
-  useEffect(() => {
-    if (!vendorData) return;
+  // Seed the selection map once the query resolves, and re-seed if the wizard
+  // hands back a different selection list. Done during render rather than in an
+  // effect: vendorData arrives asynchronously, so there is no render-time
+  // source a useState initializer could read, and seeding from an effect
+  // commits an extra render with the boxes unchecked. Setting state during
+  // render is React's sanctioned way to adjust state when its source changes;
+  // the re-render happens before the browser paints.
+  const [seededFrom, setSeededFrom] = useState<{
+    vendorData: QualifiedVendorsResponse;
+    selections: VendorSelection[];
+  } | null>(null);
 
-    // If we already have selections from a previous visit (going back), restore them
-    if (data.vendorSelections.length > 0) {
-      const map = new Map<string, string>();
-      for (const s of data.vendorSelections) {
-        map.set(s.vendor_id, s.vendor_contact_id);
-      }
-      setSelected(map);
-      return;
-    }
+  if (
+    vendorData &&
+    (!seededFrom ||
+      seededFrom.vendorData !== vendorData ||
+      seededFrom.selections !== data.vendorSelections)
+  ) {
+    setSeededFrom({ vendorData, selections: data.vendorSelections });
+    setSelected(buildInitialSelection(vendorData, data.vendorSelections));
+  }
 
-    // Otherwise pre-check all qualified vendors with their primary contact
-    const map = new Map<string, string>();
-    for (const v of vendorData.qualified_vendors) {
-      if (v.primary_contact) {
-        map.set(v.vendor_id, v.primary_contact.id);
-      }
-    }
-    setSelected(map);
-  }, [vendorData, data.vendorSelections]);
-
-  const qualified = vendorData?.qualified_vendors ?? [];
+  // Memoized so the `?? []` fallback does not mint a new array identity every
+  // render and defeat the sort memo below.
+  const qualified = useMemo(() => vendorData?.qualified_vendors ?? [], [vendorData]);
   const disqualified = vendorData?.disqualified_vendors ?? [];
 
   // Sort qualified vendors

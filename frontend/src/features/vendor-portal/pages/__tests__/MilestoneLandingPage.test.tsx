@@ -16,7 +16,7 @@ vi.mock('../../services/portalApi', () => ({
 }));
 
 const setMilestoneSession = vi.fn();
-vi.mock('../../context/VendorPortalContext', () => ({
+vi.mock('../../context/useVendorPortal', () => ({
   useVendorPortal: () => ({ setMilestoneSession }),
 }));
 

@@ -66,7 +66,6 @@ export function useAutoSave({
       setStatus('saved');
       setLastSavedAt(new Date());
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('[useAutoSave] save failed', err);
       setStatus('error');
     } finally {

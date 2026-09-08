@@ -1,5 +1,5 @@
 import bluonxLogo from '@/assets/bluonx-logo.png';
-import { useVendorPortal } from '../../context/VendorPortalContext';
+import { useVendorPortal } from '../../context/useVendorPortal';
 
 export function PortalHeader() {
   const { bidContext } = useVendorPortal();

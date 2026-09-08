@@ -60,7 +60,9 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
   const deleteMutation = useDeleteTask(projectId);
   const reorderMutation = useReorderTasks(projectId);
 
-  const tasks = data?.items ?? [];
+  // Memoized so the fallback array does not change identity every render:
+  // taskIds, the drag handlers and the budget total all take it as a dep.
+  const tasks = useMemo(() => data?.items ?? [], [data]);
 
   // DnD is disabled when parent project is archived (read-only)
   const isDragDisabled = readOnly;

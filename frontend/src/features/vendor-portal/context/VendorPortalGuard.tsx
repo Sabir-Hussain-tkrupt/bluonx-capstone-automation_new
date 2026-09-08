@@ -13,7 +13,7 @@
 
 import { Navigate, Outlet } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
-import { useVendorPortal } from './VendorPortalContext';
+import { useVendorPortal } from './useVendorPortal';
 
 export function VendorPortalGuard() {
   const { jwt, bidContext, milestoneContext } = useVendorPortal();

@@ -18,9 +18,7 @@
  */
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -33,20 +31,10 @@ import {
   setVendorJwt as setApiJwt,
 } from '../services/portalApi';
 import type { VendorBidContext, VendorMilestoneContext } from '../types/portal';
-
-interface VendorPortalContextValue {
-  jwt: string | null;
-  bidContext: VendorBidContext | null;
-  milestoneContext: VendorMilestoneContext | null;
-  setSession: (jwt: string, bidContext: VendorBidContext) => void;
-  setMilestoneSession: (
-    jwt: string,
-    milestoneContext: VendorMilestoneContext,
-  ) => void;
-  clearSession: () => void;
-}
-
-const VendorPortalReactContext = createContext<VendorPortalContextValue | null>(null);
+import {
+  VendorPortalReactContext,
+  type VendorPortalContextValue,
+} from './vendorPortalSession';
 
 // ── sessionStorage keys ─────────────────────────────────────────────
 // Namespaced to avoid collisions with any future per-tab storage.
@@ -234,12 +222,4 @@ export function VendorPortalProvider({ children }: { children: ReactNode }) {
       {children}
     </VendorPortalReactContext.Provider>
   );
-}
-
-export function useVendorPortal(): VendorPortalContextValue {
-  const ctx = useContext(VendorPortalReactContext);
-  if (!ctx) {
-    throw new Error('useVendorPortal must be used inside <VendorPortalProvider>');
-  }
-  return ctx;
 }

@@ -75,7 +75,8 @@ export function BidTemplateListPage() {
   const total = data?.total ?? 0;
 
   const { data: tradesData } = useTrades();
-  const trades = tradesData ?? [];
+  // Memoized so the fallback array does not defeat the tradeOptions memo.
+  const trades = useMemo(() => tradesData ?? [], [tradesData]);
 
   const deleteMutation = useDeleteBidTemplate();
 

@@ -119,10 +119,7 @@ export function DropdownMenu({
 
   // Measure before paint so the panel never shows at a stale position.
   useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
+    if (!isOpen) return;
     updatePosition();
   }, [isOpen, updatePosition]);
 
@@ -199,6 +196,12 @@ export function DropdownMenu({
     ? cloneElement(trigger as ReactElement<Record<string, unknown>>, {
         onClick: (e: React.MouseEvent) => {
           (trigger as ReactElement<{ onClick?: (e: React.MouseEvent) => void }>).props.onClick?.(e);
+          // Drop the previous measurement on the event that opens the menu
+          // rather than in an effect. The panel renders hidden until
+          // `position` is set, so clearing it here is what stops a reopen from
+          // painting at the last trigger's coordinates. Unconditional is safe:
+          // `position` is never read while the menu is closed.
+          setPosition(null);
           setIsOpen((o) => !o);
         },
         'aria-haspopup': 'menu',
