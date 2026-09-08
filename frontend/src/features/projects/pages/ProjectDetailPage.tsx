@@ -300,7 +300,7 @@ export function ProjectDetailPage() {
                   <Field
                     label="Address"
                     value={
-                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      <span className="inline-flex flex-wrap items-center gap-2">
                         {project.address}
                         <AddressNotLocatableBadge
                           address={project.address}
