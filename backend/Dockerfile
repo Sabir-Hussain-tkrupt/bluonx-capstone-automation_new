@@ -20,11 +20,13 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY app/ ./app/
 
+# Create secrets folder and set permissions for appuser
+RUN mkdir -p /app/secrets && chown -R appuser:appuser /app/secrets
+
 # Switch to non-root user
 USER appuser
 
 EXPOSE 8000
 
-# Create secret file at startup if secret is present, then launch Uvicorn
-CMD sh -c 'mkdir -p /app/secrets && if [ -n "$DOCUSIGN_PRIVATE_KEY_SECRET" ]; then printf "%s\n" "$DOCUSIGN_PRIVATE_KEY_SECRET" > /app/secrets/docusign_private_key.pem; fi && exec uvicorn app.main:app --host 0.0.0.0 --port 8000'
-
+# Write secret file if present, then start Uvicorn
+CMD sh -c 'if [ -n "$DOCUSIGN_PRIVATE_KEY_SECRET" ]; then printf "%s\n" "$DOCUSIGN_PRIVATE_KEY_SECRET" > /app/secrets/docusign_private_key.pem; fi && exec uvicorn app.main:app --host 0.0.0.0 --port 8000'
