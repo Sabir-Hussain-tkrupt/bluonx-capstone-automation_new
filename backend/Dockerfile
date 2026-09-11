@@ -17,13 +17,19 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code
+# Copy application code and scripts
 COPY app/ ./app/
+COPY scripts/ ./scripts/
+
+# Ensure entrypoint script is executable
+RUN chmod +x ./scripts/entrypoint.sh
 
 # Switch to non-root user
 USER appuser
 
 EXPOSE 8000
+
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 
 # Single worker is required, not an untuned default: APScheduler runs in-process,
 # so --workers N runs every scheduled job N times.
