@@ -118,9 +118,8 @@ def _guard_last_admin(db: Client, *, removing_admin: bool) -> None:
 
 
 # ── Row fetch ────────────────────────────────────────────────────────────────
-def _get_active_user_row(db: Client, target_id) -> dict:
-    """Fetch a non-deleted public.users row or raise 404. Mutations refuse to act
-    on a soft-deleted target."""
+def _get_active_user_row(db: Client, target_id, allow_deleted: bool = False) -> dict:
+    """Fetch a public.users row or raise 404."""
     resp = (
         db.table("users")
         .select(_USER_COLUMNS)
@@ -129,7 +128,7 @@ def _get_active_user_row(db: Client, target_id) -> dict:
         .execute()
     )
     row = resp.data if resp else None
-    if not row or row.get("deleted_at"):
+    if not row or (not allow_deleted and row.get("deleted_at")):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
@@ -140,12 +139,57 @@ def _get_active_user_row(db: Client, target_id) -> dict:
 def invite_user(
     db: Client, admin_id, email: str, full_name: str, role: str
 ) -> dict:
-    """Invite a new admin/PM via Supabase's auth admin API. The trigger creates
-    the public.users row from the invite metadata; we then stamp invited_by.
-
-    The invited_by stamp is best-effort: its failure is logged but does not fail
-    the invite, because the auth user (and the real invite email) already exist.
+    """Invite a new admin/PM via Supabase's auth admin API, or restore an existing
+    soft-deleted account under the same email.
     """
+    existing_resp = (
+        db.table("users")
+        .select(_USER_COLUMNS)
+        .eq("email", email)
+        .maybe_single()
+        .execute()
+    )
+    existing_user = existing_resp.data if existing_resp else None
+
+    if existing_user:
+        if existing_user.get("deleted_at") or not existing_user.get("is_active"):
+            target_id = existing_user["id"]
+            db.table("users").update({
+                "deleted_at": None,
+                "is_active": True,
+                "full_name": full_name,
+                "role": role,
+                "invited_by": str(admin_id),
+            }).eq("id", str(target_id)).execute()
+
+            redirect = _invite_redirect()
+            try:
+                db.auth.admin.invite_user_by_email(email, {"redirect_to": redirect})
+            except AuthApiError:
+                try:
+                    db.auth.admin.generate_link({
+                        "type": "invite",
+                        "email": email,
+                        "options": {"redirect_to": redirect},
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Re-invite for %s generated error: %s", email, exc)
+
+            updated = (
+                db.table("users")
+                .select(_USER_COLUMNS)
+                .eq("id", str(target_id))
+                .maybe_single()
+                .execute()
+            )
+            row = updated.data if updated else existing_user
+            return {**row, "status": "pending"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A user with this email already exists.",
+            )
+
     redirect = _invite_redirect()
     try:
         resp = db.auth.admin.invite_user_by_email(
@@ -174,8 +218,6 @@ def invite_user(
             detail="Could not send the invite. Please try again.",
         ) from exc
     except APIError as exc:
-        # Backstop: a unique-violation on email (23505) surfacing from the
-        # trigger-side insert is the same "already exists" condition.
         if getattr(exc, "code", None) == "23505" or "duplicate key" in str(exc).lower():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -196,8 +238,6 @@ def invite_user(
             detail="Invite did not return a user; please verify in the dashboard.",
         )
 
-    # Best-effort attribution stamp. 23505 here would be spurious (id is the PK the
-    # trigger just created), but we still degrade gracefully on any write error.
     try:
         db.table("users").update({"invited_by": str(admin_id)}).eq(
             "id", str(new_id)
@@ -207,7 +247,6 @@ def invite_user(
             "Invite for %s succeeded but stamping invited_by failed: %s", email, exc
         )
 
-    # Read back the trigger-created profile so the response is truthful.
     read = (
         db.table("users")
         .select(_USER_COLUMNS)
@@ -217,7 +256,6 @@ def invite_user(
     )
     row = read.data if read else None
     if not row:
-        # The trigger has not surfaced the row yet; return a minimal, correct view.
         row = {
             "id": str(new_id),
             "email": email,
@@ -248,8 +286,7 @@ def list_users(db: Client) -> list[dict]:
 
 
 def _confirmed_at_by_id(db: Client) -> dict[str, object]:
-    """Map of auth-user id -> confirmed_at, paginating the admin list. Bounded by a
-    defensive page cap so a misbehaving backend cannot loop forever."""
+    """Map of auth-user id -> confirmed_at, paginating the admin list."""
     per_page = 200
     max_pages = 50
     mapping: dict[str, object] = {}
@@ -271,13 +308,8 @@ def _confirmed_at_by_id(db: Client) -> dict[str, object]:
 
 
 def change_user(db: Client, admin_id, target_id, patch: UserUpdate) -> dict:
-    """Apply role / is_active / full_name changes with G2 + G1 enforced first.
-
-    G2 (last-admin) is checked before G1 (self) so the more fundamental reason
-    wins its message: a lone admin acting on themselves gets "last active admin",
-    while a self-action with other admins present gets the self-protection message.
-    """
-    target = _get_active_user_row(db, target_id)
+    """Apply role / is_active / full_name changes with G2 + G1 enforced first."""
+    target = _get_active_user_row(db, target_id, allow_deleted=patch.is_active is True)
 
     demoting = patch.role is not None and patch.role != "admin"
     deactivating = patch.is_active is False
@@ -291,8 +323,10 @@ def change_user(db: Client, admin_id, target_id, patch: UserUpdate) -> dict:
         _guard_not_self(admin_id, target_id, "deactivate")
 
     update: dict = patch.model_dump(exclude_unset=True)
+    if patch.is_active is True:
+        update["deleted_at"] = None
+
     if not update:
-        # Nothing to change; return the current view rather than issue an empty write.
         confirmed = _auth_confirmed_at(db, target_id)
         return {**target, "status": _derive_status(target, confirmed)}
 
@@ -305,6 +339,34 @@ def change_user(db: Client, admin_id, target_id, patch: UserUpdate) -> dict:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="The submitted data was rejected. Please review the values and try again.",
+        ) from exc
+
+    if not resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    row = resp.data[0]
+    confirmed = _auth_confirmed_at(db, target_id)
+    return {**row, "status": _derive_status(row, confirmed)}
+
+
+def restore_user(db: Client, admin_id, target_id) -> dict:
+    """Restore a soft-deleted or deactivated user (clears deleted_at, sets is_active=True)."""
+    target = _get_active_user_row(db, target_id, allow_deleted=True)
+
+    try:
+        resp = (
+            db.table("users")
+            .update({"deleted_at": None, "is_active": True})
+            .eq("id", str(target_id))
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Supabase restore user failed for %s: %s", target_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Could not restore the user. Please try again.",
         ) from exc
 
     if not resp.data:
@@ -350,9 +412,11 @@ def soft_delete_user(db: Client, admin_id, target_id) -> None:
 
 
 def resend_invite(db: Client, target_id) -> dict:
-    """Re-send the invite email to a not-yet-confirmed user. If the user has
-    already confirmed, there is nothing to resend (409)."""
-    row = _get_active_user_row(db, target_id)
+    """Re-send the invite email to a not-yet-confirmed user."""
+    row = _get_active_user_row(db, target_id, allow_deleted=True)
+    if row.get("deleted_at"):
+        db.table("users").update({"deleted_at": None, "is_active": True}).eq("id", str(target_id)).execute()
+
     email = row["email"]
 
     if _auth_confirmed_at(db, target_id):
@@ -365,8 +429,6 @@ def resend_invite(db: Client, target_id) -> dict:
     try:
         db.auth.admin.invite_user_by_email(email, {"redirect_to": redirect})
     except AuthApiError as exc:
-        # An unconfirmed user may already exist in auth; fall back to generating a
-        # fresh invite link, which the built-in mailer sends on the same event.
         logger.info(
             "Re-invite for %s raised (%s); falling back to generate_link", email, exc
         )

@@ -14,6 +14,7 @@ import { errorMessage } from '@/lib/api';
 import {
   useDeleteUser,
   useResendInvite,
+  useRestoreUser,
   useUpdateUser,
 } from '../hooks/useUserMutations';
 import type { UserAdminResponse } from '../types';
@@ -37,6 +38,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
   const { toast } = useToast();
   const updateUser = useUpdateUser();
   const resendInvite = useResendInvite();
+  const restoreUser = useRestoreUser();
   const deleteUser = useDeleteUser();
 
   const [confirm, setConfirm] = useState<'deactivate' | 'delete' | null>(null);
@@ -67,14 +69,22 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
   }
 
   function handleReactivate() {
-    updateUser.mutate(
-      { id: user.id, patch: { is_active: true } },
-      {
+    if (isDeleted) {
+      restoreUser.mutate(user.id, {
         onSuccess: () =>
-          toast({ variant: 'success', title: 'User reactivated', message: `${user.full_name} can sign in again.` }),
-        onError: onError('Could not reactivate the user.'),
-      },
-    );
+          toast({ variant: 'success', title: 'User restored', message: `${user.full_name} has been restored and can sign in.` }),
+        onError: onError('Could not restore the user.'),
+      });
+    } else {
+      updateUser.mutate(
+        { id: user.id, patch: { is_active: true } },
+        {
+          onSuccess: () =>
+            toast({ variant: 'success', title: 'User reactivated', message: `${user.full_name} can sign in again.` }),
+          onError: onError('Could not reactivate the user.'),
+        },
+      );
+    }
   }
 
   function handleResend() {
@@ -131,7 +141,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
           )}
         </DropdownMenuItem>
 
-        {user.status === 'pending' && (
+        {(user.status === 'pending' || isDeleted) && (
           <DropdownMenuItem icon={<Send className="h-4 w-4" />} onClick={handleResend}>
             Resend invite
           </DropdownMenuItem>
@@ -150,11 +160,9 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
             )}
           </DropdownMenuItem>
         ) : (
-          !isDeleted && (
-            <DropdownMenuItem icon={<UserCheck className="h-4 w-4" />} onClick={handleReactivate}>
-              Reactivate
-            </DropdownMenuItem>
-          )
+          <DropdownMenuItem icon={<UserCheck className="h-4 w-4" />} onClick={handleReactivate}>
+            {isDeleted ? 'Reactivate / Restore' : 'Reactivate'}
+          </DropdownMenuItem>
         )}
 
         {!isDeleted && (

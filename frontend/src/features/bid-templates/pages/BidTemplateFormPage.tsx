@@ -323,18 +323,21 @@ export function BidTemplateFormPage() {
               <div className="sm:col-span-2">
                 <FormField
                   label="Template Name"
+                  htmlFor="template-name-input"
                   required
                   error={errors.name?.message}
                 >
                   <TextInput
+                    id="template-name-input"
                     {...register('name')}
                     placeholder="e.g. Grading & Earthwork — Unit Price Breakdown"
                   />
                 </FormField>
               </div>
 
-              <FormField label="Trade Affiliation">
+              <FormField label="Trade Affiliation" htmlFor="trade-id-select">
                 <Select
+                  id="trade-id-select"
                   {...register('trade_id')}
                   options={tradeOptions}
                 />

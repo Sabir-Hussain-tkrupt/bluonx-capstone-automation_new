@@ -106,7 +106,7 @@ function RoundBadge({ round }: { round: number }) {
 
 export function BidPackageListPage() {
   const navigate = useNavigate();
-  const [statusChip, setStatusChip] = useState<StatusChip>('open');
+  const [statusChip, setStatusChip] = useState<StatusChip>('all');
   const [projectId, setProjectId] = useState<string>('');
   const [sortValue, setSortValue] = useState<string>('deadline:asc');
 

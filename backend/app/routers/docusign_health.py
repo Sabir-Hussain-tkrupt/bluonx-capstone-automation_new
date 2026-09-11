@@ -6,9 +6,11 @@ consent URL so the grant is self-service. Internal-auth only — mirrors the
 /admin/scheduler-health convention.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends
 
-from app.core.auth import get_current_active_user
+from app.core.auth import require_admin
 from app.core.config import settings
 from app.services.docusign_client import (
     DocuSignClient,
@@ -16,12 +18,14 @@ from app.services.docusign_client import (
     get_docusign_client,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
 @router.get("/admin/docusign-health")
 async def docusign_health(
-    user: dict = Depends(get_current_active_user),
+    user: dict = Depends(require_admin),
     client: DocuSignClient = Depends(get_docusign_client),
 ) -> dict:
     """Mint a token and report ok, or surface the one-time consent URL."""
@@ -33,5 +37,12 @@ async def docusign_health(
             "provider": settings.DOCUSIGN_PROVIDER,
             "consent_required": True,
             "consent_url": exc.consent_url,
+        }
+    except Exception as exc:
+        logger.error("DocuSign health check failed: %s", exc)
+        return {
+            "ok": False,
+            "provider": settings.DOCUSIGN_PROVIDER,
+            "error": str(exc),
         }
     return {"ok": True, "provider": settings.DOCUSIGN_PROVIDER}

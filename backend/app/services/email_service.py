@@ -108,6 +108,16 @@ def _is_transient_error(error: str | None) -> bool:
     return any(keyword in error for keyword in _TRANSIENT_ERRORS)
 
 
+def _format_from_email(from_email: str | None) -> str:
+    """Format email sender to include the brand name if missing."""
+    raw = from_email or settings.SES_FROM_EMAIL
+    if not raw:
+        return "BluOnX <noreply@bluonx.com>"
+    if "<" in raw:
+        return raw
+    return f"BluOnX <{raw}>"
+
+
 class EmailService:
     """
     Core email service with retry logic, rate limiting, and logging.
@@ -120,7 +130,7 @@ class EmailService:
     def __init__(self, provider: EmailProvider, db_client=None) -> None:
         self._provider = provider
         self._db = db_client
-        self._default_from = settings.SES_FROM_EMAIL
+        self._default_from = _format_from_email(settings.SES_FROM_EMAIL)
 
     async def send_email(
         self,
@@ -149,7 +159,7 @@ class EmailService:
             subject=subject,
             html_body=html_body,
             plain_text_body=plain_text_body,
-            from_email=from_email or self._default_from,
+            from_email=_format_from_email(from_email or self._default_from),
             reply_to=reply_to,
             attachments=attachments or [],
         )

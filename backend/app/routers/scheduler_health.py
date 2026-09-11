@@ -7,7 +7,7 @@ to report scheduler health even if the database is down.
 
 from fastapi import APIRouter, Depends
 
-from app.core.auth import get_current_active_user
+from app.core.auth import require_admin
 from app.jobs.scheduler import KNOWN_JOB_IDS, get_last_run, is_running
 
 router = APIRouter()
@@ -18,7 +18,7 @@ _NULL_RUN = {"last_run_at": None, "status": None, "result": None, "error": None}
 
 @router.get("/admin/scheduler-health")
 async def scheduler_health(
-    user: dict = Depends(get_current_active_user),
+    user: dict = Depends(require_admin),
 ) -> dict:
     """Report last-run state for each registered scheduled job."""
     jobs = {

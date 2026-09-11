@@ -10,6 +10,7 @@ export const API_ENDPOINTS = {
   USERS: '/users',
   USER: (id: string) => `/users/${id}`,
   USER_INVITE: '/users/invite',
+  USER_RESTORE: (id: string) => `/users/${id}/restore`,
   USER_RESEND_INVITE: (id: string) => `/users/${id}/resend-invite`,
 
   // Vendors

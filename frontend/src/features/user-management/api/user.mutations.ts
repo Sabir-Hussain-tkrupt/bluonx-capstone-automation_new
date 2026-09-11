@@ -28,6 +28,12 @@ export async function updateUser(
   return data as UserAdminResponse;
 }
 
+/** POST /users/{id}/restore — restore a soft-deleted/deactivated user. */
+export async function restoreUser(id: string): Promise<UserAdminResponse> {
+  const { data } = await api.post(API_ENDPOINTS.USER_RESTORE(id));
+  return data as UserAdminResponse;
+}
+
 /** POST /users/{id}/resend-invite — re-send the invite to a pending user. */
 export async function resendInvite(id: string): Promise<void> {
   await api.post(API_ENDPOINTS.USER_RESEND_INVITE(id));

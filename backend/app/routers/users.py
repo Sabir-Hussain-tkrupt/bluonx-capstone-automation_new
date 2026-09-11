@@ -107,6 +107,18 @@ async def delete_user(
     user_service.soft_delete_user(db, admin_id=user["user_id"], target_id=user_id)
 
 
+@router.post("/users/{user_id}/restore", response_model=UserAdminResponse)
+async def restore_user(
+    user_id: UUID,
+    user: dict = Depends(require_admin),
+    db: Client = Depends(get_supabase),
+):
+    """Restore a soft-deleted or deactivated user (admin only)."""
+    return user_service.restore_user(
+        db, admin_id=user["user_id"], target_id=user_id
+    )
+
+
 @router.post("/users/{user_id}/resend-invite", response_model=MessageResponse)
 async def resend_invite(
     user_id: UUID,

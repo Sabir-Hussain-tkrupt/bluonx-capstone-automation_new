@@ -4,6 +4,7 @@ import {
   deleteUser,
   inviteUser,
   resendInvite,
+  restoreUser,
   updateUser,
 } from '../api/user.mutations';
 import type { UserInviteRequest, UserUpdateRequest } from '../types';
@@ -30,6 +31,16 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: UserUpdateRequest }) =>
       updateUser(id, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
+    },
+  });
+}
+
+export function useRestoreUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreUser(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
     },

@@ -3,6 +3,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Pencil, Trash2 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import type { Task } from '@/features/tasks/api/task.queries';
+import { cn } from '@/utils/cn';
 
 function formatCurrency(value: number | null): string {
   if (value == null) return '\u2014';
@@ -103,9 +104,19 @@ export function SortableTaskRow({ task, index, isDragDisabled, onRowClick, onEdi
             </button>
             <button
               type="button"
-              className="rounded p-1 text-secondary-400 hover:bg-danger-50 hover:text-danger-600"
-              title="Delete task"
-              onClick={() => onDelete(task)}
+              disabled={task.status !== 'draft'}
+              className={cn(
+                'rounded p-1 text-secondary-400',
+                task.status === 'draft'
+                  ? 'hover:bg-danger-50 hover:text-danger-600 cursor-pointer'
+                  : 'opacity-40 cursor-not-allowed',
+              )}
+              title={
+                task.status === 'draft'
+                  ? 'Delete task'
+                  : 'Tasks in bidding, awarded, or completed status cannot be deleted'
+              }
+              onClick={() => task.status === 'draft' && onDelete(task)}
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
             </button>
