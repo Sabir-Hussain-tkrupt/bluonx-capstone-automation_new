@@ -26,4 +26,5 @@ USER appuser
 EXPOSE 8000
 
 # Create secret file at startup if secret is present, then launch Uvicorn
-CMD ["sh", "-c", "mkdir -p /app/secrets && if [ -n \"$DOCUSIGN_PRIVATE_KEY_SECRET\" ]; then echo \"$DOCUSIGN_PRIVATE_KEY_SECRET\" > /app/secrets/docusign_private_key.pem; fi && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD sh -c 'mkdir -p /app/secrets && if [ -n "$DOCUSIGN_PRIVATE_KEY_SECRET" ]; then printf "%s\n" "$DOCUSIGN_PRIVATE_KEY_SECRET" > /app/secrets/docusign_private_key.pem; fi && exec uvicorn app.main:app --host 0.0.0.0 --port 8000'
+
