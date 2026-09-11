@@ -17,21 +17,13 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code and scripts
+# Copy application code
 COPY app/ ./app/
-COPY scripts/ ./scripts/
-
-# Ensure entrypoint script is executable
-RUN chmod +x ./scripts/entrypoint.sh
 
 # Switch to non-root user
 USER appuser
 
 EXPOSE 8000
 
-ENTRYPOINT ["/app/scripts/entrypoint.sh"]
-
-# Single worker is required, not an untuned default: APScheduler runs in-process,
-# so --workers N runs every scheduled job N times.
-# See docs/adr/0001-scheduler-single-instance.md.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Create secret file at startup if secret is present, then launch Uvicorn
+CMD ["sh", "-c", "mkdir -p /app/secrets && if [ -n \"$DOCUSIGN_PRIVATE_KEY_SECRET\" ]; then echo \"$DOCUSIGN_PRIVATE_KEY_SECRET\" > /app/secrets/docusign_private_key.pem; fi && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
