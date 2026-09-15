@@ -100,7 +100,7 @@ async def filter_qualified_vendors(
     # a vendor whose insurance had already lapsed still qualify.
     today = date.today()
     project_end = (
-        date.fromisoformat(project["estimated_end_date"])
+        date.fromisoformat(str(project["estimated_end_date"])[:10])
         if project.get("estimated_end_date")
         else None
     )
