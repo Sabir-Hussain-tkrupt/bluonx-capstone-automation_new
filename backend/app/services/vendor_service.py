@@ -24,32 +24,19 @@ from app.services.geocoding import normalize_address
 logger = logging.getLogger(__name__)
 
 
-def missing_requirements_for_complete(vendor: dict) -> list[str]:
+def missing_requirements_for_complete(
+    vendor: dict, db: Client | None = None
+) -> list[str]:
     """What blocks this vendor from onboarding_status='complete'.
 
     Returns human-readable phrases for the caller to join into a message;
     empty means the vendor qualifies.
 
-    'complete' is load-bearing, which is why it is gated at all: it is a hard
-    eligibility gate in vendor_filtering (anything else is disqualified from
-    bidding) and half of the compliance dimension in bid_scoring. A vendor
-    marked complete with no address would score 100 there while being invisible
-    to the distance filter, since a vendor with no coordinates skips the radius
-    check entirely.
-
-    Two requirements, deliberately not four:
-
-    - ANY address field, not a street line specifically. Geocoding joins
-      whatever is non-empty, so "Austin, TX" is locatable while a bare street
-      line often is not. normalize_address is reused so this rule and the
-      geocoder cannot drift apart on what counts as an address.
-    - A valid, unexpired insurance certificate. insurance_expiration_date is
-      already MAX(expiration_date) over valid insurance_certificate rows, so
-      NULL means no certificate exists and a past date means the one on file
-      has lapsed. One field answers both questions, and it is the same value
-      pre-award validation and scoring read.
-
-    W-9 and Master Trade Agreement are tracked but deliberately not required.
+    Requires:
+    - An address (street, city, state or ZIP)
+    - A valid, unexpired insurance certificate
+    - A W-9 document
+    - A Master Trade Agreement document
     """
     missing: list[str] = []
 
@@ -70,6 +57,23 @@ def missing_requirements_for_complete(vendor: dict) -> list[str]:
             missing.append(
                 f"an unexpired insurance certificate (the one on file expired {expiry.isoformat()})"
             )
+
+    if db and vendor.get("id"):
+        docs_resp = (
+            db.table("vendor_documents")
+            .select("document_type, status")
+            .eq("vendor_id", str(vendor["id"]))
+            .execute()
+        )
+        existing_types = {
+            d.get("document_type")
+            for d in (docs_resp.data or [])
+            if d.get("status") != "expired"
+        }
+        if "w9" not in existing_types:
+            missing.append("a W-9 document")
+        if "master_trade_agreement" not in existing_types:
+            missing.append("a Master Trade Agreement document")
 
     return missing
 

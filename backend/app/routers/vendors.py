@@ -489,7 +489,7 @@ async def update_vendor(
     # is well formed, it is the vendor's state that blocks the transition.
     if update_data.get("onboarding_status") == "complete":
         merged_vendor = {**existing, **update_data}
-        missing = missing_requirements_for_complete(merged_vendor)
+        missing = missing_requirements_for_complete(merged_vendor, db=db)
         if missing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

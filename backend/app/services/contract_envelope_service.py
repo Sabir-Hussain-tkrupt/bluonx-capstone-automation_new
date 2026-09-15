@@ -159,32 +159,23 @@ _FALLBACK_SIGNER_EMAIL = "owner@example.com"
 def _candidate_signer(ctx: dict) -> tuple[str, str]:
     """Who BluOnX *would* put on a new contract for this award.
 
-    Steps 2-4 of the resolution order: the award's chosen roster entry, then the
-    CONTRACT_OWNER_SIGNER_* settings (which legacy awards with signer_id NULL
-    still depend on), then the hardcoded fallback. Step 1 — an existing contract's
-    snapshot — is applied by the caller, because it outranks all of these.
+    Prioritizes CONTRACT_OWNER_SIGNER_* settings, then roster entry, then hardcoded fallback.
     """
     roster = _embed_one(ctx.get("contract_signers"))
-    name = roster.get("full_name") or settings.CONTRACT_OWNER_SIGNER_NAME
-    email = roster.get("email") or settings.CONTRACT_OWNER_SIGNER_EMAIL
+    name = settings.CONTRACT_OWNER_SIGNER_NAME or roster.get("full_name")
+    email = settings.CONTRACT_OWNER_SIGNER_EMAIL or roster.get("email")
     return (name or _FALLBACK_SIGNER_NAME, email or _FALLBACK_SIGNER_EMAIL)
 
 
 def _resolve_owner_signer(ctx: dict, contract: dict) -> tuple[str, str]:
-    """The BluOnX signer for THIS send, snapshot first.
+    """The BluOnX signer for THIS send, snapshot first unless outdated.
 
-    Once a contract carries `signer_name` / `signer_email`, that pair is the
-    answer forever: `awards.signer_id` records which roster entry was chosen, it
-    is not a live lookup after the first send. An admin correcting a signer's
-    email must not change where an already-issued contract routes, nor what the
-    contract record says about who signed it.
-
-    A contract created before this feature has both columns NULL and falls
-    through to the candidate, so those still send rather than routing nowhere.
+    If the stored contract signer matches legacy/outdated defaults (such as sabir.hussain@tkrupt.com),
+    it dynamically falls back to current settings.
     """
     name = contract.get("signer_name")
     email = contract.get("signer_email")
-    if name and email:
+    if name and email and email != "sabir.hussain@tkrupt.com" and name != "Sabir Hussain":
         return (name, email)
     return _candidate_signer(ctx)
 

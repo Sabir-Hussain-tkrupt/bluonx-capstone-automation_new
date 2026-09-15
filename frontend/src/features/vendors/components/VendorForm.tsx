@@ -80,8 +80,27 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
   const [contactsError, setContactsError] = useState('');
 
   const handleFormSubmit = (data: VendorFormValues) => {
+    let currentContacts = [...contacts];
+
+    // If contacts list is empty, but draft contact input fields are filled out, auto-commit the contact
+    if (!isEdit && currentContacts.length === 0 && contactName.trim() && contactEmail.trim()) {
+      if (!isValidEmail(contactEmail.trim())) {
+        setContactsError('Enter a valid email address for the contact.');
+        return;
+      }
+      currentContacts = [
+        {
+          full_name: contactName.trim(),
+          email: contactEmail.trim(),
+          phone: contactPhone.trim() || undefined,
+          title: contactTitle.trim() || undefined,
+          is_primary: true,
+        },
+      ];
+    }
+
     // Require at least one contact when creating a new vendor
-    if (!isEdit && contacts.length === 0) {
+    if (!isEdit && currentContacts.length === 0) {
       setContactsError('At least one contact with email is required to create a vendor.');
       return;
     }
@@ -103,7 +122,7 @@ export function VendorForm({ isOpen, onClose, vendor, onSubmit, isLoading = fals
       onSubmit({
         ...cleanedData,
         trade_ids: selectedTradeIds.length > 0 ? selectedTradeIds : undefined,
-        contacts: contacts.length > 0 ? contacts : undefined,
+        contacts: currentContacts.length > 0 ? currentContacts : undefined,
       });
     } else {
       onSubmit(cleanedData);
