@@ -159,23 +159,20 @@ _FALLBACK_SIGNER_EMAIL = "owner@example.com"
 def _candidate_signer(ctx: dict) -> tuple[str, str]:
     """Who BluOnX *would* put on a new contract for this award.
 
-    Prioritizes CONTRACT_OWNER_SIGNER_* settings, then roster entry, then hardcoded fallback.
+    Prioritizes the award's chosen roster entry from Contract Signers settings,
+    falling back to CONTRACT_OWNER_SIGNER_* settings, then hardcoded fallback.
     """
-    roster = _embed_one(ctx.get("contract_signers"))
-    name = settings.CONTRACT_OWNER_SIGNER_NAME or roster.get("full_name")
-    email = settings.CONTRACT_OWNER_SIGNER_EMAIL or roster.get("email")
+    roster = _embed_one(ctx.get("contract_signers")) or {}
+    name = roster.get("full_name") or settings.CONTRACT_OWNER_SIGNER_NAME
+    email = roster.get("email") or settings.CONTRACT_OWNER_SIGNER_EMAIL
     return (name or _FALLBACK_SIGNER_NAME, email or _FALLBACK_SIGNER_EMAIL)
 
 
 def _resolve_owner_signer(ctx: dict, contract: dict) -> tuple[str, str]:
-    """The BluOnX signer for THIS send, snapshot first unless outdated.
-
-    If the stored contract signer matches legacy/outdated defaults (such as sabir.hussain@tkrupt.com),
-    it dynamically falls back to current settings.
-    """
+    """The BluOnX signer for THIS send, snapshot first."""
     name = contract.get("signer_name")
     email = contract.get("signer_email")
-    if name and email and email != "sabir.hussain@tkrupt.com" and name != "Sabir Hussain":
+    if name and email:
         return (name, email)
     return _candidate_signer(ctx)
 

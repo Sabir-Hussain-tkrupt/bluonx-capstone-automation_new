@@ -10,6 +10,7 @@ services:
       - ./backend/.env
     volumes:
       - ./backend/app:/app/app
+      - ./backend/secrets:/app/secrets
     healthcheck:
       test:
         [
