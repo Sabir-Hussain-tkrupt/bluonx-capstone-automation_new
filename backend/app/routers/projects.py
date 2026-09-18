@@ -156,6 +156,12 @@ async def create_project(
     db: Client = Depends(get_supabase),
 ):
     """Create a new project. created_by is set from the authenticated user."""
+    if user.get("role") != "admin" and project.budget is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators are authorized to set or modify project budget.",
+        )
+
     project_data = project.model_dump()
     project_data["created_by"] = user["user_id"]
 
@@ -214,6 +220,12 @@ async def update_project(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
+        )
+
+    if user.get("role") != "admin" and "budget" in update_data and update_data["budget"] != existing.get("budget"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators are authorized to set or modify project budget.",
         )
 
     # Cross-field date check. The model validator catches both dates supplied
