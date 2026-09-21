@@ -10,42 +10,31 @@ import re
 from fastapi import HTTPException, status
 
 
-# ── Bucket configurations ────────────────────────────────────────────────
-
-# Office (OOXML .docx/.xlsx are ZIP; legacy .doc/.xls are OLE compound files).
+# ── Bucket configurations ────────────────# Office (OOXML .docx/.xlsx/.pptx are ZIP; legacy .doc/.xls/.ppt are OLE compound files).
 _OOXML_MIME_WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _OOXML_MIME_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_OOXML_MIME_POWERPOINT = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-# `allowed_extensions` is the single MIME/type gate for uploads. The Supabase
-# buckets deliberately carry no allowed_mime_types list (see the BUCKET
-# CONFIGURATION block in database/storage_rls_policies.sql). A bucket-level
-# MIME list cannot express CAD and Office files that arrive as
-# application/octet-stream, and when one drifted narrower than this list those
-# uploads passed validation here and then failed at storage. Do not add a
-# parallel MIME allow-list back to these entries.
+_COMMON_DOCUMENT_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff",
+    ".txt", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+}
+
+# `allowed_extensions` is the single MIME/type gate for uploads.
 BUCKET_CONFIGS: dict[str, dict] = {
     "vendor-documents": {
-        # Compliance paperwork: W-9, insurance cert, master trade agreement.
-        # PDFs, scanned images, or a Word agreement — no CAD/spreadsheets.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
-        "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"},
+        "allowed_extensions": _COMMON_DOCUMENT_EXTENSIONS,
     },
     "project-documents": {
-        # Plans, specs, budgets, notes: images, PDF/TIFF, TXT, Office, and CAD.
         "max_size_bytes": 50 * 1024 * 1024,  # 50 MB (dev)
-        "allowed_extensions": {
-            ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff",
-            ".txt", ".doc", ".docx", ".xls", ".xlsx",
+        "allowed_extensions": _COMMON_DOCUMENT_EXTENSIONS | {
             ".dwg", ".dxf", ".dwf", ".dgn",
         },
     },
     "bid-attachments": {
-        # 10 MB, matching MAX_ATTACHMENT_BYTES in app/routers/vendor_portal.py,
-        # which is the enforced per-attachment cap. The router checks first, so
-        # this is the backstop for any other caller of this bucket. Keep the
-        # two in step (asserted in tests/test_file_validation.py).
         "max_size_bytes": 10 * 1024 * 1024,  # 10 MB
-        "allowed_extensions": {".pdf", ".jpg", ".jpeg", ".png"},
+        "allowed_extensions": _COMMON_DOCUMENT_EXTENSIONS,
     },
 }
 
@@ -58,14 +47,16 @@ BUCKET_CONFIGS: dict[str, dict] = {
 _GENERIC_CONTENT_TYPES = {"", "application/octet-stream", "application/x-download"}
 
 # Expected MIME(s) per extension, used only to catch an obvious mismatch when a
-# *specific* content-type is declared (e.g. a PNG renamed .pdf). Extensions with
-# unreliable browser MIME (CAD) are intentionally absent, so they trust the magic
-# check + extension allow-list instead.
+# *specific* content-type is declared (e.g. a PNG renamed .pdf).
 EXTENSION_TO_MIME: dict[str, set[str]] = {
     ".pdf": {"application/pdf"},
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
     ".png": {"image/png"},
+    ".gif": {"image/gif"},
+    ".webp": {"image/webp"},
+    ".bmp": {"image/bmp", "image/x-ms-bmp"},
+    ".svg": {"image/svg+xml"},
     ".tif": {"image/tiff"},
     ".tiff": {"image/tiff"},
     ".txt": {"text/plain"},
@@ -73,6 +64,8 @@ EXTENSION_TO_MIME: dict[str, set[str]] = {
     ".docx": {_OOXML_MIME_WORD},
     ".xls": {"application/vnd.ms-excel"},
     ".xlsx": {_OOXML_MIME_EXCEL},
+    ".ppt": {"application/vnd.ms-powerpoint"},
+    ".pptx": {_OOXML_MIME_POWERPOINT},
 }
 
 
@@ -80,20 +73,25 @@ EXTENSION_TO_MIME: dict[str, set[str]] = {
 
 # Keyed by extension, not content-type, so a CAD/Office file that arrives as
 # application/octet-stream still gets sniffed. Extensions absent here have no
-# reliable signature (.txt, .dxf, .dwf, .dgn) and are accepted on extension alone.
-_ZIP = [b"PK\x03\x04"]  # OOXML .docx/.xlsx are ZIP containers
-_OLE = [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"]  # legacy .doc/.xls compound files
+# reliable signature (.txt, .svg, .dxf, .dwf, .dgn) and are accepted on extension alone.
+_ZIP = [b"PK\x03\x04"]  # OOXML .docx/.xlsx/.pptx are ZIP containers
+_OLE = [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"]  # legacy .doc/.xls/.ppt compound files
 EXTENSION_SIGNATURES: dict[str, list[bytes]] = {
     ".pdf": [b"%PDF"],
     ".jpg": [b"\xff\xd8\xff"],
     ".jpeg": [b"\xff\xd8\xff"],
     ".png": [b"\x89PNG"],
+    ".gif": [b"GIF87a", b"GIF89a"],
+    ".webp": [b"RIFF"],
+    ".bmp": [b"BM"],
     ".tif": [b"II\x2a\x00", b"MM\x00\x2a"],
     ".tiff": [b"II\x2a\x00", b"MM\x00\x2a"],
     ".docx": _ZIP,
     ".xlsx": _ZIP,
+    ".pptx": _ZIP,
     ".doc": _OLE,
     ".xls": _OLE,
+    ".ppt": _OLE,
     ".dwg": [b"AC10"],  # AutoCAD version tag, e.g. AC1027/AC1032
 }
 

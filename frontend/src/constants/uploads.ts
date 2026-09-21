@@ -21,23 +21,26 @@
  * entirely, which is the behaviour every upload surface here wants.
  */
 
-/** vendor-documents: W-9, insurance certificates, master trade agreements. */
-export const VENDOR_DOCUMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.doc,.docx';
-export const VENDOR_DOCUMENT_MAX_MB = 50;
-export const VENDOR_DOCUMENT_HINT = 'PDF, JPEG, PNG, or Word up to 50MB';
+/** Common document extensions: PDF, Images, Word, Excel, PowerPoint, TXT */
+export const COMMON_DOCUMENT_EXTENSIONS =
+  '.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
 
-/** project-documents: plans, specs, budgets, notes, and CAD. */
-export const PROJECT_DOCUMENT_ACCEPT =
-  '.pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.dwf,.dgn';
+/** vendor-documents: W-9, insurance certificates, master trade agreements. */
+export const VENDOR_DOCUMENT_ACCEPT = COMMON_DOCUMENT_EXTENSIONS;
+export const VENDOR_DOCUMENT_MAX_MB = 50;
+export const VENDOR_DOCUMENT_HINT =
+  'PDF, Images, Office (Word/Excel/PowerPoint), or TXT up to 50MB';
+
+/** project-documents: plans, specs, budgets, notes, Office, and CAD. */
+export const PROJECT_DOCUMENT_ACCEPT = `${COMMON_DOCUMENT_EXTENSIONS},.dwg,.dxf,.dwf,.dgn`;
 export const PROJECT_DOCUMENT_MAX_MB = 50;
 export const PROJECT_DOCUMENT_HINT =
-  'PDF, images, Office docs, TXT, or CAD (DWG/DXF/DWF/DGN) up to 50MB';
+  'PDF, Images, Office (Word/Excel/PowerPoint), TXT, or CAD (DWG/DXF/DWF/DGN) up to 50MB';
 
 /**
- * bid-attachments: documents a vendor sends with a bid. The 10MB cap is the
- * per-attachment limit the portal router enforces (MAX_ATTACHMENT_BYTES in
- * backend/app/routers/vendor_portal.py), not a storage-plan limit.
+ * bid-attachments: documents a vendor sends with a bid.
  */
-export const BID_ATTACHMENT_ACCEPT = '.pdf,.jpg,.jpeg,.png';
+export const BID_ATTACHMENT_ACCEPT = COMMON_DOCUMENT_EXTENSIONS;
 export const BID_ATTACHMENT_MAX_MB = 10;
-export const BID_ATTACHMENT_HINT = 'PDF, JPEG, or PNG · up to 10 MB each';
+export const BID_ATTACHMENT_HINT =
+  'PDF, Images, Office (Word/Excel/PowerPoint), or TXT up to 10MB each';
