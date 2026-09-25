@@ -22,7 +22,7 @@ describe('LoginPage', () => {
 
     expect(screen.getByText('Sign in to your account')).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Password/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
@@ -50,7 +50,7 @@ describe('LoginPage', () => {
     renderWithRouter(<LoginPage />);
 
     await user.type(screen.getByLabelText(/email/i), 'not-an-email');
-    await user.type(screen.getByLabelText(/password/i), 'somepassword');
+    await user.type(screen.getByLabelText(/^Password/), 'somepassword');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(screen.getByText('Enter a valid email address')).toBeInTheDocument();
@@ -76,7 +76,7 @@ describe('LoginPage', () => {
     renderWithRouter(<LoginPage />);
 
     await user.type(screen.getByLabelText(/email/i), 'admin@bluonx.dev');
-    await user.type(screen.getByLabelText(/password/i), 'TestPassword123!');
+    await user.type(screen.getByLabelText(/^Password/), 'TestPassword123!');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -93,7 +93,7 @@ describe('LoginPage', () => {
     renderWithRouter(<LoginPage />);
 
     await user.type(screen.getByLabelText(/email/i), 'wrong@email.com');
-    await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
+    await user.type(screen.getByLabelText(/^Password/), 'wrongpassword');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -108,12 +108,12 @@ describe('LoginPage', () => {
     renderWithRouter(<LoginPage />);
 
     await user.type(screen.getByLabelText(/email/i), 'admin@bluonx.dev');
-    await user.type(screen.getByLabelText(/password/i), 'TestPassword123!');
+    await user.type(screen.getByLabelText(/^Password/), 'TestPassword123!');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
       expect(screen.getByLabelText(/email/i)).toBeDisabled();
-      expect(screen.getByLabelText(/password/i)).toBeDisabled();
+      expect(screen.getByLabelText(/^Password/)).toBeDisabled();
     });
   });
 });

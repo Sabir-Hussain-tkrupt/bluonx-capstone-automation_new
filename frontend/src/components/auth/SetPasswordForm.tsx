@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { Button, TextInput, FormField, Alert } from '@/components/ui';
 
 interface SetPasswordFormProps {
@@ -27,6 +28,8 @@ export function SetPasswordForm({
 }: SetPasswordFormProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   function validate(): boolean {
@@ -83,7 +86,7 @@ export function SetPasswordForm({
           >
             <TextInput
               id="new-password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
@@ -94,6 +97,16 @@ export function SetPasswordForm({
               disabled={isSubmitting}
               autoComplete="new-password"
               autoFocus
+              rightAddon={
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="flex items-center"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              }
             />
           </FormField>
 
@@ -105,7 +118,7 @@ export function SetPasswordForm({
           >
             <TextInput
               id="confirm-password"
-              type="password"
+              type={showConfirmPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => {
                 setConfirmPassword(e.target.value);
@@ -115,6 +128,16 @@ export function SetPasswordForm({
               placeholder="Confirm new password"
               disabled={isSubmitting}
               autoComplete="new-password"
+              rightAddon={
+                <button
+                  type="button"
+                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowConfirmPassword((visible) => !visible)}
+                  className="flex items-center"
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              }
             />
           </FormField>
 

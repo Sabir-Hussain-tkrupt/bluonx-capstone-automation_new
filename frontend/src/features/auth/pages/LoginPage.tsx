@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { signIn } from '@/services/auth.service';
 import { Button, TextInput, FormField, Alert } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
@@ -9,6 +10,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -97,7 +99,7 @@ export function LoginPage() {
             <FormField label="Password" htmlFor="login-password" required error={errors.password}>
               <TextInput
                 id="login-password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -107,6 +109,16 @@ export function LoginPage() {
                 placeholder="Enter your password"
                 disabled={isSubmitting}
                 autoComplete="current-password"
+                rightAddon={
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    className="flex items-center"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                }
               />
             </FormField>
 
