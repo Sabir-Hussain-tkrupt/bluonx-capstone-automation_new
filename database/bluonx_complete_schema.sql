@@ -225,7 +225,7 @@ CREATE TABLE project_documents (
   project_id    UUID          NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
   file_name     VARCHAR(255)  NOT NULL,
   file_path     TEXT          NOT NULL,
-  file_type     VARCHAR(50),
+  file_type     VARCHAR(255),
   file_size     BIGINT,
   document_kind VARCHAR(20)   NOT NULL DEFAULT 'reference' CHECK (document_kind IN ('reference', 'scope_of_work')),
   uploaded_by   UUID          NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -359,29 +359,6 @@ COMMENT ON TABLE bid_invitations IS 'Individual invitation per vendor per bid pa
 COMMENT ON COLUMN bid_invitations.status IS 'pending_send = row created, invitation email not yet sent; sent = email accepted by provider (sent_at set); send_failed = provider rejected the send (recoverable via Resend/Send Bid Link, which mints a fresh token). The pending_send/send_failed pair lets a partial bid-package creation leave a recoverable, non-misleading state instead of falsely reading sent. opened = vendor viewed the portal; submitted/declined = vendor outcomes. no_response is the SINGLE terminal "invited, did not bid" status. It is written by BOTH routes out of an open package: the shared deadline transition (lazy read-path + daily post-deadline job converge on it) and the PM manually closing bidding early (close_bidding). Both call the same helper so the two routes leave identical state. expired is retained in the CHECK for legacy rows only and is no longer written by any code path.';
 
 
--- Magic link tokens for vendor bid portal access
-CREATE TABLE magic_link_tokens (
-  id                  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  bid_invitation_id   UUID          NOT NULL REFERENCES bid_invitations(id) ON DELETE CASCADE,
-  vendor_id           UUID          NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,
-  token_hash          VARCHAR(255)  NOT NULL UNIQUE,
-  expires_at          TIMESTAMPTZ   NOT NULL,
-  used_at             TIMESTAMPTZ,
-  is_used             BOOLEAN       NOT NULL DEFAULT FALSE,
-  ip_address          INET,
-  revoked_at          TIMESTAMPTZ,
-  revoked_by          UUID          REFERENCES users(id) ON DELETE SET NULL,
-  bid_revision_request_id UUID REFERENCES bid_revision_requests(id) ON DELETE RESTRICT,
-  created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
-);
-
-COMMENT ON TABLE  magic_link_tokens            IS 'Secure single-use tokens for vendor bid portal auth. Hashed, never stored raw.';
-COMMENT ON COLUMN magic_link_tokens.token_hash IS 'SHA-256 hash of the actual token. Raw token is emailed, never stored.';
-COMMENT ON COLUMN magic_link_tokens.revoked_at IS 'When this token was hard-revoked (e.g., via Resend Bid Link). NULL = live. Validator rejects revoked tokens with 410.';
-COMMENT ON COLUMN magic_link_tokens.revoked_by IS 'User who revoked this token. NULL when not revoked or when the revoking user is later deleted.';
-COMMENT ON COLUMN magic_link_tokens.bid_revision_request_id IS 'Discriminator. NULL = initial bid invitation token. Non-NULL = revision token. Validator branches on this to bypass package-status check and to validate the revision request is still pending.';
-
-
 -- Bid submissions: vendor's actual bid response
 CREATE TABLE bid_submissions (
   id                  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -404,7 +381,7 @@ CREATE TABLE bid_submissions (
   updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
   CONSTRAINT chk_bid_submissions_supersedes_not_self
-    CHECK (supersedes_submission_id IS NULL OR supersedes_submission_id != id),
+    CHECK (supersedes_submission_id IS NULL OR supersedes_submission_id != id)
 );
 
 COMMENT ON TABLE  bid_submissions              IS 'Vendor bid response. One per invitation. Supports draft state for auto-save.';
@@ -442,7 +419,7 @@ CREATE TABLE bid_attachments (
   bid_submission_id   UUID          NOT NULL REFERENCES bid_submissions(id) ON DELETE CASCADE,
   file_name           VARCHAR(255)  NOT NULL,
   file_path           TEXT          NOT NULL,
-  file_type           VARCHAR(50),
+  file_type           VARCHAR(255),
   file_size           BIGINT,
   uploaded_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -502,6 +479,29 @@ COMMENT ON COLUMN bid_revision_requests.revision_deadline IS
   'Per-request deadline, independent of bid_packages.deadline.';
 COMMENT ON COLUMN bid_revision_requests.decline_reason IS
   'Optional short note from vendor on decline.';
+
+
+-- Magic link tokens for vendor bid portal access
+CREATE TABLE magic_link_tokens (
+  id                  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  bid_invitation_id   UUID          NOT NULL REFERENCES bid_invitations(id) ON DELETE CASCADE,
+  vendor_id           UUID          NOT NULL REFERENCES vendors(id) ON DELETE RESTRICT,
+  token_hash          VARCHAR(255)  NOT NULL UNIQUE,
+  expires_at          TIMESTAMPTZ   NOT NULL,
+  used_at             TIMESTAMPTZ,
+  is_used             BOOLEAN       NOT NULL DEFAULT FALSE,
+  ip_address          INET,
+  revoked_at          TIMESTAMPTZ,
+  revoked_by          UUID          REFERENCES users(id) ON DELETE SET NULL,
+  bid_revision_request_id UUID REFERENCES bid_revision_requests(id) ON DELETE RESTRICT,
+  created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  magic_link_tokens            IS 'Secure single-use tokens for vendor bid portal auth. Hashed, never stored raw.';
+COMMENT ON COLUMN magic_link_tokens.token_hash IS 'SHA-256 hash of the actual token. Raw token is emailed, never stored.';
+COMMENT ON COLUMN magic_link_tokens.revoked_at IS 'When this token was hard-revoked (e.g., via Resend Bid Link). NULL = live. Validator rejects revoked tokens with 410.';
+COMMENT ON COLUMN magic_link_tokens.revoked_by IS 'User who revoked this token. NULL when not revoked or when the revoking user is later deleted.';
+COMMENT ON COLUMN magic_link_tokens.bid_revision_request_id IS 'Discriminator. NULL = initial bid invitation token. Non-NULL = revision token. Validator branches on this to bypass package-status check and to validate the revision request is still pending.';
 
 
 -- ========================================
@@ -625,24 +625,6 @@ COMMENT ON COLUMN milestones.cycle_number IS 'Generation counter. +1 on every re
 COMMENT ON COLUMN milestones.start_date IS 'The committed start. Editable only while status = scheduled and no check-in has been sent (enforced by trg_milestones_guard_dates); immutable thereafter.';
 
 
--- Milestone responses: vendor yes/no from email links (immutable audit)
-CREATE TABLE milestone_responses (
-  id                    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  milestone_id          UUID          NOT NULL REFERENCES milestones(id) ON DELETE RESTRICT,
-  response_type         VARCHAR(30)   NOT NULL
-                                      CHECK (response_type IN ('start_confirmation', 'progress_check',
-                                                                'completion_confirmation')),
-  response_value        VARCHAR(10)   NOT NULL CHECK (response_value IN ('yes', 'no')),
-  milestone_alert_id    UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE RESTRICT,
-  vendor_contact_id     UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
-  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-
-  CONSTRAINT uq_milestone_responses_alert UNIQUE (milestone_alert_id)
-);
-
-COMMENT ON TABLE milestone_responses IS 'Logs every vendor email-link response. Immutable audit record.';
-COMMENT ON COLUMN milestone_responses.milestone_alert_id IS 'Which check-in this answers. UNIQUE: one recorded response per alert (first-response-wins, enforced at the DB).';
-
 -- Milestone alerts: milestone-specific email tracking
 -- NOTE: email_log FK added via ALTER TABLE below (table ordering dependency)
 CREATE TABLE milestone_alerts (
@@ -661,6 +643,25 @@ CREATE TABLE milestone_alerts (
 COMMENT ON TABLE  milestone_alerts             IS 'Milestone-specific email tracking. References email_log for delivery details (no duplication).';
 COMMENT ON COLUMN milestone_alerts.email_log_id IS 'FK to email_log. Delivery status lives there, milestone context lives here.';
 COMMENT ON COLUMN milestone_alerts.cycle_number IS 'Milestone cycle this check-in was sent under. The token is stale when this != milestones.cycle_number.';
+
+
+-- Milestone responses: vendor yes/no from email links (immutable audit)
+CREATE TABLE milestone_responses (
+  id                    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  milestone_id          UUID          NOT NULL REFERENCES milestones(id) ON DELETE RESTRICT,
+  response_type         VARCHAR(30)   NOT NULL
+                                      CHECK (response_type IN ('start_confirmation', 'progress_check',
+                                                                'completion_confirmation')),
+  response_value        VARCHAR(10)   NOT NULL CHECK (response_value IN ('yes', 'no')),
+  milestone_alert_id    UUID          NOT NULL REFERENCES milestone_alerts(id) ON DELETE RESTRICT,
+  vendor_contact_id     UUID          NOT NULL REFERENCES vendor_contacts(id) ON DELETE RESTRICT,
+  responded_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT uq_milestone_responses_alert UNIQUE (milestone_alert_id)
+);
+
+COMMENT ON TABLE milestone_responses IS 'Logs every vendor email-link response. Immutable audit record.';
+COMMENT ON COLUMN milestone_responses.milestone_alert_id IS 'Which check-in this answers. UNIQUE: one recorded response per alert (first-response-wins, enforced at the DB).';
 
 
 -- Milestone events: append-only transition ledger (feeds the PM activity timeline)
@@ -747,17 +748,6 @@ COMMENT ON TABLE vendor_performance_reviews IS
   'One PM rating (1-5) per completed contract. Human-set, never inferred. Aggregated by v_vendor_performance to feed the Phase 8 performance dimension. UNIQUE(contract_id) = one review per contract.';
 
 CREATE INDEX idx_vpr_vendor_id ON vendor_performance_reviews (vendor_id);
-
--- Triggers (their functions live in SECTION 1/6 respectively; fn_set_updated_at
--- already exists, fn_enforce_review_vendor_consistency is BLOCK B).
-CREATE TRIGGER trg_vpr_vendor_consistency
-  BEFORE INSERT OR UPDATE OF vendor_id, contract_id ON vendor_performance_reviews
-  FOR EACH ROW EXECUTE FUNCTION fn_enforce_review_vendor_consistency();
-
-CREATE TRIGGER trg_vpr_updated_at
-  BEFORE UPDATE ON vendor_performance_reviews
-  FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
-
 
 -- ========================================
 -- GROUP 7: COMMUNICATION & AUDIT
@@ -1407,6 +1397,16 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Triggers (their functions live in SECTION 1/6 respectively; fn_set_updated_at
+-- already exists, fn_enforce_review_vendor_consistency is BLOCK B).
+CREATE TRIGGER trg_vpr_vendor_consistency
+  BEFORE INSERT OR UPDATE OF vendor_id, contract_id ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_enforce_review_vendor_consistency();
+
+CREATE TRIGGER trg_vpr_updated_at
+  BEFORE UPDATE ON vendor_performance_reviews
+  FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 
 -- ────────────────────────────────────────────────────────────────────────────
