@@ -249,8 +249,196 @@ async def list_tasks(
     )
 
 
+# ── Default Tasks Seeding Data & Endpoint ───────────────────────────────
+
+DEFAULT_TASKS = [
+    # Due Diligence Phase
+    {"activity": "B0010", "name": "Land", "phase": "due_diligence", "trade": "Title", "bid_type": "internal"},
+    {"activity": "B0020", "name": "Closing Costs & Commission", "phase": "due_diligence", "trade": "Title", "bid_type": "internal"},
+    {"activity": "B0030", "name": "Capitalized Interest", "phase": "due_diligence", "trade": "Legal", "bid_type": "internal"},
+    {"activity": "B0040", "name": "Financing Fees", "phase": "due_diligence", "trade": "Legal", "bid_type": "internal"},
+    {"activity": "B0050", "name": "Real Estate Taxes", "phase": "due_diligence", "trade": "Legal", "bid_type": "internal"},
+    {"activity": "B0060", "name": "Legal", "phase": "due_diligence", "trade": "Legal", "bid_type": "competitive"},
+    {"activity": "B0100", "name": "Engineering and Surveying", "phase": "due_diligence", "trade": "Engineering", "bid_type": "competitive"},
+    {"activity": "B0110", "name": "Zoning", "phase": "due_diligence", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0120", "name": "Geotech - soils", "phase": "due_diligence", "trade": "Geo Tech", "bid_type": "competitive"},
+    {"activity": "B0125", "name": "Geotech - Global Stability", "phase": "due_diligence", "trade": "Geo Tech", "bid_type": "competitive"},
+    {"activity": "B0130", "name": "Geo Tech - Compacting Testing", "phase": "due_diligence", "trade": "Geo Tech", "bid_type": "competitive"},
+    {"activity": "B0140", "name": "Environmental - Army Corps wetlands", "phase": "due_diligence", "trade": "Ecological Study", "bid_type": "competitive"},
+    {"activity": "B0145", "name": "Environmental - Fisheries or Cultural", "phase": "due_diligence", "trade": "Ecological Study", "bid_type": "competitive"},
+    {"activity": "B0150", "name": "Natural Resources & Mitigation", "phase": "due_diligence", "trade": "Ecological Study", "bid_type": "competitive"},
+
+    # Development Phase
+    {"activity": "B0200", "name": "Demolition", "phase": "development", "trade": "Site Final Grading", "bid_type": "competitive"},
+    {"activity": "B0210", "name": "Clearing", "phase": "development", "trade": "Mass Grading", "bid_type": "competitive"},
+    {"activity": "B0220", "name": "Mass Grading", "phase": "development", "trade": "Mass Grading", "bid_type": "competitive"},
+    {"activity": "B0230", "name": "Grading - Clean Up", "phase": "development", "trade": "Site Final Grading", "bid_type": "competitive"},
+    {"activity": "B0240", "name": "Grading Rock", "phase": "development", "trade": "Blasting", "bid_type": "competitive"},
+    {"activity": "B0250", "name": "Utility Rock Excavation", "phase": "development", "trade": "Blasting", "bid_type": "competitive"},
+    {"activity": "B0260", "name": "Erosion Control - silt fence and sotrm protections", "phase": "development", "trade": "Erosion Control", "bid_type": "competitive"},
+    {"activity": "B0265", "name": "Street Cleaning", "phase": "development", "trade": "Erosion Control", "bid_type": "competitive"},
+    {"activity": "B0270", "name": "Creek Imp./Channel Revetment", "phase": "development", "trade": "Erosion Control", "bid_type": "competitive"},
+    {"activity": "B0300", "name": "Sanitary Sewers", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0310", "name": "Off-site Sanitary Sewers", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0320", "name": "Sanitary Lift Station", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0330", "name": "Sanitary Connection Prepaid Fees", "phase": "development", "trade": "Underground Utilities", "bid_type": "internal"},
+    {"activity": "B0340", "name": "Storm Sewers", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0350", "name": "Off-site Storm Sewers", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0400", "name": "Water Main", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0410", "name": "Off-site Water Main", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0420", "name": "Water Main Tax", "phase": "development", "trade": "Underground Utilities", "bid_type": "internal"},
+    {"activity": "B0430", "name": "Electric Install", "phase": "development", "trade": "Electric Conduit/Crossings", "bid_type": "competitive"},
+    {"activity": "B0440", "name": "Street Lights", "phase": "development", "trade": "Common Ground Electric", "bid_type": "competitive"},
+    {"activity": "B0450", "name": "Offsite Utilities", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0460", "name": "Utility Relocation", "phase": "development", "trade": "Underground Utilities", "bid_type": "competitive"},
+    {"activity": "B0500", "name": "Concrete Streets", "phase": "development", "trade": "Paving", "bid_type": "competitive"},
+    {"activity": "B0510", "name": "Asphalt Streets", "phase": "development", "trade": "Paving", "bid_type": "competitive"},
+    {"activity": "B0520", "name": "Street Winter Service", "phase": "development", "trade": "Paving", "bid_type": "internal"},
+    {"activity": "B0530", "name": "Common Sidewalks", "phase": "development", "trade": "Common Ground Flatwork", "bid_type": "competitive"},
+    {"activity": "B0540", "name": "Asphalt Parking & Trails", "phase": "development", "trade": "Paving", "bid_type": "competitive"},
+    {"activity": "B0550", "name": "TGA Fees", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0560", "name": "Offsite Roadwork", "phase": "development", "trade": "Paving", "bid_type": "competitive"},
+    {"activity": "B0600", "name": "Street Signs", "phase": "development", "trade": "Street Signs", "bid_type": "competitive"},
+    {"activity": "B0610", "name": "Seed & Sod", "phase": "development", "trade": "Sod", "bid_type": "competitive"},
+    {"activity": "B0620", "name": "Common Landscaping", "phase": "development", "trade": "Landscaping", "bid_type": "competitive"},
+    {"activity": "B0630", "name": "Irrigation", "phase": "development", "trade": "Irrigation", "bid_type": "competitive"},
+    {"activity": "B0640", "name": "Entry Monuments", "phase": "development", "trade": "Monuments", "bid_type": "competitive"},
+    {"activity": "B0650", "name": "Lakes/Fountains & Bubblers", "phase": "development", "trade": "Fountains and Aeration", "bid_type": "competitive"},
+    {"activity": "B0660", "name": "Amenities", "phase": "development", "trade": "Common Ground Amenities", "bid_type": "competitive"},
+    {"activity": "B0670", "name": "Retaining Walls", "phase": "development", "trade": "Retaining Walls", "bid_type": "competitive"},
+    {"activity": "B0680", "name": "Fencing", "phase": "development", "trade": "Fencing", "bid_type": "competitive"},
+    {"activity": "B0700", "name": "Permits , Inspection & Recording Fees", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0720", "name": "Contingency (not a payable category)", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0730", "name": "Developer Fee (Management Fee)", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0740", "name": "Escrow Release", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0750", "name": "HOA Overages and initiation", "phase": "development", "trade": "Engineering", "bid_type": "internal"},
+    {"activity": "B0760", "name": "Post-Construction BMP and site clean up", "phase": "development", "trade": "Basins", "bid_type": "competitive"},
+]
+
+TRADE_ALIASES: dict[str, list[str]] = {
+    "Geotechnical Engineering": ["Geotechnical Engineering", "Geo Tech"],
+    "Geo Tech": ["Geo Tech", "Geotechnical Engineering"],
+}
+
+
+@router.post(
+    "/projects/{project_id}/tasks/default",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_default_tasks(
+    project_id: UUID,
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Seed the standard 58 default tasks into a project."""
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
+
+    # Fetch active trades
+    trades_resp = db.table("trades").select("id, name").eq("is_active", True).execute()
+    trades_by_name = {t["name"].strip().lower(): t["id"] for t in (trades_resp.data or [])}
+
+    def resolve_trade_id(trade_name: str) -> str | None:
+        key = trade_name.strip().lower()
+        if key in trades_by_name:
+            return trades_by_name[key]
+        aliases = TRADE_ALIASES.get(trade_name, [])
+        for alias in aliases:
+            ak = alias.strip().lower()
+            if ak in trades_by_name:
+                return trades_by_name[ak]
+        return None
+
+    # Get existing task names for duplicate prevention
+    existing_resp = (
+        db.table("tasks")
+        .select("name")
+        .eq("project_id", str(project_id))
+        .is_("deleted_at", "null")
+        .execute()
+    )
+    existing_names = {t["name"] for t in (existing_resp.data or [])}
+
+    # Get max sort_order
+    max_resp = (
+        db.table("tasks")
+        .select("sort_order")
+        .eq("project_id", str(project_id))
+        .is_("deleted_at", "null")
+        .order("sort_order", desc=True)
+        .limit(1)
+        .execute()
+    )
+    current_sort = (max_resp.data[0]["sort_order"]) if max_resp.data else 0
+
+    rows_to_insert = []
+    skipped_count = 0
+
+    for item in DEFAULT_TASKS:
+        task_name = f"{item['activity']} - {item['name']}"
+        if task_name in existing_names:
+            skipped_count += 1
+            continue
+
+        trade_id = resolve_trade_id(item["trade"])
+        if not trade_id:
+            # Fallback to any active trade if specific trade not found
+            trade_id = list(trades_by_name.values())[0] if trades_by_name else None
+
+        if not trade_id:
+            raise HTTPException(status_code=422, detail=f"Trade '{item['trade']}' could not be resolved.")
+
+        current_sort += 1
+        rows_to_insert.append({
+            "project_id": str(project_id),
+            "trade_id": trade_id,
+            "name": task_name,
+            "description": item["name"],
+            "phase": item["phase"],
+            "bid_type": item["bid_type"],
+            "status": "draft",
+            "sort_order": current_sort,
+            "created_by": user["user_id"],
+        })
+
+    if rows_to_insert:
+        try:
+            db.table("tasks").insert(rows_to_insert).execute()
+        except APIError as exc:
+            logger.error("Failed to insert default tasks for project %s: %s", project_id, exc)
+            raise HTTPException(status_code=422, detail="Failed to insert default tasks") from exc
+
+    return {
+        "message": f"Added {len(rows_to_insert)} default tasks. ({skipped_count} skipped as duplicates)",
+        "created_count": len(rows_to_insert),
+        "skipped_count": skipped_count,
+    }
+
+
+@router.put(
+    "/projects/{project_id}/tasks/reorder",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reorder_tasks(
+    project_id: UUID,
+    items: list[TaskReorderItem],
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """Bulk update sort_order for tasks within a project."""
+    project = _get_project_or_404(db, project_id)
+    _ensure_project_not_archived(project)
+
+    for item in items:
+        db.table("tasks").update(
+            {"sort_order": item.sort_order}
+        ).eq("id", str(item.task_id)).eq(
+            "project_id", str(project_id)
+        ).is_("deleted_at", "null").execute()
+
+
 @router.get(
-    "/projects/{project_id}/tasks/{task_id}",
+    "/projects/{project_id}/tasks/{task_id:uuid}",
     response_model=TaskResponse,
 )
 async def get_task(
@@ -323,7 +511,7 @@ async def create_task(
 
 
 @router.patch(
-    "/projects/{project_id}/tasks/{task_id}",
+    "/projects/{project_id}/tasks/{task_id:uuid}",
     response_model=TaskResponse,
 )
 async def update_task(
@@ -399,7 +587,7 @@ async def update_task(
         ) from exc
 
     if not resp.data:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=400, detail="Task not found")
 
     # Re-fetch with trade join
     row = _get_task_or_404(db, project_id, task_id)
@@ -407,7 +595,7 @@ async def update_task(
 
 
 @router.delete(
-    "/projects/{project_id}/tasks/{task_id}",
+    "/projects/{project_id}/tasks/{task_id:uuid}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_task(
@@ -432,28 +620,6 @@ async def delete_task(
 
     if not resp.data:
         raise HTTPException(status_code=404, detail="Task not found")
-
-
-@router.put(
-    "/projects/{project_id}/tasks/reorder",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def reorder_tasks(
-    project_id: UUID,
-    items: list[TaskReorderItem],
-    user: dict = Depends(get_current_active_user),
-    db: Client = Depends(get_supabase),
-):
-    """Bulk update sort_order for tasks within a project."""
-    project = _get_project_or_404(db, project_id)
-    _ensure_project_not_archived(project)
-
-    for item in items:
-        db.table("tasks").update(
-            {"sort_order": item.sort_order}
-        ).eq("id", str(item.task_id)).eq(
-            "project_id", str(project_id)
-        ).is_("deleted_at", "null").execute()
 
 
 # ── Vendor Filtering ────────────────────────────────────────────────────

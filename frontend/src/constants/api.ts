@@ -32,6 +32,7 @@ export const API_ENDPOINTS = {
   PROJECT_TASKS: (projectId: string) => `/projects/${projectId}/tasks`,
   PROJECT_TASK: (projectId: string, taskId: string) => `/projects/${projectId}/tasks/${taskId}`,
   PROJECT_TASKS_REORDER: (projectId: string) => `/projects/${projectId}/tasks/reorder`,
+  PROJECT_DEFAULT_TASKS: (projectId: string) => `/projects/${projectId}/tasks/default`,
 
   // Trades
   TRADES: '/trades',

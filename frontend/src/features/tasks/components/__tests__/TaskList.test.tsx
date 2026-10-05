@@ -12,6 +12,7 @@ const deleteMutate = vi.fn();
 
 vi.mock('@/features/tasks/hooks/useTasks', () => ({ useTasks: () => useTasksMock() }));
 vi.mock('@/features/tasks/hooks/useCreateTask', () => ({ useCreateTask: () => ({ mutate: vi.fn(), isPending: false }) }));
+vi.mock('@/features/tasks/hooks/useCreateDefaultTasks', () => ({ useCreateDefaultTasks: () => ({ mutate: vi.fn(), isPending: false }) }));
 vi.mock('@/features/tasks/hooks/useUpdateTask', () => ({ useUpdateTask: () => ({ mutate: vi.fn(), isPending: false }) }));
 vi.mock('@/features/tasks/hooks/useDeleteTask', () => ({ useDeleteTask: () => ({ mutate: deleteMutate, isPending: false }) }));
 vi.mock('@/features/tasks/hooks/useReorderTasks', () => ({ useReorderTasks: () => ({ mutate: vi.fn(), isPending: false }) }));
