@@ -50,3 +50,14 @@ export async function deleteTask(projectId: string, taskId: string): Promise<voi
 export async function reorderTasks(projectId: string, items: ReorderItem[]): Promise<void> {
   await api.put(API_ENDPOINTS.PROJECT_TASKS_REORDER(projectId), items);
 }
+
+export interface DefaultTasksResponse {
+  message: string;
+  created_count: number;
+  skipped_count: number;
+}
+
+export async function createDefaultTasks(projectId: string): Promise<DefaultTasksResponse> {
+  const { data } = await api.post<DefaultTasksResponse>(API_ENDPOINTS.PROJECT_DEFAULT_TASKS(projectId));
+  return data;
+}

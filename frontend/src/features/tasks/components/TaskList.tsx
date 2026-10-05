@@ -27,6 +27,7 @@ import { useToast } from '@/components/ui/Toast/useToast';
 import { errorMessage } from '@/lib/api';
 import { useTasks } from '@/features/tasks/hooks/useTasks';
 import { useCreateTask } from '@/features/tasks/hooks/useCreateTask';
+import { useCreateDefaultTasks } from '@/features/tasks/hooks/useCreateDefaultTasks';
 import { useUpdateTask } from '@/features/tasks/hooks/useUpdateTask';
 import { useDeleteTask } from '@/features/tasks/hooks/useDeleteTask';
 import { useReorderTasks } from '@/features/tasks/hooks/useReorderTasks';
@@ -56,6 +57,7 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
 
   const { data, isLoading, isError, error, refetch, isFetching } = useTasks({ projectId, page_size: 100 });
   const createMutation = useCreateTask(projectId);
+  const createDefaultMutation = useCreateDefaultTasks(projectId);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask(projectId);
   const reorderMutation = useReorderTasks(projectId);
@@ -187,6 +189,17 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
     });
   };
 
+  const handleAddDefaultTasks = () => {
+    createDefaultMutation.mutate(undefined, {
+      onSuccess: (res) => {
+        toast({ variant: 'success', message: res.message || 'Default tasks added.' });
+      },
+      onError: (err) => {
+        toast({ variant: 'danger', message: errorMessage(err, 'Failed to add default tasks.') });
+      },
+    });
+  };
+
   const handleRowClick = (task: Task) => {
     navigate(`/projects/${projectId}/tasks/${task.id}`);
   };
@@ -215,7 +228,18 @@ export function TaskList({ projectId, projectBudget, readOnly = false }: TaskLis
             </>
           )}
         </div>
-        {!readOnly && <Button onClick={() => setShowCreateForm(true)}>Add Task</Button>}
+        {!readOnly && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleAddDefaultTasks}
+              isLoading={createDefaultMutation.isPending}
+            >
+              Add Default Tasks
+            </Button>
+            <Button onClick={() => setShowCreateForm(true)}>Add Task</Button>
+          </div>
+        )}
       </div>
 
       {isOverBudget && (
