@@ -324,6 +324,7 @@ TRADE_ALIASES: dict[str, list[str]] = {
 @router.post(
     "/projects/{project_id}/tasks/default",
     status_code=status.HTTP_201_CREATED,
+    summary="Seed 58 default tasks into a project",
 )
 async def create_default_tasks(
     project_id: UUID,
