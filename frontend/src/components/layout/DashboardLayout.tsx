@@ -6,6 +6,7 @@ import {
   Folder,
   LayoutDashboard,
   LayoutTemplate,
+  ListChecks,
   Settings,
   Users,
 } from 'lucide-react';
@@ -105,6 +106,12 @@ export function DashboardLayout() {
             label: 'Bid Templates',
             href: ROUTES.BID_TEMPLATES,
             icon: <LayoutTemplate className="h-5 w-5" aria-hidden="true" />,
+          },
+          {
+            id: 'task-templates',
+            label: 'Task Templates',
+            href: ROUTES.TASK_TEMPLATES,
+            icon: <ListChecks className="h-5 w-5" aria-hidden="true" />,
           },
         ],
       },
