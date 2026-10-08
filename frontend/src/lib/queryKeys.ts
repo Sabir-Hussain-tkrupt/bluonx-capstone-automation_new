@@ -107,6 +107,17 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.bidTemplates.details(), id] as const,
   },
 
+  taskTemplates: {
+    all: ['task_templates'] as const,
+    lists: () => [...queryKeys.taskTemplates.all, 'list'] as const,
+    list: (filters?: Record<string, unknown>) =>
+      filters
+        ? ([...queryKeys.taskTemplates.lists(), filters] as const)
+        : queryKeys.taskTemplates.lists(),
+    details: () => [...queryKeys.taskTemplates.all, 'detail'] as const,
+    detail: (id: string) => [...queryKeys.taskTemplates.details(), id] as const,
+  },
+
   bidPackages: {
     all: ['bid_packages'] as const,
     lists: () => [...queryKeys.bidPackages.all, 'list'] as const,

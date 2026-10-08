@@ -112,6 +112,7 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
   [ROUTES.BID_PACKAGES]: { parent: ROUTES.DASHBOARD, label: 'Bid Packages' },
 
   [ROUTES.BID_TEMPLATES]: { parent: ROUTES.DASHBOARD, label: 'Bid Templates' },
+  [ROUTES.TASK_TEMPLATES]: { parent: ROUTES.DASHBOARD, label: 'Task Templates' },
   [ROUTES.BID_TEMPLATE_NEW]: { parent: ROUTES.BID_TEMPLATES, label: 'New Template' },
   [ROUTES.BID_TEMPLATE_DETAIL]: {
     parent: ROUTES.BID_TEMPLATES,

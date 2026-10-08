@@ -23,6 +23,7 @@ export const ROUTES = {
   TASK_DETAIL: '/projects/:id/tasks/:taskId',
   BID_PACKAGES: '/bid-packages',
   BID_TEMPLATES: '/bid-templates',
+  TASK_TEMPLATES: '/task-templates',
   BID_TEMPLATE_NEW: '/bid-templates/new',
   BID_TEMPLATE_DETAIL: '/bid-templates/:id',
   BID_TEMPLATE_EDIT: '/bid-templates/:id/edit',

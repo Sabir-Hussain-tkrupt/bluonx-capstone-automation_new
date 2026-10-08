@@ -38,6 +38,7 @@ from app.routers import (
     reviews,
     scheduler_health,
     tasks,
+    task_templates,
     trades,
     users,
     vendor_auth,
@@ -127,6 +128,7 @@ app.include_router(trades.router, prefix=_v1, tags=["Trades"])
 app.include_router(holidays.router, prefix=_v1, tags=["Holidays"])
 app.include_router(bid_packages.router, prefix=_v1, tags=["Bid Packages"])
 app.include_router(bid_templates.router, prefix=_v1, tags=["Bid Templates"])
+app.include_router(task_templates.router, prefix=_v1, tags=["Task Templates"])
 app.include_router(bid_invitations.router, prefix=_v1, tags=["Bid Invitations"])
 app.include_router(bid_revisions.router, prefix=_v1, tags=["Bid Revisions"])
 app.include_router(bid_submissions.router, prefix=_v1, tags=["Bid Submissions"])

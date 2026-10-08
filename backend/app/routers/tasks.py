@@ -324,31 +324,40 @@ TRADE_ALIASES: dict[str, list[str]] = {
 @router.post(
     "/projects/{project_id}/tasks/default",
     status_code=status.HTTP_201_CREATED,
-    summary="Seed 58 default tasks into a project",
+    summary="Seed default tasks from task templates into a project",
 )
 async def create_default_tasks(
     project_id: UUID,
     user: dict = Depends(get_current_active_user),
     db: Client = Depends(get_supabase),
 ):
-    """Seed the standard 58 default tasks into a project."""
+    """Seed default tasks into a project dynamically from active task templates."""
     project = _get_project_or_404(db, project_id)
     _ensure_project_not_archived(project)
 
-    # Fetch active trades
-    trades_resp = db.table("trades").select("id, name").eq("is_active", True).execute()
-    trades_by_name = {t["name"].strip().lower(): t["id"] for t in (trades_resp.data or [])}
+    # Fetch active task templates from database
+    try:
+        templates_resp = (
+            db.table("task_templates")
+            .select("*")
+            .eq("is_active", True)
+            .is_("deleted_at", "null")
+            .order("sort_order")
+            .execute()
+        )
+    except APIError as exc:
+        logger.error("Failed to query task_templates: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to fetch task templates from database",
+        ) from exc
 
-    def resolve_trade_id(trade_name: str) -> str | None:
-        key = trade_name.strip().lower()
-        if key in trades_by_name:
-            return trades_by_name[key]
-        aliases = TRADE_ALIASES.get(trade_name, [])
-        for alias in aliases:
-            ak = alias.strip().lower()
-            if ak in trades_by_name:
-                return trades_by_name[ak]
-        return None
+    templates = templates_resp.data or []
+    if not templates:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No active task templates found in database. Create task templates first.",
+        )
 
     # Get existing task names for duplicate prevention
     existing_resp = (
@@ -375,28 +384,21 @@ async def create_default_tasks(
     rows_to_insert = []
     skipped_count = 0
 
-    for item in DEFAULT_TASKS:
-        task_name = f"{item['activity']} - {item['name']}"
+    for tmpl in templates:
+        task_name = tmpl["name"]
         if task_name in existing_names:
             skipped_count += 1
             continue
 
-        trade_id = resolve_trade_id(item["trade"])
-        if not trade_id:
-            # Fallback to any active trade if specific trade not found
-            trade_id = list(trades_by_name.values())[0] if trades_by_name else None
-
-        if not trade_id:
-            raise HTTPException(status_code=422, detail=f"Trade '{item['trade']}' could not be resolved.")
-
         current_sort += 1
         rows_to_insert.append({
             "project_id": str(project_id),
-            "trade_id": trade_id,
+            "trade_id": str(tmpl["trade_id"]),
             "name": task_name,
-            "description": item["name"],
-            "phase": item["phase"],
-            "bid_type": item["bid_type"],
+            "description": tmpl.get("description"),
+            "phase": tmpl["phase"],
+            "bid_type": tmpl.get("bid_type", "competitive"),
+            "budget_estimate": tmpl.get("budget_estimate", 0.0),
             "status": "draft",
             "sort_order": current_sort,
             "created_by": user["user_id"],
