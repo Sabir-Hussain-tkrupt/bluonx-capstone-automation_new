@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _STORAGE_REJECTION_STATUSES = {
     400: status.HTTP_400_BAD_REQUEST,
     409: status.HTTP_409_CONFLICT,
-    413: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    413: status.HTTP_413_CONTENT_TOO_LARGE,
     415: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }
 

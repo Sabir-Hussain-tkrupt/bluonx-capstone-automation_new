@@ -145,10 +145,17 @@ describe('VendorDocumentUpload — single-instance replace', () => {
 });
 
 describe('VendorDocumentUpload — file-type validation', () => {
-  it('rejects a spreadsheet (vendor docs are PDF/image/Word only)', () => {
+  it('rejects a CAD file (vendor docs take the common document types only)', () => {
+    renderWithRouter(<VendorDocumentUpload vendorId="v-1" isOpen onClose={() => {}} />);
+    selectFile('site.dwg');
+    expect(screen.getByText(/not an accepted file type/i)).toBeInTheDocument();
+  });
+
+  it('accepts a spreadsheet', () => {
     renderWithRouter(<VendorDocumentUpload vendorId="v-1" isOpen onClose={() => {}} />);
     selectFile('budget.xlsx');
-    expect(screen.getByText(/not an accepted file type/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not an accepted file type/i)).not.toBeInTheDocument();
+    expect(screen.getByText('budget.xlsx')).toBeInTheDocument();
   });
 
   it('accepts a Word document', () => {

@@ -20,7 +20,7 @@ class TestInviteHappyPath:
         tc = admin_client(
             {
                 "invite_result": _invite_ok(new_id),
-                "users": [
+                "invite_creates": [
                     user_row(
                         id=new_id,
                         email="new@bluonx.dev",
@@ -108,7 +108,7 @@ class TestInvitePartialFailure:
         tc = admin_client(
             {
                 "invite_result": _invite_ok(new_id),
-                "users": [
+                "invite_creates": [
                     user_row(id=new_id, email="p@bluonx.dev", full_name="P", role="admin")
                 ],
                 "raise_on": {"users": {"update": APIError({"message": "boom"})}},

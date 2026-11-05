@@ -28,13 +28,19 @@ _buckets: dict[str, list[float]] = {}
 _lock = Lock()
 
 
-def _client_ip(request: Request) -> str:
-    """First hop in X-Forwarded-For if present, else direct peer."""
+def client_ip(request: Request) -> str:
+    """The caller's IP as seen by the ALB, else the direct peer.
+
+    The ALB appends the address it received the connection from to
+    X-Forwarded-For, so the LAST entry is the one it vouches for. Everything
+    before it is whatever the caller sent: taking the first entry let a client
+    pick a fresh fake IP per request and never hit the rate limit.
+    """
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",", 1)[0].strip()
-        if first:
-            return first
+        last = xff.rsplit(",", 1)[-1].strip()
+        if last:
+            return last
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
@@ -46,7 +52,7 @@ def validate_token_rate_limit(request: Request) -> None:
 
     Raises 429 with Retry-After when exceeded.
     """
-    ip = _client_ip(request)
+    ip = client_ip(request)
     now = time.monotonic()
     cutoff = now - _WINDOW_SECONDS
 

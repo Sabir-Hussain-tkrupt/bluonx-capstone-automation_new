@@ -18,14 +18,28 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
-from app.routers.webhooks import _build_signing_string, verify_sns_signature
+from app.routers.webhooks import _build_signing_string, _load_signing_cert, verify_sns_signature
 
 
 # ── Realistic SNS payload fixtures ──────────────────────────────────────────
 
 # These match the actual AWS SNS message format for SES events.
 # See: https://docs.aws.amazon.com/ses/latest/dg/notification-contents.html
+
+
+TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:ses-notifications"
+
+
+@pytest.fixture(autouse=True)
+def _sns_topic_and_cert_cache(monkeypatch):
+    """Pin the expected topic, and start every test with an empty cert cache
+    (the round-trip tests sign with a fresh key behind the same cert URL)."""
+    monkeypatch.setattr(settings, "SES_SNS_TOPIC_ARN", TOPIC_ARN)
+    _load_signing_cert.cache_clear()
+    yield
+    _load_signing_cert.cache_clear()
 
 
 COMMON_SNS_HEADERS = {
@@ -164,7 +178,7 @@ def delivery_event_configset() -> dict:
     return {
         "Type": "Notification",
         "MessageId": "ee85e39f-ea4d-435a-b922-c6aae3915eff",
-        "TopicArn": "arn:aws:sns:us-east-1:314727362874:bluonx-ses-events-dev",
+        "TopicArn": TOPIC_ARN,
         "Subject": "Amazon SES Email Event Notification",
         "Message": json.dumps(ses_message),
         "Timestamp": "2026-06-22T12:00:02.000Z",
@@ -641,3 +655,73 @@ class TestSignatureValidation:
                 headers={"x-amz-sns-message-type": "Notification"},
             )
         assert resp.status_code == 200
+
+
+# ── Topic pinning and certificate caching ───────────────────────────────────
+
+
+class TestTopicPinning:
+    """Only the configured SES topic is accepted, and the check happens before
+    any certificate is fetched (so a foreign topic costs no outbound call)."""
+
+    def test_foreign_topic_rejected_before_verification(self, test_client, delivery_notification):
+        delivery_notification["TopicArn"] = "arn:aws:sns:us-east-1:999999999999:attacker-topic"
+        with patch("app.routers.webhooks.verify_sns_signature") as mock_verify:
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications", json=delivery_notification
+            )
+        assert resp.status_code == 403
+        mock_verify.assert_not_called()
+
+    def test_foreign_subscription_confirmation_not_confirmed(
+        self, test_client, subscription_confirmation
+    ):
+        subscription_confirmation["TopicArn"] = "arn:aws:sns:us-east-1:999999999999:attacker-topic"
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.httpx.get") as mock_get:
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications", json=subscription_confirmation
+            )
+        assert resp.status_code == 403
+        mock_get.assert_not_called()
+
+    def test_unconfigured_topic_fails_closed(self, test_client, delivery_notification, monkeypatch):
+        monkeypatch.setattr(settings, "SES_SNS_TOPIC_ARN", None)
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True):
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications", json=delivery_notification
+            )
+        assert resp.status_code == 403
+
+    def test_own_subscription_confirmation_is_confirmed(self, test_client, subscription_confirmation):
+        with patch("app.routers.webhooks.verify_sns_signature", return_value=True), \
+             patch("app.routers.webhooks.httpx.get") as mock_get:
+            resp = test_client.post(
+                "/api/v1/webhooks/ses-notifications", json=subscription_confirmation
+            )
+        assert resp.status_code == 200
+        mock_get.assert_called_once()
+        assert mock_get.call_args.args[0] == subscription_confirmation["SubscribeURL"]
+
+
+class TestSigningCertCache:
+    """The signing certificate is downloaded once per URL, not once per call."""
+
+    def test_cert_fetched_once_per_url(self):
+        payload, cert_pem = TestVerifyConfirmationSignatureRoundTrip()._signed_payload()
+        with patch("app.routers.webhooks.httpx.get") as mock_get:
+            mock_get.return_value = MagicMock(content=cert_pem, raise_for_status=lambda: None)
+            assert verify_sns_signature(payload) is True
+            assert verify_sns_signature(payload) is True
+        assert mock_get.call_count == 1
+
+    def test_failed_fetch_is_not_cached(self):
+        payload, cert_pem = TestVerifyConfirmationSignatureRoundTrip()._signed_payload()
+        with patch("app.routers.webhooks.httpx.get") as mock_get:
+            mock_get.side_effect = [
+                RuntimeError("network down"),
+                MagicMock(content=cert_pem, raise_for_status=lambda: None),
+            ]
+            assert verify_sns_signature(payload) is False
+            assert verify_sns_signature(payload) is True
+        assert mock_get.call_count == 2

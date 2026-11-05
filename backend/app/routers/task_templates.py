@@ -70,12 +70,12 @@ def _validate_trade_exists(db: Client, trade_id: UUID) -> dict:
 
     if not resp or not resp.data:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Trade not found",
         )
     if not resp.data.get("is_active"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Trade is inactive",
         )
     return resp.data
@@ -193,7 +193,7 @@ async def create_task_template(
     except APIError as exc:
         logger.error("Failed to insert task_template: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.message or "Failed to create task template",
         ) from exc
 
@@ -249,7 +249,7 @@ async def update_task_template(
     except APIError as exc:
         logger.error("Failed to update task_template %s: %s", template_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.message or "Failed to update task template",
         ) from exc
 

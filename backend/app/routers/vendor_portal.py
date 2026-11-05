@@ -30,9 +30,10 @@ from fastapi import (
     status,
 )
 from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
 from supabase import Client
 
-from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.file_validation import read_upload, sanitize_filename, validate_upload
 from app.core.storage import delete_file, get_signed_url, upload_file
 from app.core.supabase_client import get_supabase
 from app.core.vendor_auth import (
@@ -591,7 +592,7 @@ async def submit_bid(
     )
     if errors:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "detail": "Submission failed validation",
                 "errors": [e.model_dump() for e in errors],
@@ -900,17 +901,17 @@ async def upload_attachment(
     _assert_draft(sub)
     assert_package_open_and_before_deadline(db, ctx.bid_package_id)
 
-    file_bytes = await file.read()
+    file_bytes = await read_upload(file, BID_ATTACHMENTS_BUCKET)
     if not file_bytes:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Uploaded file is empty",
         )
     # Hard 10MB cap at router layer (spec), even though bucket config is
     # 50MB for dev convenience.
     if len(file_bytes) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="File exceeds the 10MB size limit.",
         )
 
@@ -928,7 +929,10 @@ async def upload_attachment(
     folder = str(submission_id)
     resolved = resolve_unique_filename(db, BID_ATTACHMENTS_BUCKET, folder, filename)
     storage_path = f"{folder}/{resolved}"
-    upload_file(db, BID_ATTACHMENTS_BUCKET, storage_path, file_bytes, content_type)
+    # Blocking HTTP call to Supabase Storage; keep it off the event loop.
+    await run_in_threadpool(
+        upload_file, db, BID_ATTACHMENTS_BUCKET, storage_path, file_bytes, content_type
+    )
 
     try:
         insert_resp = (

@@ -1,7 +1,7 @@
 """GET /admin/docusign-health diagnostic (Task 9.3a).
 
-Internal-auth only; returns ok on a successful mint, or the consent URL when
-consent is missing. Mirrors the scheduler-health convention.
+Admin-only; returns ok on a successful mint, or the consent URL when consent
+is missing. Mirrors the scheduler-health convention.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class _ConsentClient:
 
 @pytest.fixture()
 def authed_user() -> dict:
-    return {"user_id": "u1", "email": "pm@example.com", "role": "project_manager", "is_active": True}
+    return {"user_id": "u1", "email": "admin@example.com", "role": "admin", "is_active": True}
 
 
 @pytest.fixture()
@@ -43,6 +43,17 @@ def test_requires_auth():
     with TestClient(app) as c:
         resp = c.get("/api/v1/admin/docusign-health")
     assert resp.status_code in (401, 403)
+
+
+def test_non_admin_forbidden():
+    pm = {"user_id": "u2", "email": "pm@example.com", "role": "project_manager", "is_active": True}
+    app.dependency_overrides[get_current_active_user] = lambda: pm
+    app.dependency_overrides[get_docusign_client] = lambda: _OkClient()
+    try:
+        resp = TestClient(app).get("/api/v1/admin/docusign-health")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 403
 
 
 def test_health_ok(client):

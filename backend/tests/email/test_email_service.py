@@ -156,12 +156,23 @@ class TestDefaultFromEmail:
     async def test_from_email_uses_explicit_value(
         self, email_service, mock_provider, sample_email_kwargs
     ):
-        """When from_email is explicitly provided, it takes precedence."""
+        """When from_email is explicitly provided, it takes precedence (wrapped
+        with the BluOnX display name, like the default sender)."""
         sample_email_kwargs["from_email"] = "custom@bluonx.com"
         await email_service.send_email(**sample_email_kwargs)
         mock_provider.send.assert_called_once()
         payload: EmailPayload = mock_provider.send.call_args[0][0]
-        assert payload.from_email == "custom@bluonx.com"
+        assert payload.from_email == "BluOnX <custom@bluonx.com>"
+
+    @pytest.mark.asyncio
+    async def test_preformatted_from_email_is_kept(
+        self, email_service, mock_provider, sample_email_kwargs
+    ):
+        """A sender that already carries a display name is passed through as is."""
+        sample_email_kwargs["from_email"] = "Ops Team <ops@bluonx.com>"
+        await email_service.send_email(**sample_email_kwargs)
+        payload: EmailPayload = mock_provider.send.call_args[0][0]
+        assert payload.from_email == "Ops Team <ops@bluonx.com>"
 
     @pytest.mark.asyncio
     async def test_reply_to_is_passed_through(

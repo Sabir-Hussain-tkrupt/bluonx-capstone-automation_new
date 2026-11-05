@@ -23,24 +23,22 @@ describe('upload accept lists', () => {
     // These are the backend's allowed_extensions sets, transcribed. The backend
     // is the gate; a list narrower here silently blocks a file the server would
     // have taken, with no error the user can see.
-    expect(tokens(VENDOR_DOCUMENT_ACCEPT).sort()).toEqual(
-      ['.doc', '.docx', '.jpeg', '.jpg', '.pdf', '.png'].sort(),
-    );
+    // backend _COMMON_DOCUMENT_EXTENSIONS, shared by vendor-documents and
+    // bid-attachments; project-documents adds the four CAD types.
+    const common = [
+      '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff',
+      '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    ];
+    expect(tokens(VENDOR_DOCUMENT_ACCEPT).sort()).toEqual([...common].sort());
     expect(tokens(PROJECT_DOCUMENT_ACCEPT).sort()).toEqual(
-      [
-        '.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff',
-        '.txt', '.doc', '.docx', '.xls', '.xlsx',
-        '.dwg', '.dxf', '.dwf', '.dgn',
-      ].sort(),
+      [...common, '.dwg', '.dxf', '.dwf', '.dgn'].sort(),
     );
-    expect(tokens(BID_ATTACHMENT_ACCEPT).sort()).toEqual(
-      ['.pdf', '.jpg', '.jpeg', '.png'].sort(),
-    );
+    expect(tokens(BID_ATTACHMENT_ACCEPT).sort()).toEqual([...common].sort());
   });
 
-  it('has 15 project-document extensions, including all four CAD types', () => {
+  it('has 21 project-document extensions, including all four CAD types', () => {
     const project = tokens(PROJECT_DOCUMENT_ACCEPT);
-    expect(project).toHaveLength(15);
+    expect(project).toHaveLength(21);
     expect(project).toEqual(expect.arrayContaining(['.dwg', '.dxf', '.dwf', '.dgn']));
   });
 

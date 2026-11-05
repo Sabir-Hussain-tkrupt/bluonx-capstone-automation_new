@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from supabase import Client
 
@@ -22,7 +23,7 @@ from app.services.vendor_service import (
     missing_requirements_for_complete,
     recompute_vendor_insurance_expiration,
 )
-from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.file_validation import read_upload, sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
@@ -341,7 +342,7 @@ async def _create_vendor_with_contacts(
     # Validate: at least one contact is required
     if not contacts_data:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="At least one contact with an email address is required.",
         )
 
@@ -352,7 +353,7 @@ async def _create_vendor_with_contacts(
     primary_count = sum(1 for c in contacts_data if c.is_primary)
     if primary_count > 1:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Only one contact can be marked as primary.",
         )
     if primary_count == 0:
@@ -392,7 +393,7 @@ async def _create_vendor_with_contacts(
     except APIError as exc:
         logger.error("Supabase insert failed for vendors: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -532,7 +533,7 @@ async def update_vendor(
     except APIError as exc:
         logger.error("Supabase update failed for vendors/%s: %s", vendor_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -970,7 +971,7 @@ async def upload_vendor_document(
     # Validate document_type
     if document_type not in VENDOR_DOC_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid document_type. Must be one of: {', '.join(sorted(VENDOR_DOC_TYPES))}",
         )
 
@@ -998,14 +999,14 @@ async def upload_vendor_document(
     if document_type == "insurance_certificate":
         if not expiration_date:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="expiration_date is required for insurance_certificate.",
             )
         try:
             parsed_expiration = date.fromisoformat(expiration_date)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="expiration_date must be in YYYY-MM-DD format.",
             )
     elif expiration_date:
@@ -1013,15 +1014,15 @@ async def upload_vendor_document(
             parsed_expiration = date.fromisoformat(expiration_date)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="expiration_date must be in YYYY-MM-DD format.",
             )
 
     # Read file bytes
-    file_bytes = await file.read()
+    file_bytes = await read_upload(file, VENDOR_BUCKET)
     if not file_bytes:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Uploaded file is empty.",
         )
 
@@ -1033,7 +1034,10 @@ async def upload_vendor_document(
     # Upload under a per-upload uuid segment so a same-named re-upload can't
     # collide (which used to surface as an opaque 500).
     storage_path = unique_object_path(f"{vendor_id}/{document_type}", filename)
-    upload_file(db, VENDOR_BUCKET, storage_path, file_bytes, content_type)
+    # Blocking HTTP call to Supabase Storage; keep it off the event loop.
+    await run_in_threadpool(
+        upload_file, db, VENDOR_BUCKET, storage_path, file_bytes, content_type
+    )
 
     # Insert vendor_documents row
     doc_data: dict = {

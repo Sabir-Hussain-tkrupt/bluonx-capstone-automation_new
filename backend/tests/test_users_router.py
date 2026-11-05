@@ -27,10 +27,10 @@ class TestGetCurrentUser:
         assert "created_at" in data
         assert "updated_at" in data
 
-    def test_unauthenticated_returns_403(self, client):
-        """Should return 403 when no auth header is provided."""
+    def test_unauthenticated_returns_401(self, client):
+        """Should return 401 when no auth header is provided."""
         resp = client.get("/api/v1/users/me")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 class TestListUsers:
@@ -52,10 +52,10 @@ class TestListUsers:
         for user in data:
             assert user["status"] in ("active", "pending", "deactivated")
 
-    def test_unauthenticated_returns_403(self, client):
-        """Should return 403 without auth."""
+    def test_unauthenticated_returns_401(self, client):
+        """Should return 401 without auth."""
         resp = client.get("/api/v1/users")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 @pytest.mark.requires_db

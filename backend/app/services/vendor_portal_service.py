@@ -619,7 +619,7 @@ def build_line_item_rows(
         )
     if unknown:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "detail": "Submission contains unknown template items",
                 "errors": [

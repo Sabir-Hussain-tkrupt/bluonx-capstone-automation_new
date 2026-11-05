@@ -74,10 +74,10 @@ class TestJWTDecoding:
         )
         assert resp.status_code == 401
 
-    def test_missing_auth_header_returns_403(self, client):
-        """No Authorization header should return 403 (HTTPBearer default)."""
+    def test_missing_auth_header_returns_401(self, client):
+        """No Authorization header should return 401 (HTTPBearer default since FastAPI 0.122)."""
         resp = client.get("/api/v1/users/me")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     def test_wrong_audience_rejected(self, client):
         """A token with wrong audience should be rejected."""

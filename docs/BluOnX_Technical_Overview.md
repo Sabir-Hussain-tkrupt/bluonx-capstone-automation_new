@@ -490,26 +490,29 @@ Server-side validation of extension, size and file signature ("magic bytes"), pr
 
 ### 9.1 Task Template Library and Default-Task Seeding
 
-**What it is.** A standard library of 58 activity-coded task templates (B0010–B0760; 14 Due Diligence, 44 Development; 43 competitive, 15 internal), defined in the tasks router alongside a small trade-alias map. The full list is in Appendix A of the Context Handoff.
+**What it is.** A database-driven library of reusable task templates stored in `public.task_templates`. Each template defines an activity name or code (e.g. B0010, B0220), optional description, phase (`due_diligence` or `development`), trade reference (`trade_id`), bid type (`competitive` or `internal`), default budget estimate, and sort order. Templates can be dynamically added, edited, or retired via the dedicated Task Templates management interface (`/task-templates`).
 
-**Endpoint.** `POST /api/v1/projects/{project_id}/tasks/default` (any active staff user). Returns 201 with a message plus `created_count` and `skipped_count`.
+**Endpoints.**
+- `GET /api/v1/task-templates` — List task templates with search (by name and description), phase/trade filters, sorting, and pagination.
+- `POST /api/v1/task-templates` — Create a new reusable task template.
+- `GET / PATCH / DELETE /api/v1/task-templates/{id}` — Read, update, or soft-delete a task template.
+- `POST /api/v1/projects/{project_id}/tasks/default` — Seed all active task templates into a project (any active staff user). Returns 201 with `created_count` and `skipped_count`.
 
-**Algorithm.**
+**Seeding Algorithm.**
 1. Load the project; reject if missing (404) or archived (400).
-2. Load all **active** trades and index them by lower-cased name.
-3. Load the names of the project's existing non-deleted tasks.
-4. Find the project's current highest sort order.
-5. For each template in activity-code order: build the name "*Code* - *Name*"; skip it if that name already exists; resolve the trade by exact name, then through the alias map ("Geotechnical Engineering" ↔ "Geo Tech"); assign the next sort order; create a draft task with the template's description, phase and bid type, and the calling user as creator.
-6. Insert all new tasks in one bulk insert. Report created and skipped counts.
+2. Query all active, non-deleted templates from `public.task_templates` ordered by `sort_order`. If no active templates exist, returns 422.
+3. Query the project's existing non-deleted task names to prevent duplicate creation.
+4. Retrieve the current highest `sort_order` for the project.
+5. For each active template: skip if a task with the template's name already exists in the project; assign the next incremental sort order; generate a draft task with the template's trade, description, phase, and bid type.
+6. Insert all eligible tasks in a single bulk insert, reporting `created_count` and `skipped_count`.
 
 **Operational notes.**
-- Idempotent by name: repeating the action fills gaps only.
-- **Trade dependency:** if a template's trade cannot be resolved, the current implementation falls back to the first active trade it finds rather than failing. Before using the feature in a new environment, confirm that every trade named in the library exists, is active, and has a phase compatible with the template (Context Handoff, Section 5). A misspelt or inactive trade is the only realistic way to get a wrongly classified seeded task.
-- The bulk insert bypasses the per-task trade-phase check used by the single-task form, so trade phases must be configured correctly.
-- Seeded tasks have no budget; PMs fill budgets per project.
-- Route ordering matters (Section 5.5): this static route must remain above the UUID-typed single-task routes.
+- Idempotent by name: repeating "Add Default Tasks" fills newly added templates only without duplicating existing ones.
+- Fully dynamic: adding or modifying templates in the Task Templates management page immediately reflects in subsequent seedings across any project.
+- Seeded tasks are independent: once seeded into a project, tasks can have project-specific budgets, modifications, or deletions without affecting the template library.
+- Route ordering matters (Section 5.5): static task routes remain above UUID-typed single-task routes.
 
-**Changing the library** is described in Section 19.2.
+**Managing the library** is described in Section 19.2.
 
 ### 9.2 Vendor Filtering
 
@@ -979,17 +982,14 @@ On every pull request: backend hermetic tests; frontend type-check, lint and tes
 5. Add the path to `frontend/src/constants/api.ts`, a mutation or query in the feature's `api/`, a hook in `hooks/`, and invalidate the right query keys.
 6. Add backend and frontend tests.
 
-### 19.2 Changing the Task Template Library
+### 19.2 Managing the Task Template Library
 
-The library is defined centrally in the backend tasks router (the default-task list and the trade-alias map).
+The Task Template Library is fully database-driven and managed directly via the dedicated Task Templates interface under `/task-templates` and the `/api/v1/task-templates` REST endpoints.
 
-1. Edit, add or remove template entries (activity code, name, phase, trade, bid type). Keep entries in activity-code order — that becomes the task order in projects.
-2. Ensure each trade name exists and is active in **every** environment with a compatible phase, or add an alias.
-3. Remember that existing projects are not changed; renamed templates will be seen as new by the duplicate check (it matches on the full task name).
-4. Update the endpoint summary if the count changes, update tests, and update Appendix A of the Context Handoff.
-5. Release the backend (Section 14.2).
-
-A future enhancement can move the library into database tables with an admin editor, mirroring the bid-template feature (template table + items, management page, and the seeding endpoint reading from the table).
+1. Navigate to **Task Templates** in the staff dashboard to view, create, edit, or remove templates.
+2. When creating or editing a template, specify the task name (or activity code), description, phase (`Due Diligence` or `Development`), associated trade, default bid type (`Competitive` or `Internal`), and default budget estimate.
+3. Templates are soft-deleted when removed (`deleted_at` timestamp set and `is_active = False`), ensuring existing project tasks created from historical templates remain intact.
+4. Any active template is automatically included whenever a Project Manager clicks **Add Default Tasks** on any project.
 
 ### 19.3 Adding a Trade
 
@@ -1041,7 +1041,7 @@ Replace the firm terms template (`app/templates/contracts/firm_terms.txt.j2`) an
 | Monitoring | No Sentry or uptime monitor yet | Add both |
 | CI | No GitHub Actions workflow | Add the gates in Section 18.3 |
 | Frontend DB types | Placeholder types make direct reads loosely typed | Regenerate from the live schema |
-| Task Template Library | Defined in code; unresolved trade falls back to the first active trade | Move to database tables with an admin editor; fail or warn on unresolved trades |
+| Task Template Library | Managed dynamically in database | Fully supported via `/task-templates` UI and `/api/v1/task-templates` API |
 | Default-task seeding | Bulk insert skips the per-task trade-phase validation | Validate phase compatibility during seeding |
 | Distance | Bulk radius is straight-line | Acceptable; switch to Routes matrix if driving distance is needed |
 | Upload scanning | No antivirus | Add scanning (e.g. ClamAV or a managed service) if vendor uploads become higher risk |
@@ -1109,9 +1109,11 @@ All paths are prefixed with `/api/v1` except `/health`. "Staff" = active admin o
 | GET | `/projects/{id}/documents/{doc_id}/url` | Signed URL |
 | DELETE | `/projects/{id}/documents/{doc_id}` | Remove |
 | GET / POST | `/projects/{id}/tasks` | List / create task |
-| POST | `/projects/{id}/tasks/default` | **Seed the Task Template Library** |
+| POST | `/projects/{id}/tasks/default` | **Seed active templates from the Task Template Library** |
 | PUT | `/projects/{id}/tasks/reorder` | Bulk sort order |
 | GET / PATCH / DELETE | `/projects/{id}/tasks/{task_id}` | Read / update / soft delete (UUID-typed) |
+| GET / POST | `/task-templates` | List / create reusable task templates |
+| GET / PATCH / DELETE | `/task-templates/{id}` | Read / update / soft delete task template |
 | GET | `/tasks/{task_id}/qualified-vendors` | Vendor filtering |
 
 ### Bidding
@@ -1232,7 +1234,7 @@ All paths are prefixed with `/api/v1` except `/health`. "Staff" = active admin o
 | RPC | A PostgreSQL function called through Supabase as a single transaction |
 | Service role | Supabase key that bypasses RLS; backend only |
 | Supersession | Replacing a bid with a revision while keeping the original |
-| Task Template Library | The 58 standard activity-coded task definitions seeded by Add Default Tasks |
+| Task Template Library | Reusable task template definitions stored in `public.task_templates` and seeded into projects via Add Default Tasks |
 | Working day | Weekday not on the holiday calendar |
 
 ---

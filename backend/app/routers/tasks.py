@@ -355,7 +355,7 @@ async def create_default_tasks(
     templates = templates_resp.data or []
     if not templates:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="No active task templates found in database. Create task templates first.",
         )
 

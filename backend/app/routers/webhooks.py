@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import re
+from functools import lru_cache
 from urllib.parse import urlparse
 
 import httpx
@@ -17,7 +18,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, utils
 from fastapi import APIRouter, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,34 @@ _VALID_CERT_URL_RE = re.compile(
 
 
 # ── SNS signature verification ──────────────────────────────────────────────
+
+
+@lru_cache(maxsize=16)
+def _load_signing_cert(cert_url: str) -> x509.Certificate:
+    """Download and parse the SNS signing certificate, cached by URL.
+
+    AWS publishes a rotated certificate under a new URL, so a URL's content
+    never changes and one fetch per URL is enough. Without the cache every
+    webhook call (including forged ones) cost an outbound download. Failures
+    raise and are therefore not cached.
+    """
+    cert_resp = httpx.get(cert_url, timeout=10)
+    cert_resp.raise_for_status()
+    return x509.load_pem_x509_certificate(cert_resp.content)
+
+
+def _topic_allowed(payload: dict) -> bool:
+    """Whether the message comes from our configured SES event topic.
+
+    Checked before any network call. Any AWS account can create a topic,
+    subscribe this URL and sign messages that verify, so the signature alone
+    proves only that the message came from SNS, not that it came from us.
+    """
+    expected = settings.SES_SNS_TOPIC_ARN
+    if not expected:
+        logger.error("SES_SNS_TOPIC_ARN is not configured; rejecting SNS message")
+        return False
+    return payload.get("TopicArn") == expected
 
 
 def _build_signing_string(payload: dict) -> str:
@@ -67,11 +98,14 @@ def verify_sns_signature(payload: dict) -> bool:
 
     Steps:
       1. Validate SigningCertURL is from amazonaws.com (HTTPS)
-      2. Download the X.509 certificate
+      2. Download the X.509 certificate (cached per URL)
       3. Build the canonical signing string
       4. Verify the signature using the certificate's public key (SHA1WithRSA)
 
     Returns True if the signature is valid, False otherwise.
+
+    Blocking (certificate download): call it through run_in_threadpool from
+    async code.
     """
     cert_url = payload.get("SigningCertURL", "")
     signature_b64 = payload.get("Signature", "")
@@ -99,9 +133,7 @@ def verify_sns_signature(payload: dict) -> bool:
 
     try:
         # ── Download certificate ────────────────────────────────────
-        cert_resp = httpx.get(cert_url, timeout=10)
-        cert_resp.raise_for_status()
-        cert = x509.load_pem_x509_certificate(cert_resp.content)
+        cert = _load_signing_cert(cert_url)
 
         # ── Build signing string and verify ─────────────────────────
         signing_string = _build_signing_string(payload)
@@ -131,13 +163,21 @@ async def ses_notifications(request: Request) -> Response:
     """
     Receive AWS SNS notifications for SES delivery/bounce/complaint events.
 
-    Public endpoint (no JWT auth) — validates SNS message signature instead.
-    Always returns 200 (SNS retries on non-2xx responses).
+    Public endpoint (no JWT auth) — validates the topic and the SNS message
+    signature instead. Always returns 200 once both pass (SNS retries on non-2xx
+    responses).
     """
     body = await request.json()
+    if not isinstance(body, dict):
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, content="Invalid payload")
 
-    # ── Validate signature ──────────────────────────────────────────
-    if not verify_sns_signature(body):
+    # ── Validate topic, then signature ──────────────────────────────
+    if not _topic_allowed(body):
+        return Response(status_code=status.HTTP_403_FORBIDDEN, content="Unexpected SNS topic")
+
+    # The certificate download blocks; keep it off the event loop so a burst
+    # of webhook calls cannot stall every other request on this task.
+    if not await run_in_threadpool(verify_sns_signature, body):
         return Response(status_code=status.HTTP_403_FORBIDDEN, content="Invalid SNS signature")
 
     msg_type = body.get("Type", "")
@@ -147,7 +187,7 @@ async def ses_notifications(request: Request) -> Response:
         subscribe_url = body.get("SubscribeURL")
         if subscribe_url:
             logger.info("Confirming SNS subscription: %s", subscribe_url)
-            httpx.get(subscribe_url, timeout=10)
+            await run_in_threadpool(httpx.get, subscribe_url, timeout=10)
         return Response(status_code=200, content="OK")
 
     # ── Notification ────────────────────────────────────────────────

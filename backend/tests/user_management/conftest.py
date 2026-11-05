@@ -12,6 +12,8 @@ spec keys:
   users:         list[dict]  seed rows for public.users (mutated by writes)
   confirmed:     dict[str, str|None]  auth-user id -> confirmed_at (absent => pending)
   invite_result: object|Exception  return value / side effect of invite_user_by_email
+  invite_creates: list[dict]  rows added to `users` when invite_user_by_email runs,
+                 standing in for Supabase's auth.users -> public.users trigger
   raise_on:      dict like {"users": {"update": APIError(...)}}  inject a write error
 """
 
@@ -228,7 +230,23 @@ def make_db(spec: dict) -> MagicMock:
         return _Query(rows, write_errors)
 
     client.table.side_effect = _table
-    client.auth.admin = _build_auth_admin(spec, [r["id"] for r in rows])
+    created = [dict(r) for r in spec.get("invite_creates", [])]
+    client.auth.admin = _build_auth_admin(
+        spec, [r["id"] for r in rows] + [r["id"] for r in created]
+    )
+
+    if created:
+        # The invited user's public.users row only exists once the invite has
+        # run, as with the real trigger, so the service's "already exists?"
+        # pre-check sees no row.
+        invite = client.auth.admin.invite_user_by_email
+        result = invite.return_value
+
+        def _invite_and_create(*_a, **_k):
+            rows.extend(dict(r) for r in created)
+            return result
+
+        invite.side_effect = _invite_and_create
     return client
 
 

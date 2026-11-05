@@ -69,7 +69,7 @@ def _map_rpc_error(err: APIError) -> HTTPException:
         )
     if _has_pt_code(err, "PT422"):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The check-in response was rejected",
         )
     logger.error("Unexpected fn_record_milestone_response failure: %s", err)

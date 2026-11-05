@@ -337,7 +337,7 @@ def change_user(db: Client, admin_id, target_id, patch: UserUpdate) -> dict:
     except APIError as exc:
         logger.error("Supabase update failed for users %s: %s", target_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -365,7 +365,7 @@ def restore_user(db: Client, admin_id, target_id) -> dict:
     except APIError as exc:
         logger.error("Supabase restore user failed for %s: %s", target_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Could not restore the user. Please try again.",
         ) from exc
 
@@ -401,7 +401,7 @@ def soft_delete_user(db: Client, admin_id, target_id) -> None:
     except APIError as exc:
         logger.error("Supabase soft-delete failed for users %s: %s", target_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Could not delete the user. Please try again.",
         ) from exc
 

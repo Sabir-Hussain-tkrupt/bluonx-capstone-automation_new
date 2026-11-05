@@ -36,7 +36,8 @@ describe('fetchProjects param mapping', () => {
   it('asks for archived_only and drops the status filter in the archived view', async () => {
     await fetchProjects({ archived: true, status: 'active' });
 
-    const params = mockGet.mock.calls[0][1]!.params;
+    // axios >= 1.20 types `params` as unknown.
+    const params = mockGet.mock.calls[0][1]!.params as Record<string, unknown>;
     expect(params.archived_only).toBe(true);
     expect(params.status).toBeUndefined();
   });

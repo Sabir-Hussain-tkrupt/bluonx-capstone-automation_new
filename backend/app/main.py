@@ -13,8 +13,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from postgrest.exceptions import APIError
 
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.db_errors import api_error_handler
+from app.core.host_validation import HostValidationMiddleware
 from app.core.logging_config import configure_logging
 from app.core.request_logging import RequestLoggingMiddleware
 from app.core.supabase_client import init_supabase
@@ -85,6 +87,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Body Size Limit Middleware ────────────────────────────────────────────
+# Added FIRST so it is the innermost of these layers: CORS wraps its 413, so
+# the browser can read the status instead of reporting an opaque CORS failure.
+app.add_middleware(BodySizeLimitMiddleware)
+
 # ── CORS Middleware ───────────────────────────────────────────────────────
 # allow_credentials is deliberately omitted: both auth paths are
 # `Authorization: Bearer` (Supabase JWT for staff, custom JWT for vendors) and
@@ -102,6 +109,12 @@ app.add_middleware(
 # times the full request including CORS handling, and assigns a correlation id
 # to preflight and CORS-rejected requests too.
 app.add_middleware(RequestLoggingMiddleware)
+
+# ── Host Validation Middleware ────────────────────────────────────────────
+# Outermost: a request for a foreign Host is refused before anything else
+# runs. Skipped entirely while ALLOWED_HOSTS is the "*" default.
+if "*" not in settings.ALLOWED_HOSTS:
+    app.add_middleware(HostValidationMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 # ── Exception Handlers ────────────────────────────────────────────────────
 # Net under every write path that does not catch APIError itself: a unique

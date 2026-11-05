@@ -99,12 +99,24 @@ def _no_geocoding():
         yield
 
 
-def _existing(**overrides):
+_REQUIRED_DOCS = [
+    {"document_type": "w9", "status": "valid"},
+    {"document_type": "master_trade_agreement", "status": "valid"},
+]
+
+
+def _existing(docs=None, **overrides):
+    """A stored vendor row plus its documents. Defaults to having both the
+    W-9 and the Master Trade Agreement on file, so the address/insurance tests
+    exercise only those rules."""
     vid = overrides.pop("id", str(uuid4()))
     row = _vendor_row(id=vid, **overrides)
     return vid, {
         ("vendors", "select"): FakeResponse(row),
         ("vendors", "update"): lambda p: FakeResponse([{**row, **p}]),
+        ("vendor_documents", "select"): FakeResponse(
+            _REQUIRED_DOCS if docs is None else docs
+        ),
     }
 
 
@@ -248,6 +260,27 @@ class TestUpdateGate:
             json={"city": "Austin", "onboarding_status": "complete"},
         )
         assert resp.status_code == 200, resp.text
+
+    def test_blocked_without_w9_and_master_trade_agreement(self, make_client):
+        vid, mapping = _existing(docs=[], city="Austin", insurance_expiration_date=FUTURE)
+        resp = make_client(mapping).patch(
+            f"/api/v1/vendors/{vid}", json={"onboarding_status": "complete"}
+        )
+        assert resp.status_code == 409, resp.text
+        detail = resp.json()["detail"]
+        assert "W-9" in detail and "Master Trade Agreement" in detail
+
+    def test_expired_w9_does_not_count(self, make_client):
+        docs = [
+            {"document_type": "w9", "status": "expired"},
+            {"document_type": "master_trade_agreement", "status": "valid"},
+        ]
+        vid, mapping = _existing(docs=docs, city="Austin", insurance_expiration_date=FUTURE)
+        resp = make_client(mapping).patch(
+            f"/api/v1/vendors/{vid}", json={"onboarding_status": "complete"}
+        )
+        assert resp.status_code == 409, resp.text
+        assert "W-9" in resp.json()["detail"]
 
     @pytest.mark.parametrize("value", ["pending", "partial"])
     def test_other_statuses_are_never_gated(self, make_client, value):

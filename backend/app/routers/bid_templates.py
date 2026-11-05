@@ -50,7 +50,7 @@ def _parse_uuid(value: str, field_name: str = "id") -> UUID:
         return UUID(value)
     except (ValueError, AttributeError):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid {field_name}: '{value}' is not a valid UUID",
         )
 
@@ -254,7 +254,7 @@ def _validate_trade_id(db: Client, trade_id: UUID) -> None:
 
     if not resp or not resp.data:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Trade not found or inactive",
         )
 
@@ -358,7 +358,7 @@ def _insert_items(db: Client, template_id: str, items: list) -> None:
     except APIError as exc:
         logger.error("Failed to insert bid_template_items: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_DB_REJECTED_DETAIL,
         ) from exc
 
@@ -552,7 +552,7 @@ async def create_bid_template(
     except APIError as exc:
         logger.error("Supabase insert failed for bid_templates: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_DB_REJECTED_DETAIL,
         ) from exc
 
@@ -617,7 +617,7 @@ async def update_bid_template(
     except APIError as exc:
         logger.error("Supabase update failed for bid_templates: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_DB_REJECTED_DETAIL,
         ) from exc
 
@@ -682,7 +682,7 @@ async def delete_bid_template(
             ) from exc
         logger.error("Supabase delete failed for bid_templates: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_DB_REJECTED_DETAIL,
         ) from exc
 
@@ -719,7 +719,7 @@ async def duplicate_bid_template(
     except APIError as exc:
         logger.error("Supabase insert failed duplicating bid_template: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=_DB_REJECTED_DETAIL,
         ) from exc
 
@@ -767,7 +767,7 @@ async def duplicate_bid_template(
         except APIError as exc:
             logger.error("Failed to insert duplicated items: %s", exc)
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=_DB_REJECTED_DETAIL,
             ) from exc
 

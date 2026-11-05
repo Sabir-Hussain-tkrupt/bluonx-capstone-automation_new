@@ -103,7 +103,7 @@ async def test_start_scheduler_registers_jobs():
         stop_scheduler()
 
 
-def test_unauthenticated_returns_403(client):
-    """A request with no auth header is rejected (HTTPBearer convention: 403)."""
+def test_unauthenticated_returns_401(client):
+    """A request with no auth header is rejected (HTTPBearer, FastAPI >= 0.122: 401)."""
     resp = client.get(ENDPOINT)
-    assert resp.status_code == 403
+    assert resp.status_code == 401

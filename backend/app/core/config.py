@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # startup rather than at the first browser call.
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 
+    # Host header allow list (see app/core/host_validation.py). "*" disables the
+    # check. Deployed environments should list the API domain(s), e.g.
+    # ["api.bluonx.com"]; /health stays reachable by IP for the ALB either way.
+    ALLOWED_HOSTS: list[str] = ["*"]
+
     # Logging
     # LOG_LEVEL is the root logger level. LOG_FORMAT selects the handler
     # formatter: "console" (human-readable, for local dev) or "json" (one JSON
@@ -66,6 +71,12 @@ class Settings(BaseSettings):
     # SES emits Delivery/Bounce/Complaint events to SNS. Empty/None → no event
     # tracking (behaves as before). Must name an existing config set or sends fail.
     SES_CONFIGURATION_SET: str | None = None  # e.g. "bluonx-dev"
+    # ARN of the SNS topic the SES configuration set publishes to. The webhook
+    # accepts messages from this topic only, checked before any certificate is
+    # fetched; any SNS topic in any AWS account can otherwise sign a message.
+    # None ⇒ the webhook rejects everything (fail-closed), mirroring
+    # DOCUSIGN_CONNECT_HMAC_KEY.
+    SES_SNS_TOPIC_ARN: str | None = None
 
     # Portal (vendor-facing URL for magic links)
     PORTAL_BASE_URL: str = "http://localhost:5173"

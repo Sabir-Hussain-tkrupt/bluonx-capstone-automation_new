@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from supabase import Client
 
-from app.core.rate_limit import validate_token_rate_limit
+from app.core.rate_limit import client_ip, validate_token_rate_limit
 from app.core.supabase_client import get_supabase
 from app.core.vendor_auth import VendorContext, issue_vendor_jwt
 from app.models.vendor_portal import (
@@ -29,17 +29,6 @@ from app.services.vendor_portal_service import build_bid_context
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        first = xff.split(",", 1)[0].strip()
-        if first:
-            return first
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
 
 
 def _parse_expires_at(value: str) -> datetime:
@@ -199,7 +188,7 @@ async def validate_magic_link_token(
                 {
                     "is_used": True,
                     "used_at": datetime.now(timezone.utc).isoformat(),
-                    "ip_address": _client_ip(request),
+                    "ip_address": client_ip(request),
                 }
             ).eq("id", token_row["id"]).execute()
         except Exception as e:
@@ -260,5 +249,5 @@ async def validate_milestone_magic_link_token(
     the SPA routes to the invalid / no-longer-current pages.
     """
     return validate_milestone_token(
-        db, raw_token=payload.token, client_ip=_client_ip(request)
+        db, raw_token=payload.token, client_ip=client_ip(request)
     )

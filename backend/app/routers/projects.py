@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from postgrest.exceptions import APIError
+from starlette.concurrency import run_in_threadpool
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ from app.services.geocoding import (
     address_fields_changed,
     resolve_coordinates,
 )
-from app.core.file_validation import sanitize_filename, validate_upload
+from app.core.file_validation import read_upload, sanitize_filename, validate_upload
 from app.core.query_filters import escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
@@ -191,7 +192,7 @@ async def create_project(
     except APIError as exc:
         logger.error("Supabase insert failed for projects: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -235,7 +236,7 @@ async def update_project(
     eff_end = _as_date(update_data.get("estimated_end_date", existing.get("estimated_end_date")))
     if eff_start and eff_end and eff_end < eff_start:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="estimated_end_date must be on or after start_date",
         )
 
@@ -272,7 +273,7 @@ async def update_project(
     except APIError as exc:
         logger.error("Supabase update failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -404,7 +405,7 @@ async def archive_project(
     except APIError as exc:
         logger.error("Supabase archive failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -442,7 +443,7 @@ async def unarchive_project(
     except APIError as exc:
         logger.error("Supabase unarchive failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The submitted data was rejected. Please review the values and try again.",
         ) from exc
 
@@ -479,7 +480,7 @@ async def list_project_documents(
     """List documents for a project, filtered by document_kind (default reference)."""
     if kind not in _DOCUMENT_KINDS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"document_kind must be one of {sorted(_DOCUMENT_KINDS)}",
         )
 
@@ -519,7 +520,7 @@ async def upload_project_document(
     """
     if document_kind not in _DOCUMENT_KINDS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"document_kind must be one of {sorted(_DOCUMENT_KINDS)}",
         )
 
@@ -527,10 +528,10 @@ async def upload_project_document(
     _ensure_project_not_archived(project, resource="documents")
 
     # Read file bytes
-    file_bytes = await file.read()
+    file_bytes = await read_upload(file, PROJECT_BUCKET)
     if not file_bytes:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Uploaded file is empty.",
         )
 
@@ -543,7 +544,10 @@ async def upload_project_document(
     # re-upload can't collide (SoW keeps its {project_id}/sow prefix).
     prefix = f"{project_id}/sow" if document_kind == "scope_of_work" else str(project_id)
     storage_path = unique_object_path(prefix, filename)
-    upload_file(db, PROJECT_BUCKET, storage_path, file_bytes, content_type)
+    # Blocking HTTP call to Supabase Storage; keep it off the event loop.
+    await run_in_threadpool(
+        upload_file, db, PROJECT_BUCKET, storage_path, file_bytes, content_type
+    )
 
     # Insert project_documents row
     doc_data: dict = {

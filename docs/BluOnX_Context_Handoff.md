@@ -37,7 +37,7 @@ Version 3.1 of this document was written mid-build (March 2026) as a working con
 - **Section 11** documents the features added beyond the original plan at the client's request, led by the **Task Template Library and Add Default Tasks** capability.
 - **Section 12** is the consolidated register of deviations from the plan, with the reason for each.
 - **Sections 13 and 14** summarise environments, deployment, and the open items that must be closed before or shortly after go-live.
-- **Appendix A** lists the full standard task template library (58 activity-coded tasks).
+- **Appendix A** describes the Task Template Library architecture and default task seeding.
 
 ---
 
@@ -47,7 +47,7 @@ Version 3.1 of this document was written mid-build (March 2026) as a working con
 
 The platform is a **Bid Management & Vendor Coordination System** for **BluOnX Development** (land / horizontal development) and **Capstone LLC** (vertical construction). It manages the complete vendor lifecycle for every unit of work on a project:
 
-1. **Project and task set-up** — projects with budgets, locations and documents; tasks organised by phase and trade, either created individually or seeded from the standard Task Template Library.
+1. **Project and task set-up** — projects with budgets, locations and documents; tasks organised by phase and trade, either created individually or seeded from the database-backed Task Template Library.
 2. **Bid invitation** — automatic filtering of qualified vendors, a configurable bid package (deadline, desired start date, bid template, scope of work, documents), and personalised invitation emails carrying secure magic links.
 3. **Bid collection** — a dedicated, account-free vendor portal where vendors build, save and submit structured bids.
 4. **Tracking and reminders** — live invitation status, automated reminders at T-7, T-3 and T-0, and post-deadline escalation.
@@ -207,21 +207,19 @@ Vendor documents with expiration dates (primarily insurance certificates) are mo
 
 ### 2.10 Task Template Library and Default Tasks (Client Enhancement)
 
-At the client's request, the system includes a **Task Template Library**: a standard set of **58 activity-coded task templates** that reflects BluOnX's cost-activity chart (activity codes B0010 through B0760). Each template defines the task name, activity code, phase, trade and bid type, so a PM no longer has to key in the same standard tasks for every new project.
+The system includes a dedicated, database-backed **Task Template Library** (`public.task_templates`) with an interactive management dashboard (`/task-templates`). Reusable task templates can be dynamically added, edited, searched, and retired at any time:
 
-- **14 Due Diligence templates** (B0010–B0150): land, closing costs, capitalised interest, financing fees, real estate taxes, legal, engineering and surveying, zoning, three geotechnical activities, and three environmental activities.
-- **44 Development templates** (B0200–B0760): demolition, clearing and grading, rock work, erosion control, sanitary and storm sewers, water main, electric and street lights, utilities, paving and streets, sidewalks, signage, sod and landscaping, irrigation, monuments, lakes and fountains, amenities, retaining walls, fencing, permits and fees, contingency, developer fee, escrow release, HOA overages, and post-construction clean-up.
-- **Bid type is pre-assigned:** 43 templates are `competitive` (vendor-bid trade packages and professional services) and 15 are `internal` (land, fees, taxes, interest, permits, contingency, escrow and similar budget lines).
+- **Configurable Scope Definitions:** Each template specifies a task name (or activity code), scope description, project phase (`Due Diligence` or `Development`), trade category, default bid type (`Competitive` or `Internal`), and default budget estimate.
+- **Dynamic Trade Linking:** Templates link directly to trade entities in the database, with automatic trade filtering by phase.
+- **Bid Strategy Assignment:** Templates designate whether an item is `competitive` (vendor-solicited bid package) or `internal` (self-perform, legal, municipal fees, contingency, or soft costs).
 
-**How PMs use it:** on a project's task list, the **Add Default Tasks** button (next to **+ Add Task**) applies the whole library to the project in one action. Each template becomes a draft task named "*Activity Code* – *Activity Name*" (for example "B0220 – Mass Grading"), placed after any existing tasks in activity-code order, with the description, phase, trade and bid type already filled in. A confirmation message reports how many tasks were added and how many were skipped.
+**How PMs use it:** On a project's task list, the **Add Default Tasks** button (next to **+ Add Task**) seeds all active templates from the library into the project in one action. Each template creates a draft task with the description, phase, trade, and bid type pre-configured. A confirmation toast informs the PM how many tasks were added and how many were skipped.
 
 **Rules that keep it safe:**
-- **Safe to click more than once.** A template whose task name already exists in the project is skipped, so repeating the action only fills gaps and never creates duplicates.
-- **Trade matching is by name** against the active trades in the system, with an alias for the two spellings of the geotechnical trade ("Geotechnical Engineering" and "Geo Tech"). The trades the library expects must exist and be active (see Section 5).
+- **Safe to click more than once (Idempotent):** A template whose task name already exists in the project is skipped, so repeating the action only fills newly added templates and never creates duplicates.
 - **Archived projects** cannot receive default tasks until they are unarchived.
-- **Budgets are left blank** — the PM enters budget estimates per project.
-
-**Editing:** every task created from a template is an ordinary task. The PM can rename it, change its description, phase, trade, bid type or budget, reorder it by drag-and-drop, delete tasks the project does not need, and add custom tasks alongside them through **+ Add Task**. Changes to a project's tasks never alter the library itself. The library's standard content (which activities, and their default phase, trade and bid type) is maintained centrally by the engineering team so every project starts from the same company standard; the procedure for changing it is described in the Technical Overview. The full library is listed in Appendix A.
+- **Independent Project Tasks:** Tasks created from templates are independent project records. The PM can freely edit names, descriptions, phases, trades, bid types, and budgets, reorder them, or delete tasks not needed for that specific site. Project-level changes never modify the underlying template library.
+- **Full Template CRUD:** Administrators and staff can manage templates directly via the Task Templates page—adding new templates, updating descriptions or defaults, and soft-deleting obsolete templates without any code redeployments.
 
 ### 2.11 Per-Vendor Bid Revision (Client Enhancement)
 
@@ -738,7 +736,7 @@ These capabilities were requested by the client or proved necessary during the b
 
 | # | Feature | What it gives the client |
 |---|---------|--------------------------|
-| 1 | **Task Template Library & Add Default Tasks** | 58 standard activity-coded task templates (B0010–B0760) with phase, trade and bid type; one click seeds a project; safe to repeat; every resulting task fully editable (Section 2.10, Appendix A) |
+| 1 | **Task Template Library & Add Default Tasks** | Database-backed Task Template Library with UI management & Add Default Tasks seeding; one click seeds all active templates into a project; safe to repeat; every resulting task fully editable (Section 2.10, Appendix A) |
 | 2 | **Per-vendor bid revision** | Negotiate with one vendor after the round closes, with full version history and automatic expiry (Section 2.11) |
 | 3 | **Scope of Work requirement and attestation** | Mandatory SoW per bid package; vendor attestation carried onto the contract (Section 2.7) |
 | 4 | **Contract Signers roster** | Admin-managed list of authorised BluOnX signers; the PM picks one per award; it can never be emptied (Section 9.2) |
@@ -891,79 +889,28 @@ Full engineering detail is in `docs/BluOnX_Technical_Overview.md`; the go-live r
 
 ---
 
-## Appendix A — Standard Task Template Library (58 Templates)
+## Appendix A — Task Template Library Architecture
 
-Applied to a project with **Add Default Tasks**. Each becomes a draft task named "*Code* – *Task*" with the description, phase, trade and bid type shown. Budget is left blank for the PM.
+The Task Template Library allows teams to manage company-wide scope standards dynamically. Templates are stored in `public.task_templates` and seeded into individual projects via the **Add Default Tasks** action.
 
-### A.1 Due Diligence (14)
+### A.1 Core Template Attributes
 
-| Code | Task | Trade | Bid type |
-|------|------|-------|----------|
-| B0010 | Land | Title | internal |
-| B0020 | Closing Costs & Commission | Title | internal |
-| B0030 | Capitalized Interest | Legal | internal |
-| B0040 | Financing Fees | Legal | internal |
-| B0050 | Real Estate Taxes | Legal | internal |
-| B0060 | Legal | Legal | competitive |
-| B0100 | Engineering and Surveying | Engineering | competitive |
-| B0110 | Zoning | Engineering | internal |
-| B0120 | Geotech - soils | Geo Tech | competitive |
-| B0125 | Geotech - Global Stability | Geo Tech | competitive |
-| B0130 | Geo Tech - Compacting Testing | Geo Tech | competitive |
-| B0140 | Environmental - Army Corps wetlands | Ecological Study | competitive |
-| B0145 | Environmental - Fisheries or Cultural | Ecological Study | competitive |
-| B0150 | Natural Resources & Mitigation | Ecological Study | competitive |
+| Field | Description | Rules |
+| :--- | :--- | :--- |
+| `name` | Task name or standard activity code | Unique identifier within the template scope |
+| `description` | Detailed scope of work | Explains scope expectations to PMs and bidders |
+| `phase` | `due_diligence` or `development` | Categorizes task in project lifecycle |
+| `trade_id` | Foreign key to `trades(id)` | Trade category associated with the task |
+| `bid_type` | `competitive` or `internal` | Specifies if work is bid out or tracked internally |
+| `budget_estimate` | Default budget figure | Base cost estimate (default $0.00) |
+| `is_active` | Boolean flag | Only active templates are seeded by Add Default Tasks |
 
-### A.2 Development (44)
+### A.2 Phase Structure
 
-| Code | Task | Trade | Bid type |
-|------|------|-------|----------|
-| B0200 | Demolition | Site Final Grading | competitive |
-| B0210 | Clearing | Mass Grading | competitive |
-| B0220 | Mass Grading | Mass Grading | competitive |
-| B0230 | Grading - Clean Up | Site Final Grading | competitive |
-| B0240 | Grading Rock | Blasting | competitive |
-| B0250 | Utility Rock Excavation | Blasting | competitive |
-| B0260 | Erosion Control - silt fence and storm protections | Erosion Control | competitive |
-| B0265 | Street Cleaning | Erosion Control | competitive |
-| B0270 | Creek Imp./Channel Revetment | Erosion Control | competitive |
-| B0300 | Sanitary Sewers | Underground Utilities | competitive |
-| B0310 | Off-site Sanitary Sewers | Underground Utilities | competitive |
-| B0320 | Sanitary Lift Station | Underground Utilities | competitive |
-| B0330 | Sanitary Connection Prepaid Fees | Underground Utilities | internal |
-| B0340 | Storm Sewers | Underground Utilities | competitive |
-| B0350 | Off-site Storm Sewers | Underground Utilities | competitive |
-| B0400 | Water Main | Underground Utilities | competitive |
-| B0410 | Off-site Water Main | Underground Utilities | competitive |
-| B0420 | Water Main Tax | Underground Utilities | internal |
-| B0430 | Electric Install | Electric Conduit/Crossings | competitive |
-| B0440 | Street Lights | Common Ground Electric | competitive |
-| B0450 | Offsite Utilities | Underground Utilities | competitive |
-| B0460 | Utility Relocation | Underground Utilities | competitive |
-| B0500 | Concrete Streets | Paving | competitive |
-| B0510 | Asphalt Streets | Paving | competitive |
-| B0520 | Street Winter Service | Paving | internal |
-| B0530 | Common Sidewalks | Common Ground Flatwork | competitive |
-| B0540 | Asphalt Parking & Trails | Paving | competitive |
-| B0550 | TGA Fees | Engineering | internal |
-| B0560 | Offsite Roadwork | Paving | competitive |
-| B0600 | Street Signs | Street Signs | competitive |
-| B0610 | Seed & Sod | Sod | competitive |
-| B0620 | Common Landscaping | Landscaping | competitive |
-| B0630 | Irrigation | Irrigation | competitive |
-| B0640 | Entry Monuments | Monuments | competitive |
-| B0650 | Lakes/Fountains & Bubblers | Fountains and Aeration | competitive |
-| B0660 | Amenities | Common Ground Amenities | competitive |
-| B0670 | Retaining Walls | Retaining Walls | competitive |
-| B0680 | Fencing | Fencing | competitive |
-| B0700 | Permits, Inspection & Recording Fees | Engineering | internal |
-| B0720 | Contingency (not a payable category) | Engineering | internal |
-| B0730 | Developer Fee (Management Fee) | Engineering | internal |
-| B0740 | Escrow Release | Engineering | internal |
-| B0750 | HOA Overages and initiation | Engineering | internal |
-| B0760 | Post-Construction BMP and site clean up | Basins | competitive |
+- **Due Diligence:** Preliminary activities such as Land acquisitions, Closing Costs, Legal reviews, Engineering & Surveying, Zoning, Geotechnical studies, and Environmental/Ecological assessments.
+- **Development:** Construction and horizontal site work such as Demolition, Clearing, Mass Grading, Blasting, Erosion Control, Underground Utilities (Sanitary, Storm, Water), Electrical infrastructure, Paving, Landscaping, Signage, Amenities, and Site Clean-up.
 
-> Two template names are stored with minor spelling as entered from the source cost chart ("sotrm" in B0260 and "Permits , Inspection" in B0700). The tables above show the intended wording; PMs can correct the task name per project, and the library text can be corrected centrally.
+Templates can be maintained, expanded, or customized at any time through the **Task Templates** page in the application dashboard.
 
 ---
 

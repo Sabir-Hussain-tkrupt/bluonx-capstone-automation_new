@@ -98,11 +98,21 @@ class TestVendorDocuments:
     def test_rejects_dwg(self):
         _assert_rejected(self.BUCKET, "site.dwg", "application/octet-stream", DWG)
 
-    def test_rejects_xlsx(self):
-        _assert_rejected(self.BUCKET, "budget.xlsx", _OOXML_MIME_EXCEL, ZIP)
+    # Vendor documents share the common document set (frontend
+    # VENDOR_DOCUMENT_ACCEPT mirrors it): spreadsheets and text are allowed,
+    # CAD and executables are not.
+    def test_xlsx(self):
+        _validate(self.BUCKET, "budget.xlsx", _OOXML_MIME_EXCEL, ZIP)
 
-    def test_rejects_txt(self):
-        _assert_rejected(self.BUCKET, "notes.txt", "text/plain", TXT)
+    def test_txt(self):
+        _validate(self.BUCKET, "notes.txt", "text/plain", TXT)
+
+    def test_rejects_exe(self):
+        _assert_rejected(self.BUCKET, "malware.exe", "application/octet-stream", PDF)
+
+    def test_rejects_xlsx_with_wrong_content(self):
+        # Extension is allowed, but the bytes are not a ZIP container.
+        _assert_rejected(self.BUCKET, "budget.xlsx", _OOXML_MIME_EXCEL, PDF)
 
 
 class TestBucketConfigShape:

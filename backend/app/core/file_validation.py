@@ -7,7 +7,7 @@ per bucket configuration defined in docs/task_1.6_storage_bucket_setup.md.
 import os
 import re
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 
 
 # ── Bucket configurations ────────────────# Office (OOXML .docx/.xlsx/.pptx are ZIP; legacy .doc/.xls/.ppt are OLE compound files).
@@ -146,6 +146,35 @@ def _check_magic_bytes(file_bytes: bytes, ext: str) -> bool:
     return any(file_bytes[: len(sig)] == sig for sig in signatures)
 
 
+# Reads stop at the first chunk that crosses the bucket limit, so an oversized
+# file is rejected without first being loaded whole into memory.
+_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _too_large(max_size_bytes: int) -> HTTPException:
+    max_mb = max_size_bytes / (1024 * 1024)
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"File exceeds the {max_mb:.0f}MB size limit.",
+    )
+
+
+async def read_upload(file: UploadFile, bucket: str) -> bytes:
+    """Read an uploaded file in chunks, capped at the bucket's size limit.
+
+    Raises HTTPException(422) as soon as the running total passes the limit.
+    """
+    max_size_bytes = BUCKET_CONFIGS[bucket]["max_size_bytes"]
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        total += len(chunk)
+        if total > max_size_bytes:
+            raise _too_large(max_size_bytes)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize a filename for safe storage.
 
@@ -187,17 +216,13 @@ def validate_upload(
     config = BUCKET_CONFIGS.get(bucket)
     if config is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown storage bucket: {bucket}",
         )
 
     # 1. Check file size
     if len(file_bytes) > config["max_size_bytes"]:
-        max_mb = config["max_size_bytes"] / (1024 * 1024)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"File exceeds the {max_mb:.0f}MB size limit.",
-        )
+        raise _too_large(config["max_size_bytes"])
 
     # 2. Extension is the primary gate. CAD/Office files often arrive as
     #    application/octet-stream, so the declared MIME can't be the gate.
@@ -205,7 +230,7 @@ def validate_upload(
     if ext not in config["allowed_extensions"]:
         allowed_ext = ", ".join(sorted(config["allowed_extensions"]))
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File extension '{ext}' is not allowed. Accepted extensions: {allowed_ext}",
         )
 
@@ -220,7 +245,7 @@ def validate_upload(
         and normalized_ct not in expected_mimes
     ):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File extension '{ext}' does not match content type '{content_type}'.",
         )
 
@@ -228,6 +253,6 @@ def validate_upload(
     #    still sniffed where a signature exists; unsignatured types are skipped).
     if len(file_bytes) >= 8 and not _check_magic_bytes(file_bytes, ext):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="File content does not match its declared type. The file may be corrupted or mislabeled.",
         )
