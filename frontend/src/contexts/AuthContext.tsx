@@ -9,7 +9,7 @@ import {
 import type { Session, User as SupabaseUser, AuthChangeEvent } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { unsubscribeAllChannels } from '@/lib/realtime';
-import type { AuthState, UserProfile } from '@/types/auth.types';
+import type { AppRole, AuthState, UserProfile } from '@/types/auth.types';
 
 // ─── Context Shape ───────────────────────────────────────────────────────
 interface AuthContextValue extends AuthState {
@@ -21,6 +21,38 @@ interface AuthContextValue extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+// ─── Financial roles ─────────────────────────────────────────────────────
+/**
+ * Active roles from user_roles (+ the base role) and the employee flag.
+ * Advisory and never fatal: if the financial tables are missing or the read
+ * fails, the user keeps their base role, exactly as before the module existed.
+ */
+async function fetchFinancialRoles(
+  userId: string,
+  baseRole: UserProfile['role'],
+): Promise<Pick<UserProfile, 'roles' | 'is_employee'>> {
+  const roles = new Set<AppRole>([baseRole]);
+  let isEmployee = true;
+  try {
+    const { data: roleRows } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .is('revoked_at', null);
+    for (const row of (roleRows ?? []) as unknown as { role: AppRole }[]) roles.add(row.role);
+
+    const { data: emp } = await supabase
+      .from('users')
+      .select('is_employee')
+      .eq('id', userId)
+      .maybeSingle();
+    if ((emp as unknown as { is_employee?: boolean } | null)?.is_employee === false) isEmployee = false;
+  } catch {
+    // keep the base role
+  }
+  return { roles: [...roles].sort(), is_employee: isEmployee };
+}
 
 // ─── Provider ────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -68,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setProfile(data);
+      setProfile({ ...data, ...(await fetchFinancialRoles(userId, data.role)) });
     } catch (err) {
       // AbortError means our 10s timeout fired — the query hung.
       if (err instanceof DOMException && err.name === 'AbortError') {

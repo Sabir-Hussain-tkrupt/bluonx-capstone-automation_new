@@ -38,6 +38,7 @@ export const ROUTES = {
   SETTINGS_USERS: '/settings/users',
   SETTINGS_CALENDAR: '/settings/calendar',
   SETTINGS_CONTRACT_SIGNERS: '/settings/contract-signers',
+  SETTINGS_BUDGET_TEMPLATE: '/settings/budget-template',
 
   // Error pages
   UNAUTHORIZED: '/unauthorized',

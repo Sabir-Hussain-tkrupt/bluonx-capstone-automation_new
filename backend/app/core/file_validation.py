@@ -36,6 +36,14 @@ BUCKET_CONFIGS: dict[str, dict] = {
         "max_size_bytes": 10 * 1024 * 1024,  # 10 MB
         "allowed_extensions": _COMMON_DOCUMENT_EXTENSIONS,
     },
+    # Financial module: invoices, escrow / bond documents, PO records. Private,
+    # no client storage policies — reachable only via FastAPI + signed URLs.
+    "finance-documents": {
+        "max_size_bytes": 25 * 1024 * 1024,  # 25 MB
+        "allowed_extensions": {
+            ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".doc", ".docx", ".xls", ".xlsx",
+        },
+    },
 }
 
 

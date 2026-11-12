@@ -13,6 +13,7 @@ from app.models.users import (
     UserAdminResponse,
     UserInviteRequest,
     UserResponse,
+    UserRolesUpdate,
     UserUpdate,
 )
 from app.services import user_service
@@ -61,6 +62,8 @@ async def invite_user(
         email=payload.email,
         full_name=payload.full_name,
         role=payload.role,
+        roles=list(payload.roles),
+        is_employee=payload.is_employee,
     )
 
 
@@ -94,6 +97,25 @@ async def update_user(
     """Update a user's role / active state / name (admin only)."""
     return user_service.change_user(
         db, admin_id=user["user_id"], target_id=user_id, patch=payload
+    )
+
+
+@router.put("/users/{user_id}/roles", response_model=UserAdminResponse)
+async def set_user_roles(
+    user_id: UUID,
+    payload: UserRolesUpdate,
+    user: dict = Depends(require_admin),
+    db: Client = Depends(get_supabase),
+):
+    """Replace a user's financial roles (field_manager / executive / finance) and
+    optionally the employee / external flag (admin only). Revoked roles are kept
+    in user_roles with revoked_at for the audit trail."""
+    return user_service.set_user_roles(
+        db,
+        admin_id=user["user_id"],
+        target_id=user_id,
+        roles=list(payload.roles),
+        is_employee=payload.is_employee,
     )
 
 

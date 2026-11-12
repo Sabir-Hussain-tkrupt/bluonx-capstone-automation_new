@@ -31,6 +31,11 @@ export const VENDOR_DOCUMENT_MAX_MB = 50;
 export const VENDOR_DOCUMENT_HINT =
   'PDF, Images, Office (Word/Excel/PowerPoint), or TXT up to 50MB';
 
+/** finance-documents: invoices (financial module). Mirrors BUCKET_CONFIGS. */
+export const FINANCE_DOCUMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.tif,.tiff,.doc,.docx,.xls,.xlsx';
+export const FINANCE_DOCUMENT_MAX_MB = 25;
+export const FINANCE_DOCUMENT_HINT = 'PDF, images (PNG/JPG/TIFF) or Office (Word/Excel) up to 25MB';
+
 /** project-documents: plans, specs, budgets, notes, Office, and CAD. */
 export const PROJECT_DOCUMENT_ACCEPT = `${COMMON_DOCUMENT_EXTENSIONS},.dwg,.dxf,.dwf,.dgn`;
 export const PROJECT_DOCUMENT_MAX_MB = 50;

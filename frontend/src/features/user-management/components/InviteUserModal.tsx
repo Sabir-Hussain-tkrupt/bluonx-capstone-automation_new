@@ -6,16 +6,21 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { FormField } from '@/components/ui/FormField';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast';
 import { errorMessage } from '@/lib/api';
+import { FINANCIAL_ROLES } from '@/lib/roles';
 import { useInviteUser } from '../hooks/useUserMutations';
 
 const inviteSchema = z.object({
   email: z.string().trim().min(1, 'Email is required').email('Enter a valid email address'),
   full_name: z.string().trim().min(1, 'Full name is required').max(255),
   role: z.enum(['admin', 'project_manager']),
+  // Financial module: optional extra roles and the external / temporary flag.
+  roles: z.array(z.enum(['field_manager', 'executive', 'finance'])),
+  external: z.boolean(),
 });
 
 type InviteFormValues = z.infer<typeof inviteSchema>;
@@ -42,7 +47,7 @@ export function InviteUserModal({ isOpen, onClose }: InviteUserModalProps) {
     formState: { errors },
   } = useForm<InviteFormValues>({
     resolver: zodResolver(inviteSchema),
-    defaultValues: { email: '', full_name: '', role: 'project_manager' },
+    defaultValues: { email: '', full_name: '', role: 'project_manager', roles: [], external: false },
   });
 
   const resetAndClose = () => {
@@ -59,7 +64,14 @@ export function InviteUserModal({ isOpen, onClose }: InviteUserModalProps) {
   const onSubmit = (data: InviteFormValues) => {
     setSubmitError(null);
     inviteUser.mutate(
-      { email: data.email.trim(), full_name: data.full_name.trim(), role: data.role },
+      {
+        email: data.email.trim(),
+        full_name: data.full_name.trim(),
+        role: data.role,
+        // Sent only when used, so a plain invite is byte-for-byte what it was.
+        ...(data.roles.length ? { roles: data.roles } : {}),
+        ...(data.external ? { is_employee: false } : {}),
+      },
       {
         onSuccess: (user) => {
           toast({
@@ -131,6 +143,25 @@ export function InviteUserModal({ isOpen, onClose }: InviteUserModalProps) {
         >
           <Select id="invite-role" {...register('role')} options={roleOptions} error={errors.role?.message} />
         </FormField>
+
+        <fieldset>
+          <legend className="mb-1 block text-sm font-medium text-secondary-700">Financial roles</legend>
+          <p className="mb-1 text-xs text-secondary-500">Optional. A person can hold more than one.</p>
+          {FINANCIAL_ROLES.map((r) => (
+            <Checkbox
+              key={r.value}
+              {...register('roles')}
+              value={r.value}
+              label={r.label}
+              description={r.description}
+            />
+          ))}
+          <Checkbox
+            {...register('external')}
+            label="External / temporary field manager"
+            description="Gets their own login and can confirm work, but can never authorise payment."
+          />
+        </fieldset>
 
         <p className="rounded-lg border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-600">
           The user receives an email invite and sets their own password. They appear here as

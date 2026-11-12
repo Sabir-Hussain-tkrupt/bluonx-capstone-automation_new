@@ -49,6 +49,10 @@ vi.mock('@/features/projects/hooks/useProjectDocuments', () => ({
 
 // The tabbed children pull their own data hooks; they are irrelevant here.
 vi.mock('@/features/tasks/components/TaskList', () => ({ TaskList: () => null }));
+vi.mock('@/features/budgets/components/BudgetTab', () => ({ BudgetTab: () => null }));
+vi.mock('@/features/invoices/components/InvoicesTab', () => ({ InvoicesTab: () => null }));
+// Role checks read the auth context, which these page tests do not mount.
+vi.mock('@/lib/roles', () => ({ useHasRole: () => true }));
 
 function projectWith(overrides: Record<string, unknown> = {}) {
   return {

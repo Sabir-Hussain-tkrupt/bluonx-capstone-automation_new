@@ -34,6 +34,9 @@ reportlab>=4.5,<5.0
 # Transitive via reportlab; pinned so the patched floor shows up in audits.
 pillow>=13.0,<14.0
 
+# Budget Excel export / import (Financial module, Phase 2 — Task 2.8)
+openpyxl>=3.1,<4.0
+
 # Testing (pytest >= 9.0.3 fixes PYSEC-2026-1845)
 pytest>=9.0.3,<10.0
 pytest-asyncio>=1.4,<2.0

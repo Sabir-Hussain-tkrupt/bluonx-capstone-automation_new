@@ -3,6 +3,7 @@ import { API_ENDPOINTS } from '@/constants/api';
 import type {
   UserAdminResponse,
   UserInviteRequest,
+  UserRolesUpdateRequest,
   UserUpdateRequest,
 } from '../types';
 
@@ -25,6 +26,15 @@ export async function updateUser(
   patch: UserUpdateRequest,
 ): Promise<UserAdminResponse> {
   const { data } = await api.patch(API_ENDPOINTS.USER(id), patch);
+  return data as UserAdminResponse;
+}
+
+/** PUT /users/{id}/roles — replace financial roles (and optionally the employee flag). */
+export async function setUserRoles(
+  id: string,
+  body: UserRolesUpdateRequest,
+): Promise<UserAdminResponse> {
+  const { data } = await api.put(API_ENDPOINTS.USER_ROLES(id), body);
   return data as UserAdminResponse;
 }
 

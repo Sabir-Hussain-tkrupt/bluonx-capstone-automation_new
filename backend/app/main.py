@@ -28,12 +28,15 @@ from app.routers import (
     bid_revisions,
     bid_submissions,
     bid_templates,
+    budget_templates,
+    budgets,
     contract_signers,
     contracts,
     docusign_health,
     docusign_webhooks,
     health,
     holidays,
+    internal_invoices,
     milestones,
     notifications,
     projects,
@@ -150,6 +153,9 @@ app.include_router(contracts.router, prefix=_v1, tags=["Contracts"])
 app.include_router(contract_signers.router, prefix=_v1, tags=["Contract Signers"])
 app.include_router(reviews.router, prefix=_v1, tags=["Reviews"])
 app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
+app.include_router(budgets.router, prefix=_v1, tags=["Budgets"])
+app.include_router(budget_templates.router, prefix=_v1, tags=["Budget Templates"])
+app.include_router(internal_invoices.router, prefix=_v1, tags=["Internal Invoices"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
 app.include_router(docusign_webhooks.router, prefix=_v1, tags=["DocuSign Webhooks"])

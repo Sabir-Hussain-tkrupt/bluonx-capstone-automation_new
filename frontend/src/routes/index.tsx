@@ -36,6 +36,7 @@ import { TradesSettingsPage } from '@/features/trades';
 import { UserManagementPage } from '@/features/user-management';
 import { HolidayCalendarPage } from '@/features/holidays';
 import { ContractSignersPage } from '@/features/contract-signers';
+import { BudgetTemplatePage } from '@/features/budget-templates/pages/BudgetTemplatePage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
@@ -151,6 +152,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute requiredRole="admin">
               <ContractSignersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path={ROUTES.SETTINGS_BUDGET_TEMPLATE}
+          element={
+            <ProtectedRoute requiredRole="admin">
+              <BudgetTemplatePage />
             </ProtectedRoute>
           }
         />

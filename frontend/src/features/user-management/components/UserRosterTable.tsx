@@ -8,6 +8,13 @@ const ROLE_LABELS: Record<UserAdminResponse['role'], string> = {
   project_manager: 'Project Manager',
 };
 
+/** Financial roles shown as chips next to the base role. */
+const FINANCIAL_ROLE_LABELS: Record<string, string> = {
+  field_manager: 'Field Manager',
+  executive: 'Executive',
+  finance: 'Finance',
+};
+
 interface UserRosterTableProps {
   users: UserAdminResponse[];
   isLoading: boolean;
@@ -36,7 +43,21 @@ export function UserRosterTable({
       {
         id: 'role',
         header: 'Role',
-        accessor: (row) => ROLE_LABELS[row.role],
+        accessor: (row) => {
+          const extra = (row.roles ?? []).filter((r) => r !== row.role && r in FINANCIAL_ROLE_LABELS);
+          if (!extra.length && row.is_employee !== false) return ROLE_LABELS[row.role];
+          return (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span>{ROLE_LABELS[row.role]}</span>
+              {extra.map((r) => (
+                <StatusBadge key={r} status={FINANCIAL_ROLE_LABELS[r]} variant="info" dot={false} size="sm" />
+              ))}
+              {row.is_employee === false && (
+                <StatusBadge status="External" variant="warning" dot={false} size="sm" />
+              )}
+            </div>
+          );
+        },
       },
       {
         id: 'status',

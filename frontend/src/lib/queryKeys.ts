@@ -221,6 +221,25 @@ export const queryKeys = {
     unreadCount: () => [...queryKeys.notifications.all, 'unreadCount'] as const,
   },
 
+  // ── Financial module ──────────────────────────────────────────────────
+  budgets: {
+    all: ['budgets'] as const,
+    project: (projectId: string) => [...queryKeys.budgets.all, projectId] as const,
+    lines: (projectId: string) => [...queryKeys.budgets.project(projectId), 'lines'] as const,
+    summary: (projectId: string) => [...queryKeys.budgets.project(projectId), 'summary'] as const,
+    closings: (projectId: string) => [...queryKeys.budgets.project(projectId), 'closings'] as const,
+  },
+
+  budgetTemplates: {
+    all: ['budget_templates'] as const,
+    default: () => [...queryKeys.budgetTemplates.all, 'default'] as const,
+  },
+
+  invoices: {
+    all: ['internal_invoices'] as const,
+    project: (projectId: string) => [...queryKeys.invoices.all, projectId] as const,
+  },
+
   holidays: {
     all: ['holidays'] as const,
     lists: () => [...queryKeys.holidays.all, 'list'] as const,

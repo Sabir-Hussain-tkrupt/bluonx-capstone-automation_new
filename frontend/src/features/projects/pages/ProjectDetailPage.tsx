@@ -16,6 +16,9 @@ import { DocumentList } from '@/components/ui/DocumentList';
 import { Field } from '@/components/ui/Field';
 import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatableBadge';
 import { TaskList } from '@/features/tasks/components/TaskList';
+import { BudgetTab } from '@/features/budgets/components/BudgetTab';
+import { InvoicesTab } from '@/features/invoices/components/InvoicesTab';
+import { useHasRole } from '@/lib/roles';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
 import { useDeleteProject } from '@/features/projects/hooks/useDeleteProject';
@@ -38,6 +41,8 @@ import { notifyGeocodeWarning } from '@/utils/geocodeToast';
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'tasks', label: 'Tasks' },
+  { id: 'budget', label: 'Budget' },
+  { id: 'invoices', label: 'Invoices' },
   { id: 'documents', label: 'Documents' },
 ];
 const TAB_IDS = TABS.map((t) => t.id);
@@ -74,6 +79,8 @@ export function ProjectDetailPage() {
   const deleteDocMutation = useDeleteProjectDocument();
   const { download: downloadDoc, downloadingId } = useProjectDocumentDownload();
 
+  // Invoices are for field managers, PMs and finance (admins always).
+  const canSeeInvoices = useHasRole('field_manager', 'finance', 'project_manager');
   const [activeTab, setActiveTab] = useTabParam(TAB_IDS);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showUploadDoc, setShowUploadDoc] = useState(false);
@@ -215,7 +222,10 @@ export function ProjectDetailPage() {
   const tabCounts: Record<string, number | undefined> = {
     documents: projectDocuments.length,
   };
-  const tabDefs = TABS.map((t) => ({ ...t, count: tabCounts[t.id] }));
+  const tabDefs = TABS.filter((t) => t.id !== 'invoices' || canSeeInvoices).map((t) => ({
+    ...t,
+    count: tabCounts[t.id],
+  }));
 
   return (
     <div className="space-y-6">
@@ -336,6 +346,10 @@ export function ProjectDetailPage() {
         {activeTab === 'tasks' && (
           <TaskList projectId={id!} projectBudget={project.budget} readOnly={isArchived} />
         )}
+
+        {activeTab === 'budget' && <BudgetTab projectId={id!} readOnly={isArchived} />}
+
+        {activeTab === 'invoices' && canSeeInvoices && <InvoicesTab projectId={id!} readOnly={isArchived} />}
 
         {activeTab === 'documents' && (
           <div className="space-y-4">

@@ -127,6 +127,7 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
   [ROUTES.SETTINGS_USERS]: { parent: ROUTES.SETTINGS, label: 'Users' },
   [ROUTES.SETTINGS_CALENDAR]: { parent: ROUTES.SETTINGS, label: 'Holiday Calendar' },
   [ROUTES.SETTINGS_CONTRACT_SIGNERS]: { parent: ROUTES.SETTINGS, label: 'Contract Signers' },
+  [ROUTES.SETTINGS_BUDGET_TEMPLATE]: { parent: ROUTES.SETTINGS, label: 'Budget Template' },
 };
 
 /**

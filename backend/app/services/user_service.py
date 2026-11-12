@@ -137,7 +137,13 @@ def _get_active_user_row(db: Client, target_id, allow_deleted: bool = False) -> 
 
 # ── Operations ───────────────────────────────────────────────────────────────
 def invite_user(
-    db: Client, admin_id, email: str, full_name: str, role: str
+    db: Client,
+    admin_id,
+    email: str,
+    full_name: str,
+    role: str,
+    roles: list[str] | None = None,
+    is_employee: bool = True,
 ) -> dict:
     """Invite a new admin/PM via Supabase's auth admin API, or restore an existing
     soft-deleted account under the same email.
@@ -161,6 +167,10 @@ def invite_user(
                 "role": role,
                 "invited_by": str(admin_id),
             }).eq("id", str(target_id)).execute()
+            if roles or not is_employee:
+                _apply_financial_roles(
+                    db, target_id, roles or [], is_employee, actor_id=admin_id
+                )
 
             redirect = _invite_redirect()
             try:
@@ -195,7 +205,7 @@ def invite_user(
         resp = db.auth.admin.invite_user_by_email(
             email,
             {
-                "data": {"full_name": full_name, "role": role},
+                "data": _invite_metadata(full_name, role, roles, is_employee),
                 "redirect_to": redirect,
             },
         )
@@ -267,7 +277,7 @@ def invite_user(
             "updated_at": datetime.now(timezone.utc),
             "deleted_at": None,
         }
-    return {**row, "status": "pending"}
+    return _with_roles(db, [{**row, "status": "pending"}])[0]
 
 
 def list_users(db: Client) -> list[dict]:
@@ -282,7 +292,7 @@ def list_users(db: Client) -> list[dict]:
     for row in rows:
         confirmed = confirmed_by_id.get(str(row["id"]))
         out.append({**row, "status": _derive_status(row, confirmed)})
-    return out
+    return _with_roles(db, out)
 
 
 def _confirmed_at_by_id(db: Client) -> dict[str, object]:
@@ -444,3 +454,105 @@ def resend_invite(db: Client, target_id) -> dict:
             ) from exc2
 
     return {"detail": "Invite resent."}
+
+
+# ── Financial roles (v4.0) ───────────────────────────────────────────────────
+# The base role stays in users.role (admin | project_manager). Financial roles
+# (field_manager, executive, finance) live in user_roles; one person may hold
+# several. Rows are never deleted: a revoke stamps revoked_at for the audit.
+FINANCIAL_ROLE_NAMES = ("field_manager", "executive", "finance")
+
+
+def _invite_metadata(full_name: str, role: str, roles, is_employee: bool) -> dict:
+    """Invite user_metadata. Identical to the pre-financial payload unless extra
+    roles are requested or the person is external — fn_handle_new_auth_user reads
+    `roles` and `is_employee` when present."""
+    data = {"full_name": full_name, "role": role}
+    if roles:
+        data["roles"] = sorted(set(roles))
+    if not is_employee:
+        data["is_employee"] = False
+    return data
+
+
+def _with_roles(db: Client, rows: list[dict]) -> list[dict]:
+    """Attach `roles` and `is_employee` to user rows. Advisory: on any failure
+    (e.g. the financial schema is not installed) each row keeps its base role."""
+    by_user: dict[str, set[str]] = {}
+    employee: dict[str, bool] = {}
+    try:
+        resp = (
+            db.table("user_roles")
+            .select("user_id, role")
+            .is_("revoked_at", "null")
+            .execute()
+        )
+        for r in resp.data or []:
+            if r.get("user_id") and r.get("role"):
+                by_user.setdefault(str(r["user_id"]), set()).add(r["role"])
+        emp = db.table("users").select("id, is_employee").execute()
+        for r in emp.data or []:
+            if r.get("is_employee") is not None:
+                employee[str(r["id"])] = bool(r["is_employee"])
+    except Exception:  # noqa: BLE001 - advisory enrichment, never fatal
+        logger.warning("Could not load user roles; returning base roles only")
+    out = []
+    for row in rows:
+        uid = str(row.get("id"))
+        roles = by_user.get(uid, set()) | {row.get("role")}
+        out.append(
+            {
+                **row,
+                "roles": sorted(r for r in roles if r),
+                "is_employee": employee.get(uid, row.get("is_employee", True)),
+            }
+        )
+    return out
+
+
+def _apply_financial_roles(
+    db: Client, target_id, roles: list[str], is_employee: bool | None, actor_id
+) -> None:
+    """Make the user's active financial roles exactly `roles` (base role untouched)."""
+    wanted = {r for r in roles if r in FINANCIAL_ROLE_NAMES}
+    try:
+        resp = (
+            db.table("user_roles")
+            .select("id, role")
+            .eq("user_id", str(target_id))
+            .is_("revoked_at", "null")
+            .execute()
+        )
+        current = {r["role"]: r["id"] for r in (resp.data or [])}
+        now = datetime.now(timezone.utc).isoformat()
+        for role_name, row_id in current.items():
+            if role_name in FINANCIAL_ROLE_NAMES and role_name not in wanted:
+                db.table("user_roles").update(
+                    {"revoked_at": now, "revoked_by": str(actor_id)}
+                ).eq("id", row_id).execute()
+        to_add = [
+            {"user_id": str(target_id), "role": r, "granted_by": str(actor_id)}
+            for r in sorted(wanted - set(current))
+        ]
+        if to_add:
+            db.table("user_roles").insert(to_add).execute()
+        if is_employee is not None:
+            db.table("users").update({"is_employee": is_employee}).eq(
+                "id", str(target_id)
+            ).execute()
+    except APIError as exc:
+        logger.error("Updating roles for user %s failed: %s", target_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not update the user's roles. Please try again.",
+        ) from exc
+
+
+def set_user_roles(
+    db: Client, admin_id, target_id, roles: list[str], is_employee: bool | None
+) -> dict:
+    """Admin: replace a user's financial roles and optionally the employee flag."""
+    row = _get_active_user_row(db, target_id)
+    _apply_financial_roles(db, target_id, roles, is_employee, actor_id=admin_id)
+    confirmed = _confirmed_at_by_id(db).get(str(target_id))
+    return _with_roles(db, [{**row, "status": _derive_status(row, confirmed)}])[0]

@@ -2,8 +2,8 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Row Level Security (RLS) Migration
 -- ============================================================================
--- Version:  3.3
--- Date:     August 13, 2026
+-- Version:  4.0
+-- Date:     November 11, 2026
 -- Author:   Awais Anwer (Tkrupt)
 -- Depends:  bluonx_complete_schema.sql (must be applied first)
 -- ============================================================================
@@ -756,6 +756,75 @@ CREATE POLICY contract_signers_update_admin
   WITH CHECK (
     (SELECT private.is_admin())
   );
+
+-- ============================================================================
+-- FINANCIAL AUTOMATION (v4.0 — Groups 9–14)
+-- ============================================================================
+-- Same pattern as above: RLS is a READ safety net; all writes go through
+-- FastAPI with the service_role key (bypasses RLS). Two tiers:
+--   • any active user        → budget, contingency, variances, approvals,
+--                              escrows, taxes, alerts, settings, roles
+--   • finance / executive / admin only → internal_invoices,
+--                              finance_handoffs, company_cash_items,
+--                              cash_flow_entries
+-- private.has_any_role() is defined in bluonx_complete_schema.sql §9.D2.
+-- Source: migrations/20261111_financial_phase1/001 (Section G). Re-runnable.
+
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'budget_templates', 'budget_template_lines', 'budget_lines', 'land_closings',
+    'contingency_buckets', 'contingency_ledger', 'variance_lines',
+    'internal_invoices', 'payment_approvals', 'finance_handoffs',
+    'escrows', 'property_taxes',
+    'accounting_periods', 'company_cash_items', 'cash_flow_entries',
+    'financial_settings', 'financial_alerts', 'user_roles', 'approval_delegations'
+  ] LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM anon', t);
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM authenticated', t);
+    EXECUTE format('GRANT SELECT ON TABLE public.%I TO authenticated', t);
+    EXECUTE format('GRANT ALL ON TABLE public.%I TO service_role', t);
+  END LOOP;
+END $$;
+
+-- Any active internal user may read these (field managers see contingency).
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'budget_templates', 'budget_template_lines', 'budget_lines', 'land_closings',
+    'contingency_buckets', 'contingency_ledger', 'variance_lines',
+    'payment_approvals', 'escrows', 'property_taxes', 'accounting_periods',
+    'financial_settings', 'financial_alerts', 'user_roles', 'approval_delegations'
+  ] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select_authenticated', t);
+    EXECUTE format(
+      'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING ((SELECT private.is_active_user()))',
+      t || '_select_authenticated', t);
+  END LOOP;
+END $$;
+
+-- Finance-restricted reads (finance, executive, admin).
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'internal_invoices', 'finance_handoffs', 'company_cash_items', 'cash_flow_entries'
+  ] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select_finance', t);
+    EXECUTE format(
+      'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING ((SELECT private.has_any_role(ARRAY[''finance'',''executive''])))',
+      t || '_select_finance', t);
+  END LOOP;
+END $$;
+
+
 
 -- ============================================================================
 -- STEP 6: VERIFICATION QUERY

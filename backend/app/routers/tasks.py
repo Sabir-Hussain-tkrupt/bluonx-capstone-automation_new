@@ -179,6 +179,16 @@ def _check_deletion_blockers(db: Client, task_id: UUID) -> None:
         )
 
 
+def _budget_sync_conflict(exc: APIError) -> str | None:
+    """The financial module's task → budget line trigger refuses (PT409) to drop
+    or retype a task whose baselined budget line still carries money. Surface its
+    message as a 409; any other error keeps the existing handling."""
+    code = str(getattr(exc, "code", "") or "")
+    if code == "PT409" or "PT409" in str(exc):
+        return str(getattr(exc, "message", None) or exc)
+    return None
+
+
 def _enrich_task(row: dict) -> dict:
     """Flatten the joined trades data into trade_name."""
     trades_data = row.pop("trades", None)
@@ -583,6 +593,9 @@ async def update_task(
             .execute()
         )
     except APIError as exc:
+        budget_conflict = _budget_sync_conflict(exc)
+        if budget_conflict:
+            raise HTTPException(status_code=409, detail=budget_conflict) from exc
         logger.error("Supabase update failed for tasks/%s: %s", task_id, exc)
         raise HTTPException(
             status_code=422,
@@ -613,13 +626,19 @@ async def delete_task(
     _get_task_or_404(db, project_id, task_id)
     _check_deletion_blockers(db, task_id)
 
-    resp = (
-        db.table("tasks")
-        .update({"deleted_at": "now()"})
-        .eq("id", str(task_id))
-        .eq("project_id", str(project_id))
-        .execute()
-    )
+    try:
+        resp = (
+            db.table("tasks")
+            .update({"deleted_at": "now()"})
+            .eq("id", str(task_id))
+            .eq("project_id", str(project_id))
+            .execute()
+        )
+    except APIError as exc:
+        budget_conflict = _budget_sync_conflict(exc)
+        if budget_conflict:
+            raise HTTPException(status_code=409, detail=budget_conflict) from exc
+        raise
 
     if not resp.data:
         raise HTTPException(status_code=404, detail="Task not found")

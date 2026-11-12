@@ -1,11 +1,18 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigate, useLocation } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
+import { hasAnyRole } from '@/lib/roles';
+import type { AppRole } from '@/types/auth.types';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   /** Optional: restrict to specific role. If not set, any authenticated user can access. */
   requiredRole?: 'admin' | 'project_manager';
+  /**
+   * Optional: allow any of these roles (base role or financial roles from
+   * user_roles). Admins always pass. Use for finance screens.
+   */
+  requiredRoles?: AppRole[];
 }
 
 /**
@@ -25,7 +32,7 @@ interface ProtectedRouteProps {
  *     </ProtectedRoute>
  *   } />
  */
-export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, requiredRole, requiredRoles }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, profile } = useAuth();
   const location = useLocation();
 
@@ -47,6 +54,11 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
   // 3. Authenticated but wrong role — silently redirect to dashboard
   //    (don't reveal which role is required — prevents information leakage)
   if (requiredRole && profile?.role !== requiredRole) {
+    return <Navigate to={ROUTES.DASHBOARD} replace />;
+  }
+
+  // 3b. Financial screens: any of the listed roles (admins always pass).
+  if (requiredRoles && !hasAnyRole(profile, ...requiredRoles)) {
     return <Navigate to={ROUTES.DASHBOARD} replace />;
   }
 
