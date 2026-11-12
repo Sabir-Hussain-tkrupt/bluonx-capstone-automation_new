@@ -235,6 +235,14 @@ async def create_award(
     if not award:
         raise AwardError(500, "Award creation failed.")
 
+    # 4b) Post-commit, best-effort: carry the award into the project budget
+    #     (line = award amount, difference into / out of contingency). Never
+    #     raises and never changes this response — a budget problem must not
+    #     fail an award; "Sync awards" on the Budget tab repairs a missed hook.
+    from app.services import budget_award_sync
+
+    await run_in_threadpool(budget_award_sync.safe_apply_award, db, award)
+
     # 5) Post-commit, best-effort: send the contract envelope (9.3b) + award email
     #    (9.4) and create the contract row (9.5). A DocuSign/PDF/email failure must
     #    NOT roll back the award — it stays pending_acceptance with no envelope and

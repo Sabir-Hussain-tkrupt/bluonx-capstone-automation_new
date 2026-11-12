@@ -3,8 +3,10 @@ JWT authentication and role-based authorization for FastAPI.
 
 Three-tier dependency chain:
   1. get_current_user       — JWT validation only (no DB call)
-  2. get_current_active_user — JWT + DB lookup (checks is_active, gets role)
+  2. get_current_active_user — JWT + DB lookup (checks is_active, gets role,
+                               financial roles from user_roles, is_employee)
   3. require_admin           — Extends above with admin role check
+     require_roles(*roles)   — Extends above: admin or any of the given roles
 
 Supports both ES256 (modern Supabase projects, verified via JWKS) and
 HS256 (legacy projects, verified via shared JWT secret). The algorithm
@@ -163,13 +165,80 @@ async def get_current_active_user(
 
     set_actor(user_id=profile["id"], role=profile["role"])
 
+    roles, is_employee = _load_financial_roles(db, profile)
+
     return {
         "user_id": profile["id"],
         "email": profile["email"],
         "full_name": profile["full_name"],
         "role": profile["role"],
         "is_active": profile["is_active"],
+        "roles": roles,
+        "is_employee": is_employee,
     }
+
+
+# Every role the financial module knows (users.role holds only the first two).
+FINANCIAL_ROLES = ("admin", "project_manager", "field_manager", "executive", "finance")
+
+
+def _load_financial_roles(db: Client, profile: dict) -> tuple[list[str], bool]:
+    """Active roles from user_roles (+ the base users.role) and the is_employee flag.
+
+    Defensive by design: if the financial schema is missing or the read fails,
+    the caller still gets its base role and is treated as an employee, so no
+    existing endpoint can break because of this lookup.
+    """
+    roles = {profile["role"]}
+    is_employee = True
+    try:
+        resp = (
+            db.table("user_roles")
+            .select("role")
+            .eq("user_id", profile["id"])
+            .is_("revoked_at", "null")
+            .execute()
+        )
+        roles.update(r["role"] for r in (resp.data or []) if r.get("role"))
+        emp = (
+            db.table("users")
+            .select("is_employee")
+            .eq("id", profile["id"])
+            .maybe_single()
+            .execute()
+        )
+        if emp and emp.data and emp.data.get("is_employee") is False:
+            is_employee = False
+    except Exception:  # noqa: BLE001 - advisory lookup, never fatal
+        logger.warning("Could not load financial roles for user %s", profile.get("id"))
+    return sorted(roles), is_employee
+
+
+def user_has_any_role(user: dict, *roles: str) -> bool:
+    """True when the caller is an admin or holds any of `roles`.
+
+    Works with both the full dependency output (has `roles`) and the slimmer
+    dicts some tests inject (only `role`).
+    """
+    held = set(user.get("roles") or []) | {user.get("role")}
+    return "admin" in held or bool(held & set(roles))
+
+
+def require_roles(*roles: str):
+    """Dependency factory: admin, or at least one of `roles` (users.role or user_roles).
+
+        @router.post(..., dependencies=[Depends(require_roles("finance"))])
+    """
+
+    async def _dependency(user: dict = Depends(get_current_active_user)) -> dict:
+        if not user_has_any_role(user, *roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action",
+            )
+        return user
+
+    return _dependency
 
 
 async def require_admin(

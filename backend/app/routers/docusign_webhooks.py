@@ -34,7 +34,7 @@ from fastapi import APIRouter, Request, Response, status
 
 from app.core.config import settings
 from app.core.supabase_client import get_supabase
-from app.services import contract_service, decline_service
+from app.services import budget_award_sync, contract_service, decline_service
 from app.services.pre_award_validation_service import _embed_one
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,9 @@ async def handle_envelope_event(
             db.table("awards").update({"status": "accepted"}).eq(
                 "id", award["id"]
             ).execute()
+        # Financial module: lock the task's budget line and default its dates
+        # from the contract. Best-effort, idempotent, never raises.
+        budget_award_sync.safe_lock_for_contract(db, contract_id)
         # Close the package on acceptance (evaluating -> closed). Guarded on the
         # current status so it's idempotent across Connect retries and only fires
         # the evaluating -> closed transition.
@@ -182,6 +185,9 @@ async def handle_envelope_event(
             db.table("awards").update({"status": "declined_by_vendor"}).eq(
                 "id", award["id"]
             ).execute()
+        # Financial module: reverse the award's budget movement. Best-effort,
+        # idempotent, never raises.
+        budget_award_sync.safe_reverse_award(db, award["id"], f"DocuSign envelope {status}")
         return "applied"
 
     # delivered / sent → status update only (already persisted above).

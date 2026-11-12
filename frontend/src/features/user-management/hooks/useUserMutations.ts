@@ -5,9 +5,10 @@ import {
   inviteUser,
   resendInvite,
   restoreUser,
+  setUserRoles,
   updateUser,
 } from '../api/user.mutations';
-import type { UserInviteRequest, UserUpdateRequest } from '../types';
+import type { UserInviteRequest, UserRolesUpdateRequest, UserUpdateRequest } from '../types';
 
 /**
  * Mutation hooks for user management. Each invalidates the whole `users` key on
@@ -31,6 +32,16 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: UserUpdateRequest }) =>
       updateUser(id, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
+    },
+  });
+}
+
+export function useSetUserRoles() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UserRolesUpdateRequest }) => setUserRoles(id, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
     },

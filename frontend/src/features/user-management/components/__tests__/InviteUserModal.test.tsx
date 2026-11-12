@@ -45,6 +45,29 @@ describe('InviteUserModal', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it('sends financial roles and the external flag only when chosen', async () => {
+    mockPost.mockResolvedValueOnce({ data: { id: 'u-9', email: 'fm@bluonx.dev' } });
+    const user = userEvent.setup();
+    renderWithRouter(<InviteUserModal isOpen onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/full name/i), 'Field Person');
+    await user.type(screen.getByLabelText(/email/i), 'fm@bluonx.dev');
+    await user.click(screen.getByLabelText(/^field manager/i));
+    await user.click(screen.getByLabelText(/^finance/i));
+    await user.click(screen.getByLabelText(/external \/ temporary field manager/i));
+    await user.click(screen.getByRole('button', { name: /send invite/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith('/users/invite', {
+        email: 'fm@bluonx.dev',
+        full_name: 'Field Person',
+        role: 'project_manager',
+        roles: ['field_manager', 'finance'],
+        is_employee: false,
+      });
+    });
+  });
+
   it('blocks an invalid email client-side and never calls the API', async () => {
     const user = userEvent.setup();
     renderWithRouter(<InviteUserModal isOpen onClose={vi.fn()} />);

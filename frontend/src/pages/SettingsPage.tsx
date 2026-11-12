@@ -1,4 +1,4 @@
-import { CalendarDays, FileSignature, LayoutGrid, Users } from 'lucide-react';
+import { CalendarDays, FileSignature, LayoutGrid, ListOrdered, Users } from 'lucide-react';
 import { SettingsCard } from '@/components/ui/SettingsCard';
 import { ROUTES } from '@/constants/routes';
 
@@ -36,6 +36,12 @@ export function SettingsPage() {
           title="Contract Signers"
           description="Manage the people authorized to sign contracts on behalf of BluOnX."
           icon={<FileSignature className="h-5 w-5" aria-hidden="true" />}
+        />
+        <SettingsCard
+          to={ROUTES.SETTINGS_BUDGET_TEMPLATE}
+          title="Budget Template"
+          description="The standard budget layout every new project budget starts from."
+          icon={<ListOrdered className="h-5 w-5" aria-hidden="true" />}
         />
       </div>
     </div>

@@ -15,13 +15,29 @@ from pydantic import EmailStr
 from app.models.common import BluOnXBase
 
 
+FinancialRole = Literal["field_manager", "executive", "finance"]
+
+
 class UserInviteRequest(BluOnXBase):
     """Admin invite payload. `role` is constrained here so an invalid value is a
-    422 that never reaches Supabase."""
+    422 that never reaches Supabase.
+
+    `roles` (financial roles) and `is_employee` are optional; when absent the
+    invite metadata is exactly what it was before the financial module."""
 
     email: EmailStr
     full_name: str
     role: Literal["admin", "project_manager"]
+    roles: list[FinancialRole] = []
+    is_employee: bool = True
+
+
+class UserRolesUpdate(BluOnXBase):
+    """Admin: set a user's financial roles (replaces the set) and employee flag.
+    The base role (admin / project_manager) is still changed with PATCH /users/{id}."""
+
+    roles: list[FinancialRole]
+    is_employee: bool | None = None
 
 
 class UserUpdate(BluOnXBase):
@@ -53,3 +69,6 @@ class UserAdminResponse(UserResponse):
 
     status: Literal["active", "pending", "deactivated"]
     invited_by: UUID | None = None
+    # Financial module (v4.0). Defaults keep older rows / fakes valid.
+    roles: list[str] = []
+    is_employee: bool = True

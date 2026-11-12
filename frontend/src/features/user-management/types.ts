@@ -26,6 +26,18 @@ export interface UserAdminResponse {
   /** UUID of the admin who sent the invite; null for bootstrap/seeded users. */
   invited_by: string | null;
   status: UserStatus;
+  /** Financial module: base role + financial roles (field_manager / executive / finance). */
+  roles?: string[];
+  /** FALSE = external / temporary field manager. */
+  is_employee?: boolean;
+}
+
+export type FinancialRole = 'field_manager' | 'executive' | 'finance';
+
+/** Body for PUT /api/v1/users/{id}/roles (UserRolesUpdate). */
+export interface UserRolesUpdateRequest {
+  roles: FinancialRole[];
+  is_employee?: boolean;
 }
 
 /** Body for POST /api/v1/users/invite (UserInviteRequest). */
@@ -33,6 +45,10 @@ export interface UserInviteRequest {
   email: string;
   full_name: string;
   role: UserRole;
+  /** Optional financial roles; omitted when none are chosen. */
+  roles?: FinancialRole[];
+  /** Sent only for external / temporary field managers (false). */
+  is_employee?: boolean;
 }
 
 /** Partial patch for PATCH /api/v1/users/{id} (UserUpdate). */

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Briefcase,
   MoreHorizontal,
   Send,
   Trash2,
@@ -18,6 +19,7 @@ import {
   useUpdateUser,
 } from '../hooks/useUserMutations';
 import type { UserAdminResponse } from '../types';
+import { FinancialRolesModal } from './FinancialRolesModal';
 
 interface UserRowActionsProps {
   user: UserAdminResponse;
@@ -42,6 +44,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
   const deleteUser = useDeleteUser();
 
   const [confirm, setConfirm] = useState<'deactivate' | 'delete' | null>(null);
+  const [editingRoles, setEditingRoles] = useState(false);
 
   const isSelf = currentUserId === user.id;
   const isDeleted = user.deleted_at !== null;
@@ -141,6 +144,12 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
           )}
         </DropdownMenuItem>
 
+        {!isDeleted && (
+          <DropdownMenuItem icon={<Briefcase className="h-4 w-4" />} onClick={() => setEditingRoles(true)}>
+            Financial roles…
+          </DropdownMenuItem>
+        )}
+
         {(user.status === 'pending' || isDeleted) && (
           <DropdownMenuItem icon={<Send className="h-4 w-4" />} onClick={handleResend}>
             Resend invite
@@ -180,6 +189,8 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
           </DropdownMenuItem>
         )}
       </DropdownMenu>
+
+      <FinancialRolesModal user={editingRoles ? user : null} onClose={() => setEditingRoles(false)} />
 
       <ConfirmDialog
         isOpen={confirm === 'deactivate'}

@@ -18,7 +18,18 @@ export interface UserProfile {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /**
+   * Financial module: every active role (base role + user_roles), e.g.
+   * ['executive', 'project_manager']. Optional so older fixtures stay valid;
+   * read it through `hasAnyRole` in `@/lib/roles`.
+   */
+  roles?: AppRole[];
+  /** FALSE = external / temporary field manager (never authorises payment). */
+  is_employee?: boolean;
 }
+
+/** Every role the app knows. users.role holds only the first two. */
+export type AppRole = 'admin' | 'project_manager' | 'field_manager' | 'executive' | 'finance';
 
 /**
  * Combined auth state available throughout the app via AuthContext.

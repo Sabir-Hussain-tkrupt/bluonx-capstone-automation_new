@@ -12,6 +12,7 @@ export const API_ENDPOINTS = {
   USER_INVITE: '/users/invite',
   USER_RESTORE: (id: string) => `/users/${id}/restore`,
   USER_RESEND_INVITE: (id: string) => `/users/${id}/resend-invite`,
+  USER_ROLES: (id: string) => `/users/${id}/roles`,
 
   // Vendors
   VENDORS: '/vendors',
@@ -40,6 +41,29 @@ export const API_ENDPOINTS = {
   // Contract signers (admin-only writes; reads go direct to Supabase under RLS)
   CONTRACT_SIGNERS: '/contract-signers',
   CONTRACT_SIGNER: (id: string) => `/contract-signers/${id}`,
+
+  // Financial module — budgets (admin-only writes; reads go direct to Supabase views)
+  PROJECT_BUDGET: (projectId: string) => `/projects/${projectId}/budget`,
+  PROJECT_BUDGET_BASELINE: (projectId: string) => `/projects/${projectId}/budget/baseline`,
+  PROJECT_BUDGET_SYNC_AWARDS: (projectId: string) => `/projects/${projectId}/budget/sync-awards`,
+  PROJECT_BUDGET_LINES: (projectId: string) => `/projects/${projectId}/budget/lines`,
+  PROJECT_BUDGET_LINES_ORDER: (projectId: string) => `/projects/${projectId}/budget/lines/order`,
+  PROJECT_BUDGET_EXPORT: (projectId: string) => `/projects/${projectId}/budget/export`,
+  PROJECT_BUDGET_IMPORT_PREVIEW: (projectId: string) => `/projects/${projectId}/budget/import/preview`,
+  PROJECT_BUDGET_IMPORT_APPLY: (projectId: string) => `/projects/${projectId}/budget/import/apply`,
+  BUDGET_LINE: (lineId: string) => `/budget-lines/${lineId}`,
+  BUDGET_LINE_CLOSINGS: (lineId: string) => `/budget-lines/${lineId}/closings`,
+  LAND_CLOSING: (closingId: string) => `/land-closings/${closingId}`,
+  BUDGET_TEMPLATE_LINES: (templateId: string) => `/budget-templates/${templateId}/lines`,
+  BUDGET_TEMPLATE_LINES_ORDER: (templateId: string) => `/budget-templates/${templateId}/lines/order`,
+  BUDGET_TEMPLATE_LINE: (lineId: string) => `/budget-template-lines/${lineId}`,
+
+  // Financial module — internal invoices
+  PROJECT_INVOICES: (projectId: string) => `/projects/${projectId}/invoices`,
+  INVOICE: (invoiceId: string) => `/invoices/${invoiceId}`,
+  INVOICE_CATEGORISE: (invoiceId: string) => `/invoices/${invoiceId}/categorise`,
+  INVOICE_CANCEL: (invoiceId: string) => `/invoices/${invoiceId}/cancel`,
+  INVOICE_URL: (invoiceId: string) => `/invoices/${invoiceId}/url`,
 
   // Holidays (admin-only writes; reads go direct to Supabase under RLS)
   HOLIDAYS: '/holidays',
