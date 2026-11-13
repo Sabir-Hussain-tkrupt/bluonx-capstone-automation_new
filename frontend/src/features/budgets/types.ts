@@ -27,7 +27,9 @@ export type LineSubtype =
   | 'escrow_bond_premium'
   | 'escrow_repairs'
   | 'property_tax'
-  | 'other';
+  | 'other'
+  /** Balancing line that keeps a draft budget at the project's Budget value. */
+  | 'unallocated';
 
 export type CashBucket = 'land' | 'vertical_construction' | 'overhead';
 
@@ -78,7 +80,8 @@ export interface BudgetLine {
   committed: number;
   spent: number;
   pending_approval: number;
-  remaining: number;
+  /** Budget − committed. Null for the contingency line (a reserve). */
+  remaining: number | null;
   bid_vs_estimate: number | null;
   has_dates: boolean;
   closings_total: number;
@@ -106,6 +109,12 @@ export interface BudgetSummary {
   lines_missing_dates: number;
   tasks_without_line: number;
   flat_ok: boolean;
+  /** The project's own Budget value (Overview tab); the total when set. */
+  project_budget: number | null;
+  /** Amount on the Unallocated balancing line. */
+  unallocated: number;
+  /** Lines total − project budget (positive = over). Null when no project budget. */
+  over_project_budget: number | null;
 }
 
 export interface LandClosing {

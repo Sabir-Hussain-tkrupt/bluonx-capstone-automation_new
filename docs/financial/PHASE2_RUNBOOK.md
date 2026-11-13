@@ -83,3 +83,28 @@ If something ever looks out of step, use the Budget tab **⋯ → Sync awards**.
 - Budget screens refresh after every change and when the browser tab regains focus. They are not realtime pushes; adding them would need the new tables in Supabase's realtime publication, which can be done later.
 - A task added **after** baseline goes after the last line of the same type. Use Move up / down if it belongs elsewhere.
 - Rollback (dev only): `099_rollback_budget_structure.sql` removes the Phase 2 procedures, views and trigger, and keeps the data.
+
+---
+
+## 6. Patch: budget envelope (Nov 13, 2026)
+
+**Apply** in the Supabase SQL Editor, after Phase 2, from `database/migrations/20261119_financial_phase2_budget_envelope/`:
+1. Run `001_budget_envelope.sql`. If Supabase warns about RLS, choose **Run without RLS**.
+2. Run `002_verify_budget_envelope.sql`. Expect 14 rows, all PASS.
+
+Then redeploy the backend and frontend (no new packages).
+
+**What changes on screen**
+- **Create budget** shows a preview. The total is the project's **Budget** value; contingency is the % of the base (e.g. $500,000 at 15% → $65,217.39 contingency).
+- Tasks that are already **awarded** appear at the award amount and count as **Committed**. Lines whose contract is already signed appear locked 🔒.
+- A new **Unallocated budget** line holds the part of the budget not yet on a line. While the budget is a draft, it grows or shrinks automatically when other lines change, so the total stays at the project budget.
+- **Remaining** card = Total − Contingency − Committed. Per line, Remaining = Budget − Committed (the contingency line shows "—").
+- If the lines add up to more than the project budget, a yellow warning says by how much.
+- **⋯ → Reset draft budget** (admin, drafts only) starts a draft over.
+
+**For budgets you already created as drafts before this patch** (e.g. Austin Development Site):
+1. Budget tab → ⋯ → **Reset draft budget** → confirm.
+2. Make sure the project has a **Budget** value (Edit project).
+3. **Create budget** again: it now uses the project budget, contingency % and current awards.
+
+Baselined budgets are not changed.

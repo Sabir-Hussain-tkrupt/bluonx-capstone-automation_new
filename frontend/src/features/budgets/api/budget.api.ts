@@ -80,6 +80,11 @@ export async function baselineBudget(projectId: string) {
   return data as { budget_status: string; approved_budget_total: number | string };
 }
 
+export async function resetBudget(projectId: string) {
+  const { data } = await api.post(API_ENDPOINTS.PROJECT_BUDGET_RESET(projectId));
+  return data as { budget_status: string };
+}
+
 export async function syncAwards(projectId: string) {
   const { data } = await api.post(API_ENDPOINTS.PROJECT_BUDGET_SYNC_AWARDS(projectId));
   return data as { applied: number; locked: number; failed: number };

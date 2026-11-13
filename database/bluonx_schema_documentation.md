@@ -1,6 +1,6 @@
 # BluOnX Bid Management & Vendor Coordination System — Database Schema Documentation
 
-**Schema Version:** 4.1 (Bid Management v3.9 + Financial Automation Phases 1–2)  
+**Schema Version:** 4.2 (Bid Management v3.9 + Financial Automation Phases 1–2 + budget envelope patch)  
 **Last Updated:** November 18, 2026  
 **Author:** Awais Anwer (Tkrupt)  
 **Engine:** PostgreSQL via Supabase  
@@ -922,3 +922,30 @@ Helpers (private): `fin_line_type_for_bid_type`, `fin_line_invoiced` (SECURITY D
 ### 11.7 Default standard template
 
 Land (land purchase, earnest money, due diligence) → Soft costs (engineering, permits, impact fees, other soft costs) → Site work / Utilities / Roads activity slots (clearing, grading, sanitary sewer, water + storm, paving) → Internal (attorney) → Contingency → Long-tail (escrow bond premium, escrow repairs, property tax). Created only when no default template exists, and edited in **Settings → Budget Template**.
+
+---
+
+## 12. Financial Automation (v4.2) — Phase 2 patch: budget envelope
+
+Migration `20261119_financial_phase2_budget_envelope`.
+
+### 12.1 How a new budget is built
+
+| Figure | Rule |
+|---|---|
+| Total budget | `projects.budget` when set (> 0); otherwise the sum of the lines (Phase 2 behaviour) |
+| Contingency | Total fixed: `(total − land) × pct / (100 + pct)`, i.e. pct of base = total − land − contingency. Otherwise: pct × (lines excluding land and contingency) |
+| Awarded tasks | Line = active award amount (`pending_acceptance` / `accepted`), `committed_amount` = award, `award_id`, `pre_award_budget_amount` = estimate. Executed / active / completed contract → line locked, contract dates |
+| Unallocated budget | New line (`soft_cost`, `line_subtype = 'unallocated'`, heading "Unallocated", just above contingency) = total − contingency − all other lines, created only when positive. At most one per project (partial unique index) |
+
+### 12.2 Draft absorption — `trg_budget_lines_absorb_unallocated`
+`AFTER INSERT OR UPDATE OF budget_amount, deleted_at ON budget_lines`. In a **draft** budget that has an Unallocated line, every change to another line's effective amount (edit, import, new or deleted task, award, removal, contingency edit) is offset on the Unallocated line, floored at $0. Baselined budgets are not touched; there the flat-budget rule and contingency do this job.
+
+### 12.3 `fn_reset_draft_budget(project, actor)`
+Draft only: retires every line (soft delete) and sets `budget_status = 'none'` so the budget can be created again. Refused (PT409) when invoices, payment approvals or land closings exist, or when the budget is not a draft.
+
+### 12.4 View changes
+- `v_budget_lines.remaining` = budget − committed (NULL for the contingency line); `committed` = 0 for contingency.
+- `v_project_budget_summary.remaining` = total − contingency − committed.
+- New columns at the end of `v_project_budget_summary`: `project_budget`, `unallocated`, `over_project_budget` (lines total − project budget).
+- `budget_lines.line_subtype` CHECK widened with `unallocated` (superset).
