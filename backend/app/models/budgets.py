@@ -19,7 +19,7 @@ from app.models.common import BluOnXBase
 CashBucket = Literal["land", "vertical_construction", "overhead"]
 LineSubtype = Literal[
     "land_purchase", "earnest_money", "due_diligence", "engineering",
-    "escrow_bond_premium", "escrow_repairs", "property_tax", "other",
+    "escrow_bond_premium", "escrow_repairs", "property_tax", "other", "unallocated",
 ]
 # Lines an admin may add by hand. Bid activities come from tasks; contingency is
 # created with the budget; variances come from the variance procedures.

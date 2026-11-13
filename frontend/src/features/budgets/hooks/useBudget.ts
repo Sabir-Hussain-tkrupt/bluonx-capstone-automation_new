@@ -16,6 +16,7 @@ import {
   removeBudgetLine,
   reorderBudgetLines,
   reorderTemplateLines,
+  resetBudget,
   syncAwards,
   updateBudgetLine,
   updateLandClosing,
@@ -80,6 +81,11 @@ export function useCreateBudget(projectId: string) {
 export function useBaselineBudget(projectId: string) {
   const invalidate = useInvalidateBudget(projectId);
   return useMutation({ mutationFn: () => baselineBudget(projectId), onSuccess: invalidate });
+}
+
+export function useResetBudget(projectId: string) {
+  const invalidate = useInvalidateBudget(projectId);
+  return useMutation({ mutationFn: () => resetBudget(projectId), onSuccess: invalidate });
 }
 
 export function useSyncAwards(projectId: string) {

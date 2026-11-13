@@ -13,6 +13,7 @@ const summaryMock = vi.fn();
 const linesMock = vi.fn();
 const createMutate = vi.fn();
 const baselineMutate = vi.fn();
+const resetMutate = vi.fn();
 
 vi.mock('@/lib/roles', () => ({ useHasRole: () => isAdminMock() }));
 
@@ -22,6 +23,7 @@ vi.mock('../../hooks/useBudget', () => ({
   useCreateBudget: () => ({ mutate: createMutate, isPending: false }),
   useBaselineBudget: () => ({ mutate: baselineMutate, isPending: false }),
   useSyncAwards: () => ({ mutate: vi.fn(), isPending: false }),
+  useResetBudget: () => ({ mutate: resetMutate, isPending: false }),
   useRemoveBudgetLine: () => ({ mutate: vi.fn(), isPending: false }),
   useReorderBudgetLines: () => ({ mutate: vi.fn(), isPending: false }),
   useAddBudgetLine: () => ({ mutate: vi.fn(), isPending: false }),
@@ -39,7 +41,7 @@ function summary(over: Partial<BudgetSummary> = {}): BudgetSummary {
     contingency_percent: 15, budget_baselined_at: null, total_budget: 100000, committed: 0, spent: 0,
     remaining: 100000, pending_approval: 0, contingency_now: 10000, contingency_at_baseline: null,
     land_total: 0, contingency_base: 90000, line_count: 3, lines_missing_dates: 0, tasks_without_line: 0,
-    flat_ok: true, ...over,
+    flat_ok: true, project_budget: null, unallocated: 0, over_project_budget: null, ...over,
   };
 }
 
@@ -143,5 +145,45 @@ describe('BudgetTab', () => {
     renderWithRouter(<BudgetTab projectId={P} />);
     expect(screen.getByText(/could not load the budget/i)).toBeInTheDocument();
     expect(screen.getByText('permission denied')).toBeInTheDocument();
+  });
+
+  it('create dialog previews total and contingency from the project budget', async () => {
+    isAdminMock.mockReturnValue(true);
+    summaryMock.mockReturnValue({ data: summary({ budget_status: 'none', project_budget: 500000 }), isLoading: false, isError: false });
+    linesMock.mockReturnValue({ data: [], isLoading: false, isError: false });
+    renderWithRouter(<BudgetTab projectId={P} />);
+    await userEvent.click(screen.getByRole('button', { name: /create budget/i }));
+    // 500,000 x 15 / 115 = 65,217.39
+    expect(screen.getByText('$500,000.00')).toBeInTheDocument();
+    expect(screen.getByText('$65,217.39')).toBeInTheDocument();
+  });
+
+  it('draft budgets over the project budget show a warning; reset asks first', async () => {
+    isAdminMock.mockReturnValue(true);
+    summaryMock.mockReturnValue({
+      data: summary({ project_budget: 90000, over_project_budget: 10000 }), isLoading: false, isError: false,
+    });
+    renderWithRouter(<BudgetTab projectId={P} />);
+    expect(screen.getByText(/lines exceed the project budget/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /more budget actions/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /reset draft budget/i }));
+    const dialog = screen.getByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: /reset budget/i }));
+    expect(resetMutate).toHaveBeenCalled();
+  });
+
+  it('contingency has no remaining of its own', () => {
+    isAdminMock.mockReturnValue(true);
+    summaryMock.mockReturnValue({ data: summary(), isLoading: false, isError: false });
+    linesMock.mockReturnValue({
+      data: [line({ id: 'k', name: 'Contingency', line_type: 'contingency', section_name: 'Contingency', budget_amount: 6000, remaining: null })],
+      isLoading: false, isError: false,
+    });
+    renderWithRouter(<BudgetTab projectId={P} />);
+    const row = screen.getByText('Contingency', { selector: 'span.font-medium.text-secondary-900' }).closest('tr')!;
+    // Columns: Line, Budget, Committed, Spent, Remaining … — Remaining is the 5th cell.
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[4]).toHaveTextContent('—');
+    expect(cells[1]).toHaveTextContent('$6,000.00');
   });
 });

@@ -21,6 +21,7 @@ export const LINE_SUBTYPE_LABELS: Record<LineSubtype, string> = {
   escrow_repairs: 'Escrow repairs',
   property_tax: 'Property tax',
   other: 'Other',
+  unallocated: 'Unallocated',
 };
 
 export const CASH_BUCKET_LABELS: Record<CashBucket, string> = {

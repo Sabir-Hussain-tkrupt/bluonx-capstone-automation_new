@@ -84,6 +84,23 @@ async def baseline_budget(
     }
 
 
+@router.post("/projects/{project_id}/budget/reset")
+async def reset_budget(
+    project_id: UUID,
+    user: dict = Depends(require_admin),
+    db: Client = Depends(get_supabase),
+):
+    """Start a DRAFT budget over (admin only): lines are retired and the project
+    returns to "no budget", ready to be created again."""
+    try:
+        project = await run_in_threadpool(
+            budget_service.reset_draft_budget, db, project_id=str(project_id), actor_id=user["user_id"]
+        )
+    except FinancialError as exc:
+        raise _http(exc) from exc
+    return {"budget_status": project.get("budget_status", "none")}
+
+
 @router.post("/projects/{project_id}/budget/sync-awards", response_model=SyncAwardsResult)
 async def sync_awards(
     project_id: UUID,

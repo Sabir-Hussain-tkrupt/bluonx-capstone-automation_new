@@ -311,3 +311,18 @@ class TestTemplate:
 def test_money_never_becomes_float():
     from app.services.financial_errors import money
     assert money(Decimal("0.10") + Decimal("0.20")) == "0.30"
+
+
+class TestResetDraft:
+    def test_reset_draft_calls_procedure(self, fin_client):
+        db = db_with("draft")
+        db.rpc_handlers["fn_reset_draft_budget"] = lambda p: [{"budget_status": "none"}]
+        resp = fin_client(db, ADMIN).post(f"/api/v1/projects/{P}/budget/reset")
+        assert resp.status_code == 200 and resp.json() == {"budget_status": "none"}
+        assert db.calls("fn_reset_draft_budget")[0]["p_actor"] == ADMIN["user_id"]
+
+    def test_baselined_cannot_be_reset(self, fin_client):
+        assert fin_client(db_with("baselined"), ADMIN).post(f"/api/v1/projects/{P}/budget/reset").status_code == 409
+
+    def test_admin_only(self, fin_client):
+        assert fin_client(db_with("draft"), PM).post(f"/api/v1/projects/{P}/budget/reset").status_code == 403

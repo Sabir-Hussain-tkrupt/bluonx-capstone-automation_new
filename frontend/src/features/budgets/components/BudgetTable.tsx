@@ -166,7 +166,8 @@ interface BudgetRowProps {
 
 function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }: BudgetRowProps) {
   const isVariance = line.line_type === 'variance';
-  const needsDates = !line.has_dates && !['contingency', 'land'].includes(line.line_type);
+  const isUnallocated = line.line_subtype === 'unallocated';
+  const needsDates = !line.has_dates && !['contingency', 'land'].includes(line.line_type) && !isUnallocated;
   const contingencyNegative = line.line_type === 'contingency' && Number(line.budget_amount) < 0;
   const removable = !line.task_id && !['contingency', 'variance'].includes(line.line_type);
   const canHaveTm = ['bid_activity', 'soft_cost'].includes(line.line_type);
@@ -193,7 +194,12 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <StatusBadge status={LINE_TYPE_LABELS[line.line_type]} variant="neutral" dot={false} size="sm" />
+              <StatusBadge
+                status={isUnallocated ? 'Unallocated' : LINE_TYPE_LABELS[line.line_type]}
+                variant={isUnallocated ? 'info' : 'neutral'}
+                dot={false}
+                size="sm"
+              />
               {line.vendor_name && <span className="text-xs text-secondary-500">{line.vendor_name}</span>}
               {isVariance && line.variance_status && (
                 <StatusBadge status={line.variance_status} size="sm" />
@@ -215,7 +221,7 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
         {line.line_type === 'contingency' ? '—' : formatMoney(line.committed)}
       </td>
       <td className={`${NUM} hidden text-secondary-700 lg:table-cell`}>{formatMoney(line.spent)}</td>
-      <td className={`${NUM} text-secondary-900`}>{formatMoney(line.remaining)}</td>
+      <td className={`${NUM} text-secondary-900`}>{line.remaining == null ? '—' : formatMoney(line.remaining)}</td>
       <td className="hidden whitespace-nowrap px-4 py-3 text-secondary-700 xl:table-cell">
         {line.has_dates
           ? `${formatDateOnly(line.anticipated_start_date)} – ${formatDateOnly(line.anticipated_end_date)}`

@@ -88,7 +88,12 @@ def _iso(value: Any) -> Any:
 def create_budget(
     db: Client, *, project_id: str, actor_id: str, template_id: str | None, contingency_percent
 ) -> list[dict]:
-    """Template + every task → draft budget (fn_create_project_budget)."""
+    """Template + every task → draft budget (fn_create_project_budget).
+
+    When the project has a Budget value, that value is the total: contingency is
+    the given % of the base (total − land − contingency), awarded tasks come in
+    at their award amount as committed, and an Unallocated line holds the rest.
+    """
     project = get_project(db, project_id)
     _ensure_editable(project)
     if project.get("budget_status", "none") != "none":
@@ -117,6 +122,23 @@ def baseline_budget(db: Client, *, project_id: str, actor_id: str) -> dict:
         "fn_baseline_project_budget",
         {"p_project_id": str(project_id), "p_actor": str(actor_id)},
         "The budget could not be baselined. Please try again.",
+    )
+    return first(data) or {}
+
+
+def reset_draft_budget(db: Client, *, project_id: str, actor_id: str) -> dict:
+    """Draft only: retire every line and go back to "no budget", so the budget
+    can be created again from the template, the project's Budget value and the
+    current awards (fn_reset_draft_budget)."""
+    project = get_project(db, project_id)
+    _ensure_editable(project)
+    if project.get("budget_status") != "draft":
+        raise FinancialError(409, "Only a draft budget can be reset.")
+    data = call_rpc(
+        db,
+        "fn_reset_draft_budget",
+        {"p_project_id": str(project_id), "p_actor": str(actor_id)},
+        "The budget could not be reset. Please try again.",
     )
     return first(data) or {}
 

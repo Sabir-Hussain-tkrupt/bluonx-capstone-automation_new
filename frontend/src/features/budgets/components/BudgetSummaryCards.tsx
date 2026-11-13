@@ -26,14 +26,16 @@ export function BudgetSummaryCards({ summary }: BudgetSummaryCardsProps) {
         meta={
           summary.budget_status === 'baselined'
             ? `Approved ${formatMoney(summary.approved_budget_total)}`
-            : 'Draft — not baselined yet'
+            : summary.project_budget != null
+              ? `Project budget ${formatMoney(summary.project_budget)} · draft`
+              : 'Sum of the lines · draft'
         }
       />
       <StatCard
         label="Committed"
         value={formatMoney(summary.committed)}
         accent="info"
-        meta="Awards, approved variances and categorised invoices"
+        meta="Awarded bids, approved variances and categorised invoices"
       />
       <StatCard
         label="Spent"
@@ -49,7 +51,7 @@ export function BudgetSummaryCards({ summary }: BudgetSummaryCardsProps) {
         label="Remaining"
         value={formatMoney(summary.remaining)}
         accent="success"
-        meta="Budget not yet spent"
+        meta="Total − contingency − committed"
       />
       <StatCard
         label="Contingency"

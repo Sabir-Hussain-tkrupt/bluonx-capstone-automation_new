@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, MoreHorizontal, Plus, RefreshCw, Upload } from 'lucide-react';
+import { Download, MoreHorizontal, Plus, RefreshCw, RotateCcw, Upload } from 'lucide-react';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -22,10 +22,11 @@ import {
   useCreateBudget,
   useRemoveBudgetLine,
   useReorderBudgetLines,
+  useResetBudget,
   useSyncAwards,
 } from '../hooks/useBudget';
 import type { BudgetLine } from '../types';
-import { formatMoney } from '../utils/money';
+import { formatCents, formatMoney, toCents } from '../utils/money';
 import { BidVsBudgetView } from './BidVsBudgetView';
 import { BudgetImportModal } from './BudgetImportModal';
 import { BudgetLineFormModal } from './BudgetLineFormModal';
@@ -55,6 +56,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const createBudget = useCreateBudget(projectId);
   const baselineBudget = useBaselineBudget(projectId);
   const syncAwards = useSyncAwards(projectId);
+  const resetBudget = useResetBudget(projectId);
   const removeLine = useRemoveBudgetLine(projectId);
   const reorderLines = useReorderBudgetLines(projectId);
 
@@ -62,6 +64,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [contingencyPct, setContingencyPct] = useState('');
   const [showBaseline, setShowBaseline] = useState(false);
+  const [showReset, setShowReset] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [formState, setFormState] = useState<{ line?: BudgetLine; parent?: BudgetLine } | null>(null);
   const [closingsLine, setClosingsLine] = useState<BudgetLine | null>(null);
@@ -71,6 +74,19 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const summary = summaryQuery.data;
   const lines = linesQuery.data ?? [];
   const status = summary?.budget_status ?? 'none';
+
+  // Preview for the Create dialog: total = the project's Budget value, and
+  // contingency = pct of the base where base = total - land - contingency
+  // (land is $0 before the budget exists), i.e. total x pct / (100 + pct).
+  const pctInput = contingencyPct.trim() === '' ? 15 : Number(contingencyPct);
+  const createPreview =
+    summary?.project_budget != null && Number(summary.project_budget) > 0 && Number.isFinite(pctInput)
+      ? {
+          total: toCents(summary.project_budget),
+          pct: pctInput,
+          contingency: Math.round((toCents(summary.project_budget) * pctInput) / (100 + pctInput)),
+        }
+      : null;
 
   if (summaryQuery.isLoading || linesQuery.isLoading) {
     return (
@@ -119,6 +135,19 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
       onError: (e) => {
         setShowBaseline(false);
         toast({ variant: 'danger', message: errorMessage(e, 'Could not baseline the budget.') });
+      },
+    });
+  };
+
+  const handleReset = () => {
+    resetBudget.mutate(undefined, {
+      onSuccess: () => {
+        setShowReset(false);
+        toast({ variant: 'success', message: 'Draft budget reset. Create it again to rebuild it from the template.' });
+      },
+      onError: (e) => {
+        setShowReset(false);
+        toast({ variant: 'danger', message: errorMessage(e, 'Could not reset the budget.') });
       },
     });
   };
@@ -201,8 +230,29 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
           <div className="space-y-4">
             <p className="text-sm text-secondary-600">
               The budget starts from the standard template (Settings → Budget Template). Every task becomes a line in
-              template order, using its budget estimate. You can add, remove, reorder and edit lines until you baseline.
+              template order. Tasks that are already awarded come in at their award amount as committed. You can add,
+              remove, reorder and edit lines until you baseline.
             </p>
+            {createPreview ? (
+              <div className="rounded-lg border border-secondary-200 bg-secondary-50 px-3 py-2 text-sm text-secondary-700">
+                <div className="flex justify-between">
+                  <span>Total budget (project Budget value)</span>
+                  <strong className="tabular-nums text-secondary-900">{formatCents(createPreview.total)}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Contingency ({createPreview.pct}% of the base)</span>
+                  <strong className="tabular-nums text-secondary-900">{formatCents(createPreview.contingency)}</strong>
+                </div>
+                <p className="mt-1 text-xs text-secondary-500">
+                  Base = total − land − contingency. What is not assigned to a line yet sits on an “Unallocated” line.
+                </p>
+              </div>
+            ) : (
+              <Alert variant="info" title="No project budget set">
+                This project has no Budget value, so the total will be the sum of the lines and contingency the % of
+                that. Set a Budget on the project (Edit) to fix the total instead.
+              </Alert>
+            )}
             <FormField
               label="Contingency %"
               htmlFor="budget-contingency"
@@ -242,6 +292,14 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
       ) : (
         <Alert variant="neutral" title={`Baselined ${summary.approved_budget_total != null ? `at ${formatMoney(summary.approved_budget_total)}` : ''}`}>
           Changes now go through bids, variances and executive-approved top-ups, so the total budget stays flat.
+        </Alert>
+      )}
+
+      {status === 'draft' && summary.over_project_budget != null && toCents(summary.over_project_budget) > 0 && (
+        <Alert variant="warning" title="Lines exceed the project budget">
+          The lines add up to {formatMoney(summary.total_budget)}, which is{' '}
+          {formatMoney(summary.over_project_budget)} more than the project budget of {formatMoney(summary.project_budget)}.
+          Lower some lines or raise the project Budget before baselining.
         </Alert>
       )}
 
@@ -290,6 +348,11 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
               <DropdownMenuItem icon={<RefreshCw className="h-4 w-4" />} onClick={handleSync}>
                 Sync awards
               </DropdownMenuItem>
+              {status === 'draft' && (
+                <DropdownMenuItem icon={<RotateCcw className="h-4 w-4" />} destructive onClick={() => setShowReset(true)}>
+                  Reset draft budget
+                </DropdownMenuItem>
+              )}
             </DropdownMenu>
           )}
         </div>
@@ -344,6 +407,22 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
         isLoading={baselineBudget.isPending}
         onConfirm={handleBaseline}
         onCancel={() => setShowBaseline(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={showReset}
+        title="Reset draft budget"
+        message={
+          <>
+            Start this draft budget over? All lines are removed (kept in the history) and the project returns to
+            “no budget”. Create it again to rebuild it from the template, the project Budget value and the current
+            awards.
+          </>
+        }
+        confirmText="Reset budget"
+        isLoading={resetBudget.isPending}
+        onConfirm={handleReset}
+        onCancel={() => setShowReset(false)}
       />
 
       <ConfirmDialog

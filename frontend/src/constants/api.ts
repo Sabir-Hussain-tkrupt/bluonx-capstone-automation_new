@@ -46,6 +46,7 @@ export const API_ENDPOINTS = {
   PROJECT_BUDGET: (projectId: string) => `/projects/${projectId}/budget`,
   PROJECT_BUDGET_BASELINE: (projectId: string) => `/projects/${projectId}/budget/baseline`,
   PROJECT_BUDGET_SYNC_AWARDS: (projectId: string) => `/projects/${projectId}/budget/sync-awards`,
+  PROJECT_BUDGET_RESET: (projectId: string) => `/projects/${projectId}/budget/reset`,
   PROJECT_BUDGET_LINES: (projectId: string) => `/projects/${projectId}/budget/lines`,
   PROJECT_BUDGET_LINES_ORDER: (projectId: string) => `/projects/${projectId}/budget/lines/order`,
   PROJECT_BUDGET_EXPORT: (projectId: string) => `/projects/${projectId}/budget/export`,
