@@ -3,6 +3,7 @@ import { Check, X } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
 import type { Trade } from '@/features/vendors/api/vendor.queries';
+import { buildTradeTree, tradeLabel } from '@/features/trades/utils/tradeTree';
 
 interface TradeMultiSelectProps {
   selectedTradeIds: string[];
@@ -114,7 +115,7 @@ export function TradeMultiSelect({
               )}
               title={isLocked(trade.id) ? lockedHint : undefined}
             >
-              {trade.name}
+              {tradeLabel(trades, trade.id) || trade.name}
               {!isLocked(trade.id) && (
                 <button
                   type="button"
@@ -122,7 +123,7 @@ export function TradeMultiSelect({
                     e.stopPropagation();
                     removeTrade(trade.id);
                   }}
-                  aria-label={`Remove ${trade.name}`}
+                  aria-label={`Remove ${tradeLabel(trades, trade.id) || trade.name}`}
                   className="text-primary-400 hover:text-primary-700"
                 >
                   <X className="h-3 w-3" aria-hidden="true" />
@@ -143,43 +144,63 @@ export function TradeMultiSelect({
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-secondary-400">
                 {phaseLabels[phase] ?? phase}
               </div>
-              {phaseTrades.map((trade) => {
-                const isSelected = selectedTradeIds.includes(trade.id);
-                const locked = isLocked(trade.id);
-                return (
-                  <button
-                    key={trade.id}
-                    type="button"
-                    onClick={() => toggleTrade(trade.id)}
-                    disabled={locked}
-                    title={locked ? lockedHint : undefined}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
-                      locked
-                        ? 'cursor-not-allowed opacity-60'
-                        : 'hover:bg-secondary-50',
-                      isSelected && !locked && 'bg-primary-50',
-                    )}
-                  >
-                    <div
+              {buildTradeTree(phaseTrades).map(({ trade: parent, children }) => {
+                const renderOption = (trade: Trade, isSub: boolean) => {
+                  const isSelected = selectedTradeIds.includes(trade.id);
+                  const locked = isLocked(trade.id);
+                  return (
+                    <button
+                      key={trade.id}
+                      type="button"
+                      onClick={() => toggleTrade(trade.id)}
+                      disabled={locked}
+                      title={locked ? lockedHint : undefined}
                       className={cn(
-                        'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                        isSelected
-                          ? locked
-                            ? 'border-secondary-400 bg-secondary-400 text-white'
-                            : 'border-primary-600 bg-primary-600 text-white'
-                          : 'border-secondary-300',
+                        'flex w-full items-center gap-2 py-2 pr-3 text-left text-sm',
+                        isSub ? 'pl-8' : 'pl-3',
+                        locked
+                          ? 'cursor-not-allowed opacity-60'
+                          : 'hover:bg-secondary-50',
+                        isSelected && !locked && 'bg-primary-50',
                       )}
                     >
-                      {isSelected && (
-                        <Check className="h-3 w-3" aria-hidden="true" />
+                      <div
+                        className={cn(
+                          'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                          isSelected
+                            ? locked
+                              ? 'border-secondary-400 bg-secondary-400 text-white'
+                              : 'border-primary-600 bg-primary-600 text-white'
+                            : 'border-secondary-300',
+                        )}
+                      >
+                        {isSelected && (
+                          <Check className="h-3 w-3" aria-hidden="true" />
+                        )}
+                      </div>
+                      <span className="text-secondary-900">{trade.name}</span>
+                      {locked && (
+                        <span className="ml-auto text-xs text-secondary-400">Added</span>
                       )}
-                    </div>
-                    <span className="text-secondary-900">{trade.name}</span>
-                    {locked && (
-                      <span className="ml-auto text-xs text-secondary-400">Added</span>
+                    </button>
+                  );
+                };
+                // A trade with subtrades is chosen through its subtrades; it
+                // stays selectable only when already on the vendor (so it can
+                // be removed).
+                const parentSelectable = children.length === 0 || selectedTradeIds.includes(parent.id);
+                return (
+                  <div key={parent.id}>
+                    {parentSelectable ? (
+                      renderOption(parent, false)
+                    ) : (
+                      <div className="flex items-center justify-between px-3 pt-2 pb-1 text-sm font-medium text-secondary-700">
+                        <span>{parent.name}</span>
+                        <span className="text-xs font-normal text-secondary-400">choose a subtrade</span>
+                      </div>
                     )}
-                  </button>
+                    {children.map((sub) => renderOption(sub, true))}
+                  </div>
                 );
               })}
             </div>

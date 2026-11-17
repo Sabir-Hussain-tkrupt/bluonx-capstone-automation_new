@@ -22,6 +22,7 @@ from app.models.vendor_filtering import (
 )
 from app.services.distance import haversine_distance, routes_api_distance
 from app.services.insurance_rules import classify_insurance
+from app.services.trade_family import trade_family_ids
 
 logger = logging.getLogger(__name__)
 
@@ -111,23 +112,27 @@ async def filter_qualified_vendors(
     try:
         trade_resp = (
             db.table("trades")
-            .select("id, name")
+            .select("id, name, parent_trade_id")
             .eq("id", trade_id)
             .single()
             .execute()
         )
         trade_name = trade_resp.data["name"] if trade_resp.data else None
+        trade_parent_id = (trade_resp.data or {}).get("parent_trade_id")
     except APIError:
         trade_name = None
+        trade_parent_id = None
 
-    # ── 4. Trade match — fetch vendors with this trade ──────────────────
-    vt_resp = (
-        db.table("vendor_trades")
-        .select("vendor_id")
-        .eq("trade_id", trade_id)
-        .execute()
-    )
-    vendor_ids = [r["vendor_id"] for r in (vt_resp.data or [])]
+    # ── 4. Trade match — vendors with this trade, its parent trade or ──
+    #       its subtrades (see trade_family.py)
+    family_ids = trade_family_ids(db, trade_id, trade_parent_id)
+    vt_query = db.table("vendor_trades").select("vendor_id")
+    if len(family_ids) == 1:
+        vt_query = vt_query.eq("trade_id", trade_id)
+    else:
+        vt_query = vt_query.in_("trade_id", family_ids)
+    vt_resp = vt_query.execute()
+    vendor_ids = list(dict.fromkeys(r["vendor_id"] for r in (vt_resp.data or [])))
 
     if not vendor_ids:
         return _build_response(

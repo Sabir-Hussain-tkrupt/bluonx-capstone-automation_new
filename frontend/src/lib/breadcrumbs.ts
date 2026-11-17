@@ -113,6 +113,7 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
 
   [ROUTES.BID_TEMPLATES]: { parent: ROUTES.DASHBOARD, label: 'Bid Templates' },
   [ROUTES.TASK_TEMPLATES]: { parent: ROUTES.DASHBOARD, label: 'Task Templates' },
+  [ROUTES.BUDGET_TEMPLATES]: { parent: ROUTES.DASHBOARD, label: 'Budget Templates' },
   [ROUTES.BID_TEMPLATE_NEW]: { parent: ROUTES.BID_TEMPLATES, label: 'New Template' },
   [ROUTES.BID_TEMPLATE_DETAIL]: {
     parent: ROUTES.BID_TEMPLATES,
@@ -127,7 +128,6 @@ export const CRUMB_CONFIG: Record<string, CrumbConfig> = {
   [ROUTES.SETTINGS_USERS]: { parent: ROUTES.SETTINGS, label: 'Users' },
   [ROUTES.SETTINGS_CALENDAR]: { parent: ROUTES.SETTINGS, label: 'Holiday Calendar' },
   [ROUTES.SETTINGS_CONTRACT_SIGNERS]: { parent: ROUTES.SETTINGS, label: 'Contract Signers' },
-  [ROUTES.SETTINGS_BUDGET_TEMPLATE]: { parent: ROUTES.SETTINGS, label: 'Budget Template' },
 };
 
 /**

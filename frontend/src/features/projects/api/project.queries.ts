@@ -41,6 +41,8 @@ export interface Project {
 export interface ProjectListFilters {
   search?: string;
   status?: string;
+  /** US state postal code (e.g. 'MO'). */
+  state?: string;
   archived?: boolean;
   sort_by?: string;
   sort_dir?: 'asc' | 'desc';
@@ -84,6 +86,7 @@ export async function fetchProjects(filters?: ProjectListFilters): Promise<Pagin
       // The archived-only view has no status sub-filter; the backend applies
       // `status` regardless, so omit it when asking for archived only.
       status: filters?.archived ? undefined : filters?.status || undefined,
+      state: filters?.state || undefined,
       archived_only: filters?.archived || undefined,
       sort_by: filters?.sort_by,
       sort_dir: filters?.sort_dir,

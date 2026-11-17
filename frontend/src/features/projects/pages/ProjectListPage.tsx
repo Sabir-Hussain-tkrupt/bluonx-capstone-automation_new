@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
+import { US_STATE_FILTER_OPTIONS } from '@/constants/usStates';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -34,6 +35,7 @@ export function ProjectListPage() {
   // Filter state
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -63,11 +65,12 @@ export function ProjectListPage() {
     search: debouncedSearch || undefined,
     status: archivedView ? undefined : (statusFilter || undefined),
     archived: archivedView || undefined,
+    state: stateFilter || undefined,
     sort_by: sortBy,
     sort_dir: sortDir,
     page,
     page_size: pageSize,
-  }), [debouncedSearch, statusFilter, archivedView, sortBy, sortDir, page, pageSize]);
+  }), [debouncedSearch, statusFilter, stateFilter, archivedView, sortBy, sortDir, page, pageSize]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useProjects(filters);
   const createProjectMutation = useCreateProject();
@@ -150,7 +153,7 @@ export function ProjectListPage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <TextInput
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -170,6 +173,14 @@ export function ProjectListPage() {
             { value: 'cancelled', label: 'Cancelled' },
             { value: 'archived', label: 'Archived' },
           ]}
+          size="sm"
+        />
+        <Select
+          aria-label="Filter by state"
+          value={stateFilter}
+          onChange={(e) => { setStateFilter(e.target.value); setPage(1); }}
+          placeholder="All States"
+          options={US_STATE_FILTER_OPTIONS}
           size="sm"
         />
       </div>

@@ -52,6 +52,18 @@ _UPLOAD_LIMITS: tuple[tuple[str, re.Pattern[str], int], ...] = (
         re.compile(rf"^{_V1}/vendor-portal/submissions/[^/]+/attachments/?$"),
         10 * _MB + _MULTIPART_OVERHEAD,
     ),
+    # Internal invoices: 25 MB files (finance-documents in BUCKET_CONFIGS).
+    ("POST", re.compile(rf"^{_V1}/projects/[^/]+/invoices/?$"), 25 * _MB + _MULTIPART_OVERHEAD),
+    # Budget import: 2 MB files (MAX_IMPORT_BYTES) plus the multipart envelope.
+    (
+        "POST",
+        re.compile(rf"^{_V1}/projects/[^/]+/budget/import/preview/?$"),
+        2 * _MB + _MULTIPART_OVERHEAD,
+    ),
+    # Project notes: document-sized rich text (up to 2,000,000 characters of
+    # HTML, which JSON escaping and multi-byte characters can make larger).
+    ("POST", re.compile(rf"^{_V1}/projects/[^/]+/notes/?$"), 8 * _MB),
+    ("PATCH", re.compile(rf"^{_V1}/project-notes/[^/]+/?$"), 8 * _MB),
 )
 
 

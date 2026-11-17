@@ -27,7 +27,7 @@ import { formatMoney } from '@/features/budgets/utils/money';
 import { TemplateLineModal } from '../components/TemplateLineModal';
 
 /**
- * Settings → Budget Template (Task 2.1). One standard layout, from land
+ * Budget Templates (sidebar; Task 2.1). One standard layout, from land
  * acquisition down to escrows and property taxes, copied into every new project
  * budget. Editing it never changes existing budgets.
  */
@@ -80,7 +80,7 @@ export function BudgetTemplatePage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-secondary-900">Budget Template</h1>
+          <h1 className="text-2xl font-semibold text-secondary-900">Budget Templates</h1>
           <p className="mt-1 max-w-2xl text-sm text-secondary-500">
             The standard layout every new project budget starts from. Activity rows (bid / internal) are placeholders:
             tasks with the same name or trade are placed there. Changes apply to new budgets only.

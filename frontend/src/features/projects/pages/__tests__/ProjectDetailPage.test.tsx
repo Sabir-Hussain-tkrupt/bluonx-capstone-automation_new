@@ -51,6 +51,7 @@ vi.mock('@/features/projects/hooks/useProjectDocuments', () => ({
 vi.mock('@/features/tasks/components/TaskList', () => ({ TaskList: () => null }));
 vi.mock('@/features/budgets/components/BudgetTab', () => ({ BudgetTab: () => null }));
 vi.mock('@/features/invoices/components/InvoicesTab', () => ({ InvoicesTab: () => null }));
+vi.mock('@/features/notes/components/NotesTab', () => ({ NotesTab: () => null }));
 // Role checks read the auth context, which these page tests do not mount.
 vi.mock('@/lib/roles', () => ({ useHasRole: () => true }));
 

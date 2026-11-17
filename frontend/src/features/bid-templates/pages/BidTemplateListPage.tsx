@@ -15,6 +15,7 @@ import { ROUTES } from '@/constants/routes';
 import { useBidTemplates } from '@/features/bid-templates/hooks/useBidTemplates';
 import { useDeleteBidTemplate } from '@/features/bid-templates/hooks/useDeleteBidTemplate';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
+import { tradeFilterOptions } from '@/features/trades/utils/tradeTree';
 import type { BidTemplate, BidTemplateListFilters } from '@/features/bid-templates/api/bid-template.queries';
 import type { Column } from '@/components/ui/Table';
 
@@ -86,9 +87,7 @@ export function BidTemplateListPage() {
       { value: '', label: 'All Trades' },
       { value: 'null', label: 'General / No Trade' },
     ];
-    for (const trade of trades) {
-      options.push({ value: trade.id, label: trade.name });
-    }
+    options.push(...tradeFilterOptions(trades));
     return options;
   }, [trades]);
 

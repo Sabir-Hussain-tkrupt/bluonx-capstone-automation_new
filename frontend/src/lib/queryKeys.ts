@@ -240,6 +240,11 @@ export const queryKeys = {
     project: (projectId: string) => [...queryKeys.invoices.all, projectId] as const,
   },
 
+  notes: {
+    all: ['project_notes'] as const,
+    project: (projectId: string) => [...queryKeys.notes.all, projectId] as const,
+  },
+
   holidays: {
     all: ['holidays'] as const,
     lists: () => [...queryKeys.holidays.all, 'list'] as const,

@@ -49,6 +49,8 @@ export interface Trade {
   name: string;
   phase: 'due_diligence' | 'development' | 'both';
   is_active: boolean;
+  /** Set when this is a subtrade (one level). */
+  parent_trade_id?: string | null;
 }
 
 // ─── Reads ────────────────────────────────────────────────────────────
@@ -101,7 +103,7 @@ export async function fetchTaskById(projectId: string, taskId: string): Promise<
 export async function fetchActiveTrades(): Promise<Trade[]> {
   const { data, error } = await supabase
     .from('trades')
-    .select('id, name, phase, is_active')
+    .select('id, name, phase, is_active, parent_trade_id')
     .eq('is_active', true)
     .order('name');
 

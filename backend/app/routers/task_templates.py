@@ -10,6 +10,7 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.query_filters import escape_like_pattern
 from app.core.supabase_client import get_supabase
+from app.services.trade_family import trade_family_ids
 from app.models.task_templates import (
     TaskTemplateCreate,
     TaskTemplateListResponse,
@@ -137,7 +138,9 @@ async def list_task_templates(
         query = query.eq("phase", phase)
 
     if trade_id:
-        query = query.eq("trade_id", str(trade_id))
+        # A trade with subtrades also lists its subtrades' templates.
+        family = trade_family_ids(db, str(trade_id), include_parent=False)
+        query = query.eq("trade_id", str(trade_id)) if len(family) == 1 else query.in_("trade_id", family)
 
     if is_active is not None:
         query = query.eq("is_active", is_active)

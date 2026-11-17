@@ -5,3 +5,13 @@ export { useTrades } from './hooks/useTrades';
 export { useCreateTrade } from './hooks/useCreateTrade';
 export type { Trade, TradePhase, CreateTradeInput } from './types';
 export { TRADE_PHASE_LABELS, TRADE_PHASE_ORDER } from './types';
+export type { TradeUsage, UpdateTradeInput } from './types';
+export { useTradeUsage, useUpdateTrade, useDeleteTrade } from './hooks/useTradeMutations';
+export {
+  assignableTradeOptions,
+  buildTradeTree,
+  hasSubtrades,
+  subtradesOf,
+  tradeFilterOptions,
+  tradeLabel,
+} from './utils/tradeTree';

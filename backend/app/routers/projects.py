@@ -19,7 +19,7 @@ from app.services.geocoding import (
     resolve_coordinates,
 )
 from app.core.file_validation import read_upload, sanitize_filename, validate_upload
-from app.core.query_filters import escape_like_pattern
+from app.core.query_filters import apply_state_filter, escape_like_pattern
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.common import SignedUrlResponse
@@ -75,6 +75,7 @@ def _get_project_or_404(db: Client, project_id: UUID) -> dict:
 async def list_projects(
     search: str | None = Query(default=None, description="Search by project name"),
     project_status: str | None = Query(default=None, alias="status", description="Filter by status"),
+    state: str | None = Query(default=None, max_length=50, description="Filter by US state (code or name, e.g. MO or Missouri)"),
     include_archived: bool = Query(default=False, description="Include archived projects (hidden by default)"),
     archived_only: bool = Query(default=False, description="Return only archived projects (overrides include_archived)"),
     sort_by: str = Query(default="name", description="Column to sort by"),
@@ -105,6 +106,8 @@ async def list_projects(
             q = q.ilike("name", f"%{escape_like_pattern(search)}%")
         if project_status:
             q = q.eq("status", project_status)
+        if state:
+            q = apply_state_filter(q, state)
         return q
 
     # Sorting (allow-list; unknown columns fall back to a safe default)

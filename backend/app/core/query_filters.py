@@ -1,5 +1,7 @@
 """Helpers for building safe PostgREST filter values."""
 
+from app.core.us_states import state_or_filter
+
 
 def escape_like_pattern(value: str) -> str:
     """Escape LIKE/ILIKE wildcards so user input is matched literally.
@@ -26,3 +28,15 @@ def escape_like_pattern(value: str) -> str:
         .replace("_", "\\_")
         .replace("*", "\\*")
     )
+
+
+def apply_state_filter(query, value: str):
+    """Filter a projects / vendors query by US state.
+
+    A known state (code or full name) matches rows holding either spelling,
+    case-insensitively. Anything else is matched literally (case-insensitive).
+    """
+    expr = state_or_filter(value)
+    if expr is not None:
+        return query.or_(expr)
+    return query.ilike("state", escape_like_pattern(" ".join(value.split())))

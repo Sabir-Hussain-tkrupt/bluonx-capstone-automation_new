@@ -229,7 +229,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
         >
           <div className="space-y-4">
             <p className="text-sm text-secondary-600">
-              The budget starts from the standard template (Settings → Budget Template). Every task becomes a line in
+              The budget starts from the standard template (Budget Templates in the sidebar). Every task becomes a line in
               template order. Tasks that are already awarded come in at their award amount as committed. You can add,
               remove, reorder and edit lines until you baseline.
             </p>
