@@ -24,3 +24,10 @@ class SignedUrlResponse(BaseModel):
     """Response containing a signed download URL."""
 
     url: str
+
+
+class StateOption(BaseModel):
+    """One option of a list page's "State" filter."""
+
+    value: str
+    label: str

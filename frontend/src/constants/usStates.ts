@@ -57,8 +57,22 @@ export const US_STATES: ReadonlyArray<{ code: string; name: string }> = [
   { code: 'WY', name: 'Wyoming' },
 ];
 
-/** Select options: "All States" first, then every state. */
-export const US_STATE_FILTER_OPTIONS = [
-  { value: '', label: 'All States' },
-  ...US_STATES.map((s) => ({ value: s.code, label: `${s.name} (${s.code})` })),
-];
+/** One "State" filter option, as returned by GET /projects/states and /vendors/states. */
+export interface StateOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Select options for a list's "State" filter: "All States", then only the
+ * states that list's records use. A selected value that is no longer in use
+ * stays listed so the select never shows a blank choice.
+ */
+export function stateFilterOptions(used: readonly StateOption[] | undefined, selected = ''): StateOption[] {
+  const options = [...(used ?? [])];
+  if (selected && !options.some((o) => o.value === selected)) {
+    const known = US_STATES.find((s) => s.code === selected);
+    options.push({ value: selected, label: known ? `${known.name} (${known.code})` : selected });
+  }
+  return [{ value: '', label: 'All States' }, ...options];
+}

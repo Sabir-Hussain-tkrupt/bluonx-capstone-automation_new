@@ -25,11 +25,12 @@ from app.services.vendor_service import (
     recompute_vendor_insurance_expiration,
 )
 from app.core.file_validation import read_upload, sanitize_filename, validate_upload
-from app.core.query_filters import apply_state_filter, escape_like_pattern
+from app.core.query_filters import apply_state_filter, escape_like_pattern, fetch_column_values
+from app.core.us_states import state_options
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import EmailLogResponse
-from app.models.common import SignedUrlResponse
+from app.models.common import SignedUrlResponse, StateOption
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
     get_vendor_email_log,
@@ -241,6 +242,19 @@ async def get_insurance_expiring_count(
         .execute()
     )
     return {"count": resp.count or 0}
+
+
+@router.get("/vendors/states", response_model=list[StateOption])
+async def list_vendor_states(
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """States used by vendors, for the list page's "State" filter."""
+
+    def _query():
+        return db.table("vendors").select("id, state").is_("deleted_at", "null").not_.is_("state", "null")
+
+    return state_options(fetch_column_values(_query, "state"))
 
 
 @router.get("/vendors/{vendor_id}", response_model=VendorDetailResponse)

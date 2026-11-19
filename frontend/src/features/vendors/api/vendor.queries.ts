@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import type { EmailLogResponse } from '@/features/bids/types';
+import type { StateOption } from '@/constants/usStates';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -144,6 +145,12 @@ export async function fetchVendors(filters?: VendorListFilters): Promise<Paginat
     },
   });
   return data;
+}
+
+/** States used by vendors, for the list's "State" filter. */
+export async function fetchVendorStates(): Promise<StateOption[]> {
+  const { data } = await api.get<StateOption[]>(API_ENDPOINTS.VENDOR_STATES);
+  return data ?? [];
 }
 
 /**

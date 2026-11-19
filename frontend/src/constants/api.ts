@@ -16,6 +16,7 @@ export const API_ENDPOINTS = {
 
   // Vendors
   VENDORS: '/vendors',
+  VENDOR_STATES: '/vendors/states',
   VENDOR: (id: string) => `/vendors/${id}`,
   VENDOR_CONTACTS: (vendorId: string) => `/vendors/${vendorId}/contacts`,
   VENDOR_CONTACT: (vendorId: string, contactId: string) => `/vendors/${vendorId}/contacts/${contactId}`,
@@ -27,6 +28,7 @@ export const API_ENDPOINTS = {
 
   // Projects
   PROJECTS: '/projects',
+  PROJECT_STATES: '/projects/states',
   PROJECT: (id: string) => `/projects/${id}`,
 
   // Tasks (project-scoped)

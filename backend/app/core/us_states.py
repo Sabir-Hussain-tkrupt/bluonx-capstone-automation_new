@@ -49,3 +49,26 @@ def state_or_filter(value: str, column: str = "state") -> str | None:
         return None
     code, name = resolved
     return f'{column}.ilike.{code},{column}.ilike."{name}"'
+
+
+def state_options(values) -> list[dict[str, str]]:
+    """Filter options for the states that actually occur in `values`.
+
+    A known state (code or full name, any case) becomes one option keyed by its
+    code, so "MO" and "Missouri" collapse into "Missouri (MO)". Any other
+    non-blank text is kept as typed, merged case-insensitively. Sorted by label.
+    """
+    options: dict[str, dict[str, str]] = {}
+    for raw in values:
+        if not isinstance(raw, str):
+            continue
+        cleaned = " ".join(raw.split())
+        if not cleaned:
+            continue
+        resolved = resolve_state(cleaned)
+        if resolved:
+            code, name = resolved
+            options.setdefault(code, {"value": code, "label": f"{name} ({code})"})
+        else:
+            options.setdefault(cleaned.lower(), {"value": cleaned, "label": cleaned})
+    return sorted(options.values(), key=lambda o: o["label"].lower())

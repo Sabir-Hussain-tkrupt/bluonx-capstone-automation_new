@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
-import { US_STATE_FILTER_OPTIONS } from '@/constants/usStates';
+import { stateFilterOptions } from '@/constants/usStates';
 import { tradeFilterOptions } from '@/features/trades/utils/tradeTree';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useVendors } from '@/features/vendors/hooks/useVendors';
+import { useVendorStates } from '@/features/vendors/hooks/useVendorStates';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
 import { useCreateVendor } from '@/features/vendors/hooks/useCreateVendor';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
@@ -86,6 +87,7 @@ export function VendorListPage() {
   }), [debouncedSearch, statusFilter, onboardingFilter, tradeFilter, stateFilter, sortBy, sortDir, page, pageSize]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useVendors(filters);
+  const { data: usedStates } = useVendorStates();
   const { data: trades = [] } = useTrades();
   const createVendorMutation = useCreateVendor();
 
@@ -219,7 +221,7 @@ export function VendorListPage() {
           value={stateFilter}
           onChange={(e) => { setStateFilter(e.target.value); setPage(1); }}
           placeholder="All States"
-          options={US_STATE_FILTER_OPTIONS}
+          options={stateFilterOptions(usedStates, stateFilter)}
           size="sm"
         />
       </div>

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
-import { US_STATE_FILTER_OPTIONS } from '@/constants/usStates';
+import { stateFilterOptions } from '@/constants/usStates';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useProjects } from '@/features/projects/hooks/useProjects';
+import { useProjectStates } from '@/features/projects/hooks/useProjectStates';
 import { useCreateProject } from '@/features/projects/hooks/useCreateProject';
 import { ProjectForm } from '@/features/projects/components/ProjectForm';
 import { formatCurrency, formatDateOnly } from '@/lib/format';
@@ -73,6 +74,7 @@ export function ProjectListPage() {
   }), [debouncedSearch, statusFilter, stateFilter, archivedView, sortBy, sortDir, page, pageSize]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useProjects(filters);
+  const { data: usedStates } = useProjectStates(archivedView);
   const createProjectMutation = useCreateProject();
 
   const projects = data?.items ?? [];
@@ -180,7 +182,7 @@ export function ProjectListPage() {
           value={stateFilter}
           onChange={(e) => { setStateFilter(e.target.value); setPage(1); }}
           placeholder="All States"
-          options={US_STATE_FILTER_OPTIONS}
+          options={stateFilterOptions(usedStates, stateFilter)}
           size="sm"
         />
       </div>
