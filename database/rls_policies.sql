@@ -827,6 +827,24 @@ END $$;
 
 
 -- ============================================================================
+-- PROJECT NOTES (v4.3 — migration 20261117_notes_states_subtrades)
+-- ============================================================================
+-- Any active user reads; every write goes through FastAPI (service_role).
+
+ALTER TABLE public.project_notes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.project_notes FROM anon;
+REVOKE ALL ON TABLE public.project_notes FROM authenticated;
+GRANT SELECT ON TABLE public.project_notes TO authenticated;
+GRANT ALL ON TABLE public.project_notes TO service_role;
+
+DROP POLICY IF EXISTS project_notes_select_authenticated ON public.project_notes;
+CREATE POLICY project_notes_select_authenticated
+  ON public.project_notes FOR SELECT TO authenticated
+  USING ((SELECT private.is_active_user()) AND deleted_at IS NULL);
+
+
+
+-- ============================================================================
 -- STEP 6: VERIFICATION QUERY
 -- ============================================================================
 -- Run this after applying the migration to confirm RLS is enabled on

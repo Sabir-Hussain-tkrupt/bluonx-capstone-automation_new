@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import { toNumberOrNull } from '@/lib/format';
+import type { StateOption } from '@/constants/usStates';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@ export interface Project {
 export interface ProjectListFilters {
   search?: string;
   status?: string;
+  /** US state postal code (e.g. 'MO'). */
+  state?: string;
   archived?: boolean;
   sort_by?: string;
   sort_dir?: 'asc' | 'desc';
@@ -84,6 +87,7 @@ export async function fetchProjects(filters?: ProjectListFilters): Promise<Pagin
       // The archived-only view has no status sub-filter; the backend applies
       // `status` regardless, so omit it when asking for archived only.
       status: filters?.archived ? undefined : filters?.status || undefined,
+      state: filters?.state || undefined,
       archived_only: filters?.archived || undefined,
       sort_by: filters?.sort_by,
       sort_dir: filters?.sort_dir,
@@ -93,6 +97,17 @@ export async function fetchProjects(filters?: ProjectListFilters): Promise<Pagin
   });
 
   return { ...data, items: (data.items ?? []).map(normalizeProject) };
+}
+
+/**
+ * States used by projects, for the list's "State" filter. Active projects by
+ * default; `archived` asks for the archived ones (the list's Archived view).
+ */
+export async function fetchProjectStates(archived = false): Promise<StateOption[]> {
+  const { data } = await api.get<StateOption[]>(API_ENDPOINTS.PROJECT_STATES, {
+    params: { archived_only: archived || undefined },
+  });
+  return data ?? [];
 }
 
 /**

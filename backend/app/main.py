@@ -39,6 +39,7 @@ from app.routers import (
     internal_invoices,
     milestones,
     notifications,
+    project_notes,
     projects,
     reviews,
     scheduler_health,
@@ -156,6 +157,7 @@ app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(budgets.router, prefix=_v1, tags=["Budgets"])
 app.include_router(budget_templates.router, prefix=_v1, tags=["Budget Templates"])
 app.include_router(internal_invoices.router, prefix=_v1, tags=["Internal Invoices"])
+app.include_router(project_notes.router, prefix=_v1, tags=["Project Notes"])
 app.include_router(notifications.router, prefix=_v1, tags=["Notifications"])
 app.include_router(webhooks.router, prefix=_v1, tags=["Webhooks"])
 app.include_router(docusign_webhooks.router, prefix=_v1, tags=["DocuSign Webhooks"])

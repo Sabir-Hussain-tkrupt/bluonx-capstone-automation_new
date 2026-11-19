@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { errorMessage } from '@/lib/api';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
+import { tradeFilterOptions } from '@/features/trades/utils/tradeTree';
 import {
   useTaskTemplates,
   useCreateTaskTemplate,
@@ -37,7 +38,7 @@ export function TaskTemplateListPage() {
 
   const tradeOptions = useMemo(() => [
     { value: '', label: 'All Trades' },
-    ...trades.map((t) => ({ value: t.id, label: t.name })),
+    ...tradeFilterOptions(trades),
   ], [trades]);
 
   const handleSort = useCallback(

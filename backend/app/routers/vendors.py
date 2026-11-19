@@ -19,16 +19,18 @@ from app.services.geocoding import (
     address_fields_changed,
     resolve_coordinates,
 )
+from app.services.trade_family import trade_family_ids
 from app.services.vendor_service import (
     missing_requirements_for_complete,
     recompute_vendor_insurance_expiration,
 )
 from app.core.file_validation import read_upload, sanitize_filename, validate_upload
-from app.core.query_filters import escape_like_pattern
+from app.core.query_filters import apply_state_filter, escape_like_pattern, fetch_column_values
+from app.core.us_states import state_options
 from app.core.storage import delete_file, get_signed_url, unique_object_path, upload_file
 from app.core.supabase_client import get_supabase
 from app.models.bid_packages import EmailLogResponse
-from app.models.common import SignedUrlResponse
+from app.models.common import SignedUrlResponse, StateOption
 from app.services.invitation_tracking_service import (
     InvitationTrackingError,
     get_vendor_email_log,
@@ -145,7 +147,8 @@ async def list_vendors(
     search: str | None = Query(default=None, description="Search by company name"),
     vendor_status: str | None = Query(default=None, alias="status", description="Filter by status"),
     onboarding_status: str | None = Query(default=None, description="Filter by onboarding status"),
-    trade_id: UUID | None = Query(default=None, description="Filter by trade association"),
+    trade_id: UUID | None = Query(default=None, description="Filter by trade association (includes its subtrades)"),
+    state: str | None = Query(default=None, max_length=50, description="Filter by US state (code or name, e.g. MO or Missouri)"),
     sort_by: str = Query(default="company_name", description="Column to sort by"),
     sort_dir: str = Query(default="asc", description="Sort direction: asc or desc"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -161,6 +164,10 @@ async def list_vendors(
     # matching vendor ids, then .in_(...)" lookup. That older shape silently
     # truncated at PostgREST's default 1000-row ceiling once a trade had enough
     # vendors, and pushed every id into the query string.
+    # Filtering by a trade that has subtrades also lists vendors registered for
+    # any of its subtrades.
+    trade_ids = trade_family_ids(db, str(trade_id), include_parent=False) if trade_id else []
+
     def _filtered(select_expr: str):
         if trade_id:
             select_expr = f"{select_expr}, vendor_trades!inner(trade_id)"
@@ -172,7 +179,12 @@ async def list_vendors(
         if onboarding_status:
             q = q.eq("onboarding_status", onboarding_status)
         if trade_id:
-            q = q.eq("vendor_trades.trade_id", str(trade_id))
+            if len(trade_ids) > 1:
+                q = q.in_("vendor_trades.trade_id", trade_ids)
+            else:
+                q = q.eq("vendor_trades.trade_id", str(trade_id))
+        if state:
+            q = apply_state_filter(q, state)
         return q
 
     # Sorting
@@ -230,6 +242,19 @@ async def get_insurance_expiring_count(
         .execute()
     )
     return {"count": resp.count or 0}
+
+
+@router.get("/vendors/states", response_model=list[StateOption])
+async def list_vendor_states(
+    user: dict = Depends(get_current_active_user),
+    db: Client = Depends(get_supabase),
+):
+    """States used by vendors, for the list page's "State" filter."""
+
+    def _query():
+        return db.table("vendors").select("id, state").is_("deleted_at", "null").not_.is_("state", "null")
+
+    return state_options(fetch_column_values(_query, "state"))
 
 
 @router.get("/vendors/{vendor_id}", response_model=VendorDetailResponse)

@@ -16,6 +16,7 @@ export const API_ENDPOINTS = {
 
   // Vendors
   VENDORS: '/vendors',
+  VENDOR_STATES: '/vendors/states',
   VENDOR: (id: string) => `/vendors/${id}`,
   VENDOR_CONTACTS: (vendorId: string) => `/vendors/${vendorId}/contacts`,
   VENDOR_CONTACT: (vendorId: string, contactId: string) => `/vendors/${vendorId}/contacts/${contactId}`,
@@ -27,6 +28,7 @@ export const API_ENDPOINTS = {
 
   // Projects
   PROJECTS: '/projects',
+  PROJECT_STATES: '/projects/states',
   PROJECT: (id: string) => `/projects/${id}`,
 
   // Tasks (project-scoped)
@@ -35,8 +37,14 @@ export const API_ENDPOINTS = {
   PROJECT_TASKS_REORDER: (projectId: string) => `/projects/${projectId}/tasks/reorder`,
   PROJECT_DEFAULT_TASKS: (projectId: string) => `/projects/${projectId}/tasks/default`,
 
-  // Trades
+  // Project notes (rich text)
+  PROJECT_NOTES: (projectId: string) => `/projects/${projectId}/notes`,
+  PROJECT_NOTE: (noteId: string) => `/project-notes/${noteId}`,
+
+  // Trades (and subtrades)
   TRADES: '/trades',
+  TRADE: (id: string) => `/trades/${id}`,
+  TRADE_USAGE: (id: string) => `/trades/${id}/usage`,
 
   // Contract signers (admin-only writes; reads go direct to Supabase under RLS)
   CONTRACT_SIGNERS: '/contract-signers',

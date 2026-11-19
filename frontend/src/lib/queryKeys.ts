@@ -38,6 +38,8 @@ export const queryKeys = {
       filters
         ? ([...queryKeys.vendors.lists(), filters] as const)
         : queryKeys.vendors.lists(),
+    // Under lists() so every vendor create / update / delete refreshes it.
+    states: () => [...queryKeys.vendors.lists(), 'states'] as const,
     details: () => [...queryKeys.vendors.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.vendors.details(), id] as const,
     insuranceExpiringCount: () =>
@@ -53,6 +55,8 @@ export const queryKeys = {
       filters
         ? ([...queryKeys.projects.lists(), filters] as const)
         : queryKeys.projects.lists(),
+    // Under lists() so every project create / update / archive refreshes it.
+    states: (archived: boolean) => [...queryKeys.projects.lists(), 'states', { archived }] as const,
     details: () => [...queryKeys.projects.all, 'detail'] as const,
     detail: (id: string) => [...queryKeys.projects.details(), id] as const,
   },
@@ -238,6 +242,11 @@ export const queryKeys = {
   invoices: {
     all: ['internal_invoices'] as const,
     project: (projectId: string) => [...queryKeys.invoices.all, projectId] as const,
+  },
+
+  notes: {
+    all: ['project_notes'] as const,
+    project: (projectId: string) => [...queryKeys.notes.all, projectId] as const,
   },
 
   holidays: {

@@ -6,9 +6,9 @@ export function TradesSettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-secondary-900">Manage Trades</h1>
         <p className="mt-1 text-sm text-secondary-500">
-          View trades grouped by project phase and add new ones. Editing and
-          deactivating trades is intentionally disabled to protect existing
-          tasks, bid packages, and vendor associations.
+          Trades grouped by project phase, each with optional subtrades. A trade or
+          subtrade can be renamed or deleted only while no task, vendor or template
+          uses it.
         </p>
       </div>
 

@@ -156,13 +156,15 @@ export function AppRoutes() {
           }
         />
         <Route
-          path={ROUTES.SETTINGS_BUDGET_TEMPLATE}
+          path={ROUTES.BUDGET_TEMPLATES}
           element={
             <ProtectedRoute requiredRole="admin">
               <BudgetTemplatePage />
             </ProtectedRoute>
           }
         />
+        {/* Old location (before Budget Templates moved to the sidebar). */}
+        <Route path="/settings/budget-template" element={<Navigate to={ROUTES.BUDGET_TEMPLATES} replace />} />
       </Route>
 
       {/* Vendor Portal — public, isolated from admin layout/auth */}

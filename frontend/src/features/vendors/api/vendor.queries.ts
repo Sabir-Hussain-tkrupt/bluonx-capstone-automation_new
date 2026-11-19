@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { api, fromSupabaseError } from '@/lib/api';
 import { API_ENDPOINTS } from '@/constants/api';
 import type { EmailLogResponse } from '@/features/bids/types';
+import type { StateOption } from '@/constants/usStates';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ export interface Trade {
   name: string;
   phase: 'due_diligence' | 'development' | 'both';
   is_active: boolean;
+  /** Set when this is a subtrade (one level). */
+  parent_trade_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +104,8 @@ export interface VendorListFilters {
   status?: string;
   onboarding_status?: string;
   trade_id?: string;
+  /** US state postal code (e.g. 'TX'). */
+  state?: string;
   sort_by?: string;
   sort_dir?: 'asc' | 'desc';
   page?: number;
@@ -132,6 +137,7 @@ export async function fetchVendors(filters?: VendorListFilters): Promise<Paginat
       status: filters?.status || undefined,
       onboarding_status: filters?.onboarding_status || undefined,
       trade_id: filters?.trade_id || undefined,
+      state: filters?.state || undefined,
       sort_by: filters?.sort_by,
       sort_dir: filters?.sort_dir,
       page: filters?.page,
@@ -139,6 +145,12 @@ export async function fetchVendors(filters?: VendorListFilters): Promise<Paginat
     },
   });
   return data;
+}
+
+/** States used by vendors, for the list's "State" filter. */
+export async function fetchVendorStates(): Promise<StateOption[]> {
+  const { data } = await api.get<StateOption[]>(API_ENDPOINTS.VENDOR_STATES);
+  return data ?? [];
 }
 
 /**

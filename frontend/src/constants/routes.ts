@@ -24,6 +24,7 @@ export const ROUTES = {
   BID_PACKAGES: '/bid-packages',
   BID_TEMPLATES: '/bid-templates',
   TASK_TEMPLATES: '/task-templates',
+  BUDGET_TEMPLATES: '/budget-templates',
   BID_TEMPLATE_NEW: '/bid-templates/new',
   BID_TEMPLATE_DETAIL: '/bid-templates/:id',
   BID_TEMPLATE_EDIT: '/bid-templates/:id/edit',
@@ -38,7 +39,6 @@ export const ROUTES = {
   SETTINGS_USERS: '/settings/users',
   SETTINGS_CALENDAR: '/settings/calendar',
   SETTINGS_CONTRACT_SIGNERS: '/settings/contract-signers',
-  SETTINGS_BUDGET_TEMPLATE: '/settings/budget-template',
 
   // Error pages
   UNAUTHORIZED: '/unauthorized',

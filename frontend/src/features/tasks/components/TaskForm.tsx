@@ -8,6 +8,7 @@ import { TextInput } from '@/components/ui/TextInput';
 import { FormField } from '@/components/ui/FormField';
 import { Select } from '@/components/ui/Select';
 import { useTrades } from '@/features/tasks/hooks/useTrades';
+import { assignableTradeOptions } from '@/features/trades/utils/tradeTree';
 import type { Task } from '@/features/tasks/api/task.queries';
 
 const taskSchema = z.object({
@@ -200,10 +201,8 @@ export function TaskForm({ isOpen, onClose, task, onSubmit, isLoading = false }:
                     placeholder={selectedPhase ? 'Select trade' : 'Select phase first'}
                     disabled={!selectedPhase}
                     error={errors.trade_id?.message}
-                    options={filteredTrades.map((t) => ({
-                      value: t.id,
-                      label: t.name,
-                    }))}
+                    // A trade with subtrades is picked through one of its subtrades.
+                    options={assignableTradeOptions(filteredTrades, task?.trade_id)}
                   />
                 )}
               />

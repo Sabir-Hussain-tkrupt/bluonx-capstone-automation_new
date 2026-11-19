@@ -1,6 +1,6 @@
 # BluOnX Bid Management & Vendor Coordination System — Database Schema Documentation
 
-**Schema Version:** 4.2 (Bid Management v3.9 + Financial Automation Phases 1–2 + budget envelope patch)  
+**Schema Version:** 4.3 (Bid Management v3.9 + Financial Automation Phases 1–2 + budget envelope patch + notes / subtrades)  
 **Last Updated:** November 18, 2026  
 **Author:** Awais Anwer (Tkrupt)  
 **Engine:** PostgreSQL via Supabase  
@@ -949,3 +949,43 @@ Draft only: retires every line (soft delete) and sets `budget_status = 'none'` s
 - `v_project_budget_summary.remaining` = total − contingency − committed.
 - New columns at the end of `v_project_budget_summary`: `project_budget`, `unallocated`, `over_project_budget` (lines total − project budget).
 - `budget_lines.line_subtype` CHECK widened with `unallocated` (superset).
+
+---
+
+## 13. Project notes, subtrades, safe trade delete (v4.3)
+
+Migration `20261117_notes_states_subtrades`.
+
+### 13.1 `project_notes`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| project_id | UUID FK → projects (RESTRICT) | |
+| title | VARCHAR(255) | not blank |
+| content_html | TEXT | editor HTML, ≤ 2,000,000 characters (`chk_project_notes_size`) |
+| content_text | TEXT | plain-text copy for previews |
+| created_by | UUID FK → users (RESTRICT) | author |
+| updated_by | UUID FK → users (SET NULL) | last editor |
+| created_at / updated_at | TIMESTAMPTZ | `trg_project_notes_updated_at` |
+| deleted_at | TIMESTAMPTZ | soft delete |
+
+Index `idx_project_notes_project (project_id, updated_at DESC) WHERE deleted_at IS NULL`. RLS: `project_notes_select_authenticated` (active users, not deleted); `authenticated` has SELECT only; writes go through FastAPI (`/projects/{id}/notes`, `/project-notes/{id}`). The author or an admin may edit or delete.
+
+### 13.2 Subtrades: `trades.parent_trade_id`
+
+- `fk_trades_parent` (RESTRICT), `chk_trades_parent_not_self`, `idx_trades_parent`.
+- `UNIQUE (name)` is replaced by `uq_trades_top_level_name (name) WHERE parent_trade_id IS NULL` and `uq_trades_subtrade_name (parent_trade_id, name) WHERE parent_trade_id IS NOT NULL`.
+- `trg_trades_hierarchy` (BEFORE INSERT / UPDATE OF parent_trade_id, phase): the parent must exist (PT404), one level only (PT422), and a trade with subtrades cannot become a subtrade (PT422). It also copies the parent's phase.
+- `trg_trades_cascade_phase` (AFTER UPDATE OF phase): a parent's new phase flows to its subtrades.
+- `trg_<table>_leaf_trade` on `tasks`, `vendor_trades`, `task_templates`, `bid_templates` (`fn_enforce_leaf_trade`). When `trade_id` is set or changed to a trade that has active subtrades, it raises PT422 'Trade "X" has subtrades — choose one of its subtrades.'
+
+### 13.3 Usage and delete
+
+- `fn_trade_usage(uuid) → jsonb` returns `{tasks, vendors, task_templates, bid_templates, budget_template_lines, variances, subtrades, total}`. Tasks are counted including soft-deleted ones, because they still hold the reference.
+- `fn_delete_trade(uuid) → SETOF trades`: row-locked hard delete, refused with PT409 while `total > 0`.
+- Both are EXECUTE for `service_role` only. API: `GET /trades/{id}/usage`, `PATCH /trades/{id}` (name and phase only while unused; `is_active` always), `DELETE /trades/{id}`.
+
+### 13.4 State filters
+
+No schema change. `GET /projects?state=` and `GET /vendors?state=` match `state` case-insensitively against the postal code or the full name (50 states + DC).

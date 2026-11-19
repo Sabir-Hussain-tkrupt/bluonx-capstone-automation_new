@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/constants/routes';
+import { stateFilterOptions } from '@/constants/usStates';
+import { tradeFilterOptions } from '@/features/trades/utils/tradeTree';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -10,6 +12,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast/useToast';
 import { useVendors } from '@/features/vendors/hooks/useVendors';
+import { useVendorStates } from '@/features/vendors/hooks/useVendorStates';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
 import { useCreateVendor } from '@/features/vendors/hooks/useCreateVendor';
 import { VendorForm } from '@/features/vendors/components/VendorForm';
@@ -42,6 +45,7 @@ export function VendorListPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [onboardingFilter, setOnboardingFilter] = useState('');
   const [tradeFilter, setTradeFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
   const [sortBy, setSortBy] = useState('company_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -75,13 +79,15 @@ export function VendorListPage() {
     status: statusFilter || undefined,
     onboarding_status: onboardingFilter || undefined,
     trade_id: tradeFilter || undefined,
+    state: stateFilter || undefined,
     sort_by: sortBy,
     sort_dir: sortDir,
     page,
     page_size: pageSize,
-  }), [debouncedSearch, statusFilter, onboardingFilter, tradeFilter, sortBy, sortDir, page, pageSize]);
+  }), [debouncedSearch, statusFilter, onboardingFilter, tradeFilter, stateFilter, sortBy, sortDir, page, pageSize]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useVendors(filters);
+  const { data: usedStates } = useVendorStates();
   const { data: trades = [] } = useTrades();
   const createVendorMutation = useCreateVendor();
 
@@ -143,7 +149,7 @@ export function VendorListPage() {
   ], []);
 
   const tradeOptions = useMemo(
-    () => trades.map((t) => ({ value: t.id, label: t.name })),
+    () => tradeFilterOptions(trades),
     [trades],
   );
 
@@ -171,7 +177,7 @@ export function VendorListPage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <TextInput
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -208,6 +214,14 @@ export function VendorListPage() {
           onChange={(e) => { setTradeFilter(e.target.value); setPage(1); }}
           placeholder="All Trades"
           options={[{ value: '', label: 'All Trades' }, ...tradeOptions]}
+          size="sm"
+        />
+        <Select
+          aria-label="Filter by state"
+          value={stateFilter}
+          onChange={(e) => { setStateFilter(e.target.value); setPage(1); }}
+          placeholder="All States"
+          options={stateFilterOptions(usedStates, stateFilter)}
           size="sm"
         />
       </div>

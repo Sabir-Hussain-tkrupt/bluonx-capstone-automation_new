@@ -16,6 +16,7 @@ import { useCreateBidTemplate } from '@/features/bid-templates/hooks/useCreateBi
 import { useUpdateBidTemplate } from '@/features/bid-templates/hooks/useUpdateBidTemplate';
 import { useDuplicateBidTemplate } from '@/features/bid-templates/hooks/useDuplicateBidTemplate';
 import { useTrades } from '@/features/vendors/hooks/useTrades';
+import { assignableTradeOptions } from '@/features/trades/utils/tradeTree';
 import { LineItemsEditor } from '@/features/bid-templates/components/LineItemsEditor';
 import { BidTemplatePreview } from '@/features/bid-templates/components/BidTemplatePreview';
 
@@ -179,9 +180,8 @@ export function BidTemplateFormPage() {
   // It is only ever offered on the template that already holds it.
   const tradeOptions = useMemo(() => {
     const options = [{ value: '', label: 'None \u2014 General Purpose' }];
-    for (const trade of trades) {
-      options.push({ value: trade.id, label: trade.name });
-    }
+    // A trade with subtrades is picked through one of its subtrades.
+    options.push(...assignableTradeOptions(trades, template?.trade_id));
     if (
       template?.trade_id &&
       !options.some((option) => option.value === template.trade_id)

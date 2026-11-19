@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   ListChecks,
+  ListOrdered,
   Settings,
   Users,
 } from 'lucide-react';
@@ -113,6 +114,15 @@ export function DashboardLayout() {
             href: ROUTES.TASK_TEMPLATES,
             icon: <ListChecks className="h-5 w-5" aria-hidden="true" />,
           },
+          // Budget templates are admin-managed (Phase 2 · Task 2.1).
+          ...(profile?.role === 'admin'
+            ? [{
+                id: 'budget-templates',
+                label: 'Budget Templates',
+                href: ROUTES.BUDGET_TEMPLATES,
+                icon: <ListOrdered className="h-5 w-5" aria-hidden="true" />,
+              }]
+            : []),
         ],
       },
     ];

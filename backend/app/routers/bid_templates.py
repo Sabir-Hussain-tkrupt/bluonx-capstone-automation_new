@@ -10,6 +10,7 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.query_filters import escape_like_pattern
 from app.core.supabase_client import get_supabase
+from app.services.trade_family import trade_family_ids
 from app.models.bid_templates import (
     BidTemplateCreate,
     BidTemplateDetailResponse,
@@ -477,7 +478,9 @@ async def list_bid_templates(
     if trade_id == "null":
         query = query.is_("trade_id", "null")
     elif trade_id:
-        query = query.eq("trade_id", trade_id)
+        # A trade with subtrades also lists its subtrades' templates.
+        family = trade_family_ids(db, trade_id, include_parent=False)
+        query = query.eq("trade_id", trade_id) if len(family) == 1 else query.in_("trade_id", family)
 
     # Sorting — whitelist to prevent injection
     allowed_sort_columns = {"name", "is_lump_sum", "created_at", "updated_at"}

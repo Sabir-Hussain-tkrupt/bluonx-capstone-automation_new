@@ -18,6 +18,7 @@ import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatabl
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { BudgetTab } from '@/features/budgets/components/BudgetTab';
 import { InvoicesTab } from '@/features/invoices/components/InvoicesTab';
+import { NotesTab } from '@/features/notes/components/NotesTab';
 import { useHasRole } from '@/lib/roles';
 import { useProject } from '@/features/projects/hooks/useProject';
 import { useUpdateProject } from '@/features/projects/hooks/useUpdateProject';
@@ -43,6 +44,7 @@ const TABS = [
   { id: 'tasks', label: 'Tasks' },
   { id: 'budget', label: 'Budget' },
   { id: 'invoices', label: 'Invoices' },
+  { id: 'notes', label: 'Notes' },
   { id: 'documents', label: 'Documents' },
 ];
 const TAB_IDS = TABS.map((t) => t.id);
@@ -350,6 +352,8 @@ export function ProjectDetailPage() {
         {activeTab === 'budget' && <BudgetTab projectId={id!} readOnly={isArchived} />}
 
         {activeTab === 'invoices' && canSeeInvoices && <InvoicesTab projectId={id!} readOnly={isArchived} />}
+
+        {activeTab === 'notes' && <NotesTab projectId={id!} readOnly={isArchived} />}
 
         {activeTab === 'documents' && (
           <div className="space-y-4">

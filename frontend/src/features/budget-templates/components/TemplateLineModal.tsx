@@ -7,7 +7,7 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Alert } from '@/components/ui/Alert';
 import { useToast } from '@/components/ui/Toast';
 import { errorMessage } from '@/lib/api';
-import { useTrades } from '@/features/trades';
+import { useTrades, assignableTradeOptions } from '@/features/trades';
 import { CASH_BUCKET_OPTIONS, LINE_SUBTYPE_LABELS, LINE_TYPE_LABELS, SUBTYPES_BY_TYPE } from '@/features/budgets/constants';
 import { useAddTemplateLine, useUpdateTemplateLine } from '@/features/budgets/hooks/useBudget';
 import type { BudgetTemplateLine, CashBucket, LineSubtype, LineType } from '@/features/budgets/types';
@@ -120,7 +120,7 @@ function TemplateLineForm({ templateId, line, onClose }: Omit<TemplateLineModalP
           {isActivity && (
             <FormField label="Trade" htmlFor="tl-trade" hint="Tasks of this trade are placed here when no name matches.">
               <Select id="tl-trade" value={tradeId} onChange={(e) => setTradeId(e.target.value)} placeholder="Any trade"
-                options={trades.map((t) => ({ value: t.id, label: t.name }))} />
+                options={assignableTradeOptions(trades, line?.trade_id)} />
             </FormField>
           )}
           {!isActivity && lineType !== 'contingency' && (

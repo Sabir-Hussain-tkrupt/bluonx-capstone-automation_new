@@ -163,9 +163,36 @@ def _trades_name_conflict(request: Request, exc: APIError) -> str:
         return active_message
 
 
+def _subtrade_name_conflict(request: Request, exc: APIError) -> str:
+    """Message for a duplicate subtrade name under the same trade.
+
+    The key is composite, `(parent_trade_id, name)=(<uuid>, <name>)`, so the
+    name is whatever follows the first ", ".
+    """
+    value = conflicting_value(exc)
+    name = value.split(", ", 1)[1].strip() if value and ", " in value else None
+    if not name:
+        return "This trade already has a subtrade with that name."
+    return f'This trade already has a subtrade named "{name}".'
+
+
 _CONSTRAINT_MESSAGES: dict[str, str | Callable[[Request, APIError], str]] = {
     "trades_name_key": _trades_name_conflict,
+    # 20261117: UNIQUE(name) became two partial unique indexes.
+    "uq_trades_top_level_name": _trades_name_conflict,
+    "uq_trades_subtrade_name": _subtrade_name_conflict,
 }
+
+# Guardrail triggers / functions raise custom SQLSTATEs with a message written
+# for a person (e.g. 'Trade "Electrical" has subtrades — choose one of its
+# subtrades.'). They pass through verbatim with the matching status.
+_GUARDRAIL_STATUS = {"PT403": 403, "PT404": 404, "PT409": 409, "PT422": 422}
+
+
+def guardrail_status(exc: APIError) -> int | None:
+    """HTTP status for a PT4xx guardrail error, else None."""
+    code = str(getattr(exc, "code", "") or "")
+    return _GUARDRAIL_STATUS.get(code)
 
 
 def _conflict_detail(request: Request, exc: APIError) -> str:
@@ -203,6 +230,11 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
             status_code=409,
             content={"detail": _conflict_detail(request, exc)},
         )
+
+    guard = guardrail_status(exc)
+    if guard is not None:
+        message = getattr(exc, "message", None) or str(exc)
+        return JSONResponse(status_code=guard, content={"detail": str(message)})
 
     logger.error(
         "Unhandled Supabase APIError on %s %s: %s",
