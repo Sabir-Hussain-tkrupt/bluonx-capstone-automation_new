@@ -25,6 +25,7 @@ import { useDefaultBudgetTemplate, useDeleteTemplateLine, useReorderTemplateLine
 import type { BudgetTemplateLine } from '@/features/budgets/types';
 import { formatMoney } from '@/features/budgets/utils/money';
 import { TemplateLineModal } from '../components/TemplateLineModal';
+import { ContingencySettingsCard } from '@/features/contingency/components/ContingencySettingsCard';
 
 /**
  * Budget Templates (sidebar; Task 2.1). One standard layout, from land
@@ -158,6 +159,8 @@ export function BudgetTemplatePage() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      <ContingencySettingsCard />
     </div>
   );
 }

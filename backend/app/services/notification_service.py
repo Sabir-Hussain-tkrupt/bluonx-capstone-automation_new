@@ -35,6 +35,10 @@ NOTIFICATION_TYPES: frozenset[str] = frozenset({
     # Phase 10.2: a vendor check-in email bounced — escalation is suppressed and
     # the PM is told to fix the address rather than being told the vendor is silent.
     "milestone_delivery_failed",
+    # Financial Phase 3: contingency engine
+    "top_up_requested",
+    "top_up_decided",
+    "bidding_checkpoint_alert",
 })
 
 
@@ -137,6 +141,9 @@ def build_notification_deep_link(notification: dict, db) -> str | None:
 
     if ref_type == "vendors":
         return f"/vendors/{ref_id}"
+
+    if ref_type == "projects":
+        return f"/projects/{ref_id}?tab=budget"
 
     if ref_type == "milestones":
         try:

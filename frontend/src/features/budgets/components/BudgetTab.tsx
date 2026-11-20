@@ -33,13 +33,15 @@ import { BudgetLineFormModal } from './BudgetLineFormModal';
 import { BudgetSummaryCards } from './BudgetSummaryCards';
 import { BudgetTable } from './BudgetTable';
 import { LandClosingsModal } from './LandClosingsModal';
+import { ContingencyLedger } from '@/features/contingency/components/ContingencyLedger';
+import { ContingencyPanel } from '@/features/contingency/components/ContingencyPanel';
 
 interface BudgetTabProps {
   projectId: string;
   readOnly?: boolean;
 }
 
-type View = 'lines' | 'bid_vs_budget';
+type View = 'lines' | 'bid_vs_budget' | 'contingency';
 
 /**
  * Task 2.4 — the project Budget tab. Only admins create and edit budgets (the
@@ -256,7 +258,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
             <FormField
               label="Contingency %"
               htmlFor="budget-contingency"
-              hint="Leave empty for the default (15%). Contingency = this % of the budget excluding land."
+              hint="Leave empty for the project's % or the default (15%). Contingency = this % of the contingency base (total − land − contingency)."
             >
               <TextInput
                 id="budget-contingency"
@@ -276,6 +278,8 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   return (
     <div className="space-y-4">
       <BudgetSummaryCards summary={summary} />
+
+      <ContingencyPanel projectId={projectId} readOnly={readOnly} onOpenLedger={() => setView('contingency')} />
 
       {status === 'draft' ? (
         <Alert variant="info" title="Draft budget">
@@ -318,6 +322,11 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
           <Button size="sm" variant={view === 'bid_vs_budget' ? 'primary' : 'outline'} onClick={() => setView('bid_vs_budget')}>
             Bid vs Budget
           </Button>
+          {status === 'baselined' && (
+            <Button size="sm" variant={view === 'contingency' ? 'primary' : 'outline'} onClick={() => setView('contingency')}>
+              Contingency ledger
+            </Button>
+          )}
           <StatusBadge status={status} variant={status === 'baselined' ? 'success' : 'info'} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -375,6 +384,8 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
             }}
           />
         )
+      ) : view === 'contingency' ? (
+        <ContingencyLedger projectId={projectId} />
       ) : (
         <BidVsBudgetView lines={lines} />
       )}

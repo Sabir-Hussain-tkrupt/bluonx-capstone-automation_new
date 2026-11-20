@@ -16,6 +16,9 @@ const baselineMutate = vi.fn();
 const resetMutate = vi.fn();
 
 vi.mock('@/lib/roles', () => ({ useHasRole: () => isAdminMock() }));
+// The contingency panel and ledger have their own feature; not under test here.
+vi.mock('@/features/contingency/components/ContingencyPanel', () => ({ ContingencyPanel: () => null }));
+vi.mock('@/features/contingency/components/ContingencyLedger', () => ({ ContingencyLedger: () => null }));
 
 vi.mock('../../hooks/useBudget', () => ({
   useBudgetSummary: () => summaryMock(),

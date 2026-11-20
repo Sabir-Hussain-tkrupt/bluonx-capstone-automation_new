@@ -74,6 +74,19 @@ export const API_ENDPOINTS = {
   INVOICE_CANCEL: (invoiceId: string) => `/invoices/${invoiceId}/cancel`,
   INVOICE_URL: (invoiceId: string) => `/invoices/${invoiceId}/url`,
 
+  // Financial module — contingency engine (Phase 3)
+  PROJECT_CONTINGENCY: (projectId: string) => `/projects/${projectId}/contingency`,
+  PROJECT_CONTINGENCY_LEDGER: (projectId: string) => `/projects/${projectId}/contingency/ledger`,
+  PROJECT_CONTINGENCY_LEDGER_EXPORT: (projectId: string) => `/projects/${projectId}/contingency/ledger/export`,
+  PROJECT_CONTINGENCY_PERCENT: (projectId: string) => `/projects/${projectId}/contingency/percent`,
+  PROJECT_CONTINGENCY_TOP_UPS: (projectId: string) => `/projects/${projectId}/contingency/top-ups`,
+  CONTINGENCY_TOP_UP_DECISION: (bucketId: string) => `/contingency-top-ups/${bucketId}/decision`,
+  CONTINGENCY_TOP_UP_CANCEL: (bucketId: string) => `/contingency-top-ups/${bucketId}/cancel`,
+  PROJECT_BIDDING_CHECKPOINT: (projectId: string) => `/projects/${projectId}/bidding/checkpoint`,
+  PROJECT_BIDDING_COMPLETE: (projectId: string) => `/projects/${projectId}/bidding/complete`,
+  PROJECT_BIDDING_REOPEN: (projectId: string) => `/projects/${projectId}/bidding/reopen`,
+  CONTINGENCY_SETTINGS: '/financial-settings/contingency',
+
   // Holidays (admin-only writes; reads go direct to Supabase under RLS)
   HOLIDAYS: '/holidays',
   HOLIDAYS_RANGE: '/holidays/range',

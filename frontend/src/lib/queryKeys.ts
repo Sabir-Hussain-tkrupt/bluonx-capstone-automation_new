@@ -232,7 +232,13 @@ export const queryKeys = {
     lines: (projectId: string) => [...queryKeys.budgets.project(projectId), 'lines'] as const,
     summary: (projectId: string) => [...queryKeys.budgets.project(projectId), 'summary'] as const,
     closings: (projectId: string) => [...queryKeys.budgets.project(projectId), 'closings'] as const,
+    // Under project() so every budget write also refreshes the contingency panel.
+    contingency: (projectId: string) => [...queryKeys.budgets.project(projectId), 'contingency'] as const,
+    contingencyLedger: (projectId: string) => [...queryKeys.budgets.project(projectId), 'contingency_ledger'] as const,
+    biddingCheckpoint: (projectId: string) => [...queryKeys.budgets.project(projectId), 'bidding_checkpoint'] as const,
   },
+
+  contingencySettings: ['financial_settings', 'contingency'] as const,
 
   budgetTemplates: {
     all: ['budget_templates'] as const,
