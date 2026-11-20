@@ -30,6 +30,7 @@ from app.routers import (
     bid_templates,
     budget_templates,
     budgets,
+    contingency,
     contract_signers,
     contracts,
     docusign_health,
@@ -155,6 +156,7 @@ app.include_router(contract_signers.router, prefix=_v1, tags=["Contract Signers"
 app.include_router(reviews.router, prefix=_v1, tags=["Reviews"])
 app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(budgets.router, prefix=_v1, tags=["Budgets"])
+app.include_router(contingency.router, prefix=_v1, tags=["Contingency"])
 app.include_router(budget_templates.router, prefix=_v1, tags=["Budget Templates"])
 app.include_router(internal_invoices.router, prefix=_v1, tags=["Internal Invoices"])
 app.include_router(project_notes.router, prefix=_v1, tags=["Project Notes"])
