@@ -35,6 +35,7 @@ import { BudgetTable } from './BudgetTable';
 import { LandClosingsModal } from './LandClosingsModal';
 import { ContingencyLedger } from '@/features/contingency/components/ContingencyLedger';
 import { ContingencyPanel } from '@/features/contingency/components/ContingencyPanel';
+import { useContingencySettings } from '@/features/contingency/hooks/useContingency';
 
 interface BudgetTabProps {
   projectId: string;
@@ -61,6 +62,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const resetBudget = useResetBudget(projectId);
   const removeLine = useRemoveBudgetLine(projectId);
   const reorderLines = useReorderBudgetLines(projectId);
+  const contingencySettings = useContingencySettings();
 
   const [view, setView] = useState<View>('lines');
   const [showCreate, setShowCreate] = useState(false);
@@ -80,7 +82,12 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   // Preview for the Create dialog: total = the project's Budget value, and
   // contingency = pct of the base where base = total - land - contingency
   // (land is $0 before the budget exists), i.e. total x pct / (100 + pct).
-  const pctInput = contingencyPct.trim() === '' ? 15 : Number(contingencyPct);
+  // Empty field = the project's own % if it has one, else the saved default
+  // (Budget Templates → Contingency settings), the same order the database uses.
+  const projectPct = summary?.contingency_percent != null ? Number(summary.contingency_percent) : null;
+  const defaultPct = Number(contingencySettings.data?.default_contingency_percent ?? 15);
+  const fallbackPct = projectPct ?? defaultPct;
+  const pctInput = contingencyPct.trim() === '' ? fallbackPct : Number(contingencyPct);
   const createPreview =
     summary?.project_budget != null && Number(summary.project_budget) > 0 && Number.isFinite(pctInput)
       ? {
@@ -258,12 +265,12 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
             <FormField
               label="Contingency %"
               htmlFor="budget-contingency"
-              hint="Leave empty for the project's % or the default (15%). Contingency = this % of the contingency base (total − land − contingency)."
+              hint={`Leave empty to use ${projectPct != null ? `this project's ${projectPct}%` : `the default (${defaultPct}%)`}. Contingency = this % of the contingency base (total − land − contingency).`}
             >
               <TextInput
                 id="budget-contingency"
                 inputMode="decimal"
-                placeholder="15"
+                placeholder={String(fallbackPct)}
                 value={contingencyPct}
                 onChange={(e) => setContingencyPct(e.target.value)}
               />
