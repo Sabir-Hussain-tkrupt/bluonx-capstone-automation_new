@@ -132,9 +132,20 @@ export function ContingencyPanel({ projectId, readOnly = false, onOpenLedger }: 
           />
           <StatCard
             label="Movements"
-            value={baselined ? `−${formatMoney(o.total_out)}` : '—'}
+            value={
+              baselined
+                ? (() => {
+                    const net = (toCents(o.total_in) - toCents(o.total_out)) / 100;
+                    return `${net < 0 ? '−' : net > 0 ? '+' : ''}${formatMoney(Math.abs(net))}`;
+                  })()
+                : '—'
+            }
             accent="info"
-            meta={baselined ? `+${formatMoney(o.total_in)} returned (savings, reversals) and top-ups` : 'The ledger starts at baseline'}
+            meta={
+              baselined
+                ? `${formatMoney(o.total_out)} out · ${formatMoney(o.total_in)} returned (savings, reversals) and top-ups`
+                : 'The ledger starts at baseline'
+            }
           />
           <StatCard
             label="Remaining"
