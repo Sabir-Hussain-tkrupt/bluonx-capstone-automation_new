@@ -1,5 +1,5 @@
 %PDF-1.4
-%“Œ‹ž ReportLab Generated PDF document (opensource)
+% ReportLab Generated PDF document (opensource)
 1 0 obj
 <<
 /F1 2 0 R /F2 3 0 R
@@ -53,7 +53,7 @@ endobj
 endobj
 9 0 obj
 <<
-/Length 3292
+/Length 6618
 >>
 stream
 1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
@@ -88,7 +88,7 @@ q
 1 0 0 1 70.8 589.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 38 Tm /F1 10 Tf 12 TL (1. SCOPE OF WORK The Subcontractor \(Acme Grading\) shall furnish all labor, materials, equipment, and) Tj T* (supervision necessary to complete the work for the scope titled "Mass Grading" on the project "Sunset) Tj T* (Hills Phase 2", in accordance with the bid submitted by the Subcontractor and any signed Scope of Work) Tj T* (attached hereto as an exhibit.) Tj T* ET
+BT 1 0 0 1 0 38 Tm /F1 10 Tf 12 TL (1. SCOPE OF WORK: The Subcontractor \(Acme Grading\) shall furnish all labor, materials, equipment, and) Tj T* (supervision necessary to complete the work for the scope titled "Mass Grading" on the project "Sunset) Tj T* (Hills Phase 2", in accordance with the bid submitted by the Subcontractor and any signed Scope of Work) Tj T* (attached hereto as an exhibit.) Tj T* ET
 Q
 Q
 q
@@ -98,7 +98,7 @@ q
 1 0 0 1 70.8 539.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (2. CONTRACT PRICE The Contractor shall pay the Subcontractor the sum of $17,000.00 as full) Tj T* (compensation for the complete and satisfactory performance of the work, subject to the terms of this) Tj T* (agreement.) Tj T* ET
+BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (2. CONTRACT PRICE: The Contractor shall pay the Subcontractor the sum of $17,000.00 as full) Tj T* (compensation for the complete and satisfactory performance of the work, subject to the terms of this) Tj T* (agreement.) Tj T* ET
 Q
 Q
 q
@@ -108,7 +108,7 @@ q
 1 0 0 1 70.8 501.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (3. SCHEDULE The Subcontractor shall commence work on or about July 01, 2026 and shall complete the) Tj T* (work by December 31, 2026, time being of the essence.) Tj T* ET
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (3. SCHEDULE: The Subcontractor shall commence work on or about July 01, 2026 and shall complete the) Tj T* (work by December 31, 2026, time being of the essence.) Tj T* ET
 Q
 Q
 q
@@ -118,113 +118,122 @@ q
 1 0 0 1 70.8 451.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (4. PAYMENT TERMS Net 30 days from receipt of approved invoice. Progress payments billed monthly) Tj T* (against completed work, subject to retainage as specified by the Contractor. [Placeholder \227 client) Tj T* (subcontract terms pending.]) Tj T* ET
+BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (4. PAYMENT TERMS: Net 30 days from receipt of approved invoice. Progress payments billed monthly) Tj T* (against completed work, subject to retainage as specified by the Contractor. Contractor shall pay) Tj T* (Sub-Contractor for the Work and materials supplied under each Project Order and Variance Purchase) Tj T* (Order, as applicable, as follows:) Tj T* ET
 Q
 Q
-q
-1 0 0 1 70.8 443.2 cm
-Q
-q
-1 0 0 1 70.8 401.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (5. INSURANCE AND BONDING The Subcontractor shall maintain insurance and bonding in the amounts) Tj T* (required by the Contractor and shall provide certificates evidencing such coverage prior to commencing) Tj T* (work.) Tj T* ET
+BT /F1 10 Tf 1 0 0 1 90.0 423.2 Tm (1.) Tj 1 0 0 1 106.0 423.2 Tm (Conditions to Payment. For each Project Order, Sub-Contractor shall furnish mechanic\222s) Tj ET
+106.0 421.7 104.5 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 410.2 Tm (and materialmen\222s lien waivers from Sub-Contractor and its approved subcontractors in a form) Tj T* (satisfactory to Contractor. Contractor may require evidence, in a form satisfactory to Contractor,) Tj T* (that all indebtedness incurred by Sub-Contractor for the Work and all related payroll taxes and) Tj T* (withholdings have been paid. Contractor may withhold retainage of ten percent \(10%\) of each) Tj T* (payment until the Work under that Project Order is complete, and shall release the retainage to) Tj T* (Sub-Contractor upon completion.) Tj ET
 Q
-Q
-q
-1 0 0 1 70.8 393.2 cm
-Q
-q
-1 0 0 1 70.8 351.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 26 Tm /F1 10 Tf 12 TL (6. GENERAL CONDITIONS This agreement incorporates the Contractor's general conditions and any) Tj T* (exhibits attached hereto. In the event of a conflict, the terms of this agreement shall govern. This) Tj T* (agreement is binding upon execution by both parties below.) Tj T* ET
+BT /F1 10 Tf 1 0 0 1 90.0 332.2 Tm (2.) Tj 1 0 0 1 106.0 332.2 Tm (Payment Terms. \(a\) Work under a Project Order. Contractor shall pay Sub-Contractor) Tj ET
+106.0 330.7 72.3 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 319.2 Tm (within thirty \(30\) days after Approval. Sub-Contractor shall not submit an invoice for Work) Tj T* (performed under a Project Order unless Contractor requests one. \(b\) Work under a Variance) Tj T* (Purchase Order, and other invoiced Work. Where Contractor directs Sub-Contractor to invoice,) Tj T* (Sub-Contractor shall submit its invoice within thirty \(30\) days after the Work is complete, and) Tj T* (Contractor shall pay within thirty \(30\) days after Approval of that invoice. \(c\) Contractor shall) Tj T* (have no obligation to pay for Work reported or invoiced more than one hundred twenty \(120\) days) Tj T* (after that Work was complete.) Tj ET
 Q
-Q
-q
-1 0 0 1 70.8 343.2 cm
-Q
-q
-1 0 0 1 70.8 319.2 cm
-Q
-q
-1 0 0 1 70.8 289.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (SIGNATURES) Tj T* ET
+BT /F1 10 Tf 1 0 0 1 90.0 229.2 Tm (3.) Tj 1 0 0 1 106.0 229.2 Tm (Approval. Contractor shall approve or reject Work reported complete within ten \(10\) business) Tj ET
+106.0 227.7 42.2 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 216.2 Tm (days and shall notify Sub-Contractor of any deficiency.) Tj ET
 Q
-Q
-q
-1 0 0 1 70.8 273.2 cm
-Q
-q
-1 0 0 1 70.8 253.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 3 Tm /F1 11 Tf 14 TL (Subcontractor: Awais Anwer) Tj T* ET
+BT /F1 10 Tf 1 0 0 1 90.0 198.2 Tm (4.) Tj 1 0 0 1 106.0 198.2 Tm (Lien Waivers as a Condition of Payment. As an express condition precedent to receiving any) Tj ET
+106.0 196.7 181.2 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 185.2 Tm (payment hereunder, Sub-Contractor shall furnish a properly executed lien waiver, in a form) Tj T* (satisfactory to Contractor, for all Work performed and materials supplied for the period covered) Tj T* (by the payment. Sub-Contractor\222s failure to provide a complete and accurate lien waiver shall be) Tj T* (grounds for Contractor to withhold payment until such waiver is received. Contractor may further) Tj T* (require, prior to final payment, a general release of liens in a form satisfactory to Contractor) Tj T* (covering all labor, equipment, materials and services furnished.) Tj ET
 Q
-Q
-q
-1 0 0 1 70.8 197.2 cm
-Q
-q
-1 0 0 1 70.8 190.2 cm
-q
-1 1 1 rg
-BT 1 0 0 1 0 0 Tm /F1 1 Tf 1 TL (/vendor_sig/) Tj T* ET
-Q
-Q
-q
-1 0 0 1 70.8 182.2 cm
-Q
-q
-1 0 0 1 70.8 164.2 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 2 Tm /F1 10 Tf 12 TL (X _______________________________ Date: ____________) Tj T* ET
-Q
-Q
-q
-1 0 0 1 70.8 134.2 cm
-Q
-q
-1 0 0 1 70.8 114.2 cm
-q
-0 0 0 rg
-BT 1 0 0 1 0 3 Tm /F1 11 Tf 14 TL (Contractor: Awais Anwer) Tj T* ET
-Q
+BT /F1 10 Tf 1 0 0 1 90.0 107.2 Tm (5.) Tj 1 0 0 1 106.0 107.2 Tm (Direct Payment. Contractor may pay laborers, materialmen, subcontractors, sub-subcontractors) Tj ET
+106.0 105.7 71.1 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 94.2 Tm (and suppliers directly for Work furnished under this Agreement. Payments made in good faith) Tj T* (upon reasonable evidence of their validity carry no liability for Contractor and shall be deducted) Tj T* (from any balance owed to Sub-Contractor.) Tj ET
 Q
  
 endstream
 endobj
 10 0 obj
 <<
-/Length 351
+/Length 2716
 >>
 stream
 1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
 q
-1 0 0 1 70.8 665.2 cm
+0 0 0 rg
+BT /F1 10 Tf 1 0 0 1 90.0 710.0 Tm (6.) Tj 1 0 0 1 106.0 710.0 Tm (Partial Payments. No progress or partial payment made under this Agreement shall be) Tj ET
+106.0 708.5 78.4 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 697.0 Tm (conclusive evidence of the performance of this Agreement either wholly or in part, and no) Tj T* (payment shall be construed to be acceptance of defective Work or improper materials.) Tj ET
 Q
 q
-1 0 0 1 70.8 658.2 cm
+0 0 0 rg
+BT /F1 10 Tf 1 0 0 1 90.0 667.0 Tm (7.) Tj 1 0 0 1 106.0 667.0 Tm (Withholding of Payment. Contractor may withhold payment, upon notice to Sub-Contractor,) Tj ET
+106.0 665.5 109.5 0.6 re f
+BT /F1 10 Tf 12 TL 1 0 0 1 106.0 654.0 Tm (for: \(i\) defective Work not remedied; \(ii\) a third party claim filed or reasonably anticipated; \(iii\)) Tj T* (failure of Sub-Contractor to furnish the certificates of insurance or the endorsements required by) Tj T* (this Agreement; \(iv\) damage to Contractor or to another subcontractor; \(v\) reasonable evidence that) Tj T* (the Work cannot be completed; or \(vi\) any other breach of this Agreement, including unsatisfactory) Tj T* (prosecution of the Work or of warranty Work and failure to pay properly for labor, materials or) Tj T* (equipment.) Tj ET
+Q
+q
+1 0 0 1 70.8 564.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F1 10 Tf 12 TL (5. INSURANCE AND BONDING: The Subcontractor shall maintain insurance and bonding in the amounts) Tj T* (required by the Contractor and shall provide certificates evidencing such coverage prior to commencing) Tj T* (work.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 516.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F1 10 Tf 12 TL (6. GENERAL CONDITIONS: This agreement incorporates the Contractor's general conditions and any) Tj T* (exhibits attached hereto. In the event of a conflict, the terms of this agreement shall govern. This) Tj T* (agreement is binding upon execution by both parties below.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 456.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F2 14 Tf 18 TL (SIGNATURES) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 424.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F1 11 Tf 14 TL (Subcontractor: Awais Anwer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 374.0 cm
+q
+1 1 1 rg
+BT 1 0 0 1 0 0 Tm /F1 1 Tf 1 TL (/vendor_sig/) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 350.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F1 10 Tf 12 TL (X _______________________________ Date: ____________) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 304.0 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 0 Tm /F1 11 Tf 14 TL (Contractor: Awais Anwer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 70.8 254.0 cm
 q
 1 1 1 rg
 BT 1 0 0 1 0 0 Tm /F1 1 Tf 1 TL (/owner_sig/) Tj T* ET
 Q
 Q
 q
-1 0 0 1 70.8 650.2 cm
-Q
-q
-1 0 0 1 70.8 632.2 cm
+1 0 0 1 70.8 230.0 cm
 q
 0 0 0 rg
-BT 1 0 0 1 0 2 Tm /F1 10 Tf 12 TL (X _______________________________ Date: ____________) Tj T* ET
+BT 1 0 0 1 0 0 Tm /F1 10 Tf 12 TL (X _______________________________ Date: ____________) Tj T* ET
 Q
-Q
-q
-1 0 0 1 70.8 602.2 cm
 Q
  
 endstream
@@ -241,7 +250,7 @@ xref
 0000000776 00000 n 
 0000001068 00000 n 
 0000001133 00000 n 
-0000004476 00000 n 
+0000007802 00000 n 
 trailer
 <<
 /ID 
@@ -253,5 +262,5 @@ trailer
 /Size 11
 >>
 startxref
-4878
+10569
 %%EOF
