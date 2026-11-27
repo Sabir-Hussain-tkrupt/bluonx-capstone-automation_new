@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ heading }}: {{ project_name }}{% endblock %}
+
+{% block preheader %}{{ message }}{% endblock %}
+
+{% block content %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:20px;">
+  <tr>
+    <td style="background-color:{{ banner_bg }}; border-left:4px solid {{ banner_border }}; border-radius:0 4px 4px 0; padding:14px 16px; font-family:Arial, Helvetica, sans-serif; font-size:15px; color:{{ banner_text }}; font-weight:bold; line-height:1.4;">
+      &#9888; {{ heading }}: {{ project_name }}
+    </td>
+  </tr>
+</table>
+
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      {% block intro %}{% endblock %}
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:16px;">
+      {{ message }}
+    </td>
+  </tr>
+</table>
+
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0; margin-bottom:24px;">
+  {% for label, value in [("Contingency left", contingency), ("Contingency left %", (left_pct ~ "%") if left_pct is not none else none), ("Work left %", (work_left_pct ~ "%") if work_left_pct is not none else none), ("Reserve for escrows and property taxes", reserve)] %}
+  {% if value is not none %}
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#666666; padding:10px 12px; border-bottom:1px solid #e0e0e0;">{{ label }}</td>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; font-weight:bold; padding:10px 12px; border-bottom:1px solid #e0e0e0; text-align:right;">{{ value }}</td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+</table>
+
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr>
+    <td style="padding-bottom:24px;">
+      <a href="{{ link }}" class="cta-button" style="display:inline-block; background-color:#1a73e8; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; text-decoration:none; padding:12px 28px; border-radius:4px;">Open the alert</a>
+    </td>
+  </tr>
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#333333; line-height:1.6; border-top:1px solid #eeeeee; padding-top:20px;">
+      {% block next_step %}The manager talks to the field manager, then records OK to proceed or a hold, with a reason.{% endblock %}
+    </td>
+  </tr>
+</table>
+{% endblock %}

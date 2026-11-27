@@ -226,6 +226,8 @@ async def create_award(
                 409,
                 "An active award already exists for this task.",
             ) from exc
+        if exc.code == "PT409":  # project on hold
+            raise AwardError(409, exc.message) from exc
         raise
 
     # RETURNS SETOF awards → PostgREST returns a JSON array of the one inserted

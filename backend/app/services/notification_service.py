@@ -39,6 +39,24 @@ NOTIFICATION_TYPES: frozenset[str] = frozenset({
     "top_up_requested",
     "top_up_decided",
     "bidding_checkpoint_alert",
+    # Financial Phase 4: variances
+    "variance_pending_approval",
+    "variance_approved",
+    "variance_rejected",
+    # Financial Phase 5: contingency health
+    "contingency_health_alert",
+    "contingency_urgent_alert",
+    "long_tail_reserve_alert",
+    "contingency_escalation",
+    "financial_alert_decision",
+    "financial_hold_lifted",
+    # Financial Phase 6: payment approvals
+    "payment_approval_requested",
+    "payment_approved",
+    "payment_rejected",
+    # Financial Phase 7: long-tail items
+    "property_tax_due",
+    "bond_renewal_due",
 })
 
 
@@ -141,6 +159,15 @@ def build_notification_deep_link(notification: dict, db) -> str | None:
 
     if ref_type == "vendors":
         return f"/vendors/{ref_id}"
+
+    if ref_type == "long_tail":
+        return f"/projects/{ref_id}?tab=long-tail"
+
+    if ref_type == "payment_approvals":
+        return f"/payments/{ref_id}"
+
+    if ref_type == "financial_alerts":
+        return f"/financial-alerts/{ref_id}"
 
     if ref_type == "projects":
         return f"/projects/{ref_id}?tab=budget"

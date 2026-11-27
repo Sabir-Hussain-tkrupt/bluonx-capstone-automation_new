@@ -87,6 +87,49 @@ export const API_ENDPOINTS = {
   PROJECT_BIDDING_REOPEN: (projectId: string) => `/projects/${projectId}/bidding/reopen`,
   CONTINGENCY_SETTINGS: '/financial-settings/contingency',
 
+  // Financial module — long-tail items (Phase 7)
+  PROJECT_LONG_TAIL: (projectId: string) => `/projects/${projectId}/long-tail`,
+  PROJECT_ESCROWS: (projectId: string) => `/projects/${projectId}/escrows`,
+  ESCROW: (id: string) => `/escrows/${id}`,
+  ESCROW_TRANSITION: (id: string) => `/escrows/${id}/transition`,
+  ESCROW_DEFECTS: (id: string) => `/escrows/${id}/defects`,
+  ESCROW_RENEW: (id: string) => `/escrows/${id}/renew`,
+  ESCROW_DOCUMENT: (id: string) => `/escrows/${id}/document`,
+  PROJECT_PROPERTY_TAXES: (projectId: string) => `/projects/${projectId}/property-taxes`,
+  PROJECT_TAX_SOLD_PORTION: (projectId: string) => `/projects/${projectId}/property-taxes/sold-portion`,
+  PROPERTY_TAX: (id: string) => `/property-taxes/${id}`,
+  JURISDICTIONS: '/jurisdictions',
+  JURISDICTION: (id: string) => `/jurisdictions/${id}`,
+
+  // Financial module — payment approvals and finance hand-off (Phase 6)
+  PAYMENT_APPROVALS: '/payment-approvals',
+  PAYMENT_APPROVAL: (id: string) => `/payment-approvals/${id}`,
+  BUDGET_LINE_PAYMENTS: (lineId: string) => `/budget-lines/${lineId}/payments`,
+  FINANCE_HANDOFFS: '/finance-handoffs',
+  FINANCE_HANDOFFS_EXPORT: '/finance-handoffs/export',
+  FINANCE_HANDOFFS_MARK_EXPORTED: '/finance-handoffs/mark-exported',
+  FINANCE_HANDOFF_RESEND: (id: string) => `/finance-handoffs/${id}/resend`,
+  FINANCE_HANDOFF_DOCUMENT: (id: string) => `/finance-handoffs/${id}/document`,
+  APPROVER_SETTINGS: '/approval-settings',
+  USER_APPROVER_SETTINGS: (id: string) => `/users/${id}/approval-settings`,
+
+  // Financial module — contingency health and alerts (Phase 5)
+  PROJECT_FINANCIAL_HEALTH: (projectId: string) => `/projects/${projectId}/financial-health`,
+  PROJECT_FINANCIAL_HEALTH_SETUP: (projectId: string) => `/projects/${projectId}/financial-health/setup`,
+  PROJECT_GROUNDBREAKING: (projectId: string) => `/projects/${projectId}/financial-health/groundbreaking`,
+  PROJECT_LIFT_HOLD: (projectId: string) => `/projects/${projectId}/financial-health/lift-hold`,
+  FINANCIAL_ALERTS: '/financial-alerts',
+  FINANCIAL_ALERT: (id: string) => `/financial-alerts/${id}`,
+  FINANCIAL_ALERT_DECISION: (id: string) => `/financial-alerts/${id}/decision`,
+
+  // Financial module — variances (Phase 4)
+  VARIANCES: '/variances',
+  VARIANCE: (id: string) => `/variances/${id}`,
+  VARIANCE_CANCEL: (id: string) => `/variances/${id}/cancel`,
+  VARIANCE_APPROVE: (id: string) => `/variances/${id}/approve`,
+  VARIANCE_REJECT: (id: string) => `/variances/${id}/reject`,
+  BUDGET_LINE_VARIANCES: (lineId: string) => `/budget-lines/${lineId}/variances`,
+
   // Holidays (admin-only writes; reads go direct to Supabase under RLS)
   HOLIDAYS: '/holidays',
   HOLIDAYS_RANGE: '/holidays/range',

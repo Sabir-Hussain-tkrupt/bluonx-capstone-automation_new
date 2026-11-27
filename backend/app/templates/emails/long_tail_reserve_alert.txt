@@ -1,0 +1,4 @@
+{% extends "_financial_alert.txt" %}
+{% set heading = "Long-tail reserve alert" %}
+
+{% block intro %}Contingency is below the amount kept for open escrows and property taxes, even if the main build is under budget.{% endblock %}

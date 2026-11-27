@@ -35,6 +35,12 @@ import { BudgetTable } from './BudgetTable';
 import { LandClosingsModal } from './LandClosingsModal';
 import { ContingencyLedger } from '@/features/contingency/components/ContingencyLedger';
 import { ContingencyPanel } from '@/features/contingency/components/ContingencyPanel';
+import { HealthPanel } from '@/features/financial-health/components/HealthPanel';
+import { useFinancialHealth } from '@/features/financial-health/hooks/useFinancialHealth';
+import { VarianceDetailModal } from '@/features/variances/components/VarianceDetailModal';
+import { VarianceFormModal } from '@/features/variances/components/VarianceFormModal';
+import { VarianceList } from '@/features/variances/components/VarianceList';
+import { PaymentRequestModal } from '@/features/payments/components/PaymentRequestModal';
 import { useContingencySettings } from '@/features/contingency/hooks/useContingency';
 
 interface BudgetTabProps {
@@ -42,7 +48,7 @@ interface BudgetTabProps {
   readOnly?: boolean;
 }
 
-type View = 'lines' | 'bid_vs_budget' | 'contingency';
+type View = 'lines' | 'bid_vs_budget' | 'contingency' | 'variances';
 
 /**
  * Task 2.4 — the project Budget tab. Only admins create and edit budgets (the
@@ -53,6 +59,8 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const { toast } = useToast();
   const isAdmin = useHasRole('admin');
   const canEdit = isAdmin && !readOnly;
+  const canCreateVariance = useHasRole('field_manager', 'project_manager') && !readOnly;
+  const canPay = useHasRole('field_manager', 'project_manager', 'executive') && !readOnly;
 
   const summaryQuery = useBudgetSummary(projectId);
   const linesQuery = useBudgetLines(projectId);
@@ -63,6 +71,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const removeLine = useRemoveBudgetLine(projectId);
   const reorderLines = useReorderBudgetLines(projectId);
   const contingencySettings = useContingencySettings();
+  const health = useFinancialHealth(projectId, summaryQuery.data?.budget_status === 'baselined');
 
   const [view, setView] = useState<View>('lines');
   const [showCreate, setShowCreate] = useState(false);
@@ -71,6 +80,9 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
   const [showReset, setShowReset] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [formState, setFormState] = useState<{ line?: BudgetLine; parent?: BudgetLine } | null>(null);
+  const [varianceParent, setVarianceParent] = useState<BudgetLine | null>(null);
+  const [openVarianceId, setOpenVarianceId] = useState<string | null>(null);
+  const [payLine, setPayLine] = useState<BudgetLine | null>(null);
   const [closingsLine, setClosingsLine] = useState<BudgetLine | null>(null);
   const [removeTarget, setRemoveTarget] = useState<BudgetLine | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -286,6 +298,8 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
     <div className="space-y-4">
       <BudgetSummaryCards summary={summary} />
 
+      {status === 'baselined' && <HealthPanel projectId={projectId} readOnly={readOnly} />}
+
       <ContingencyPanel projectId={projectId} readOnly={readOnly} onOpenLedger={() => setView('contingency')} />
 
       {status === 'draft' ? (
@@ -322,7 +336,7 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant={view === 'lines' ? 'primary' : 'outline'} onClick={() => setView('lines')}>
             Lines
           </Button>
@@ -332,6 +346,11 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
           {status === 'baselined' && (
             <Button size="sm" variant={view === 'contingency' ? 'primary' : 'outline'} onClick={() => setView('contingency')}>
               Contingency ledger
+            </Button>
+          )}
+          {status === 'baselined' && (
+            <Button size="sm" variant={view === 'variances' ? 'primary' : 'outline'} onClick={() => setView('variances')}>
+              Variances
             </Button>
           )}
           <StatusBadge status={status} variant={status === 'baselined' ? 'success' : 'info'} />
@@ -382,17 +401,24 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
             projectId={projectId}
             lines={lines}
             canEdit={canEdit}
+            canAddVariance={canCreateVariance && status === 'baselined'}
+            canPay={canPay}
             actions={{
               onEdit: (line) => setFormState({ line }),
               onMove: handleMove,
               onAddTmPortion: (parent) => setFormState({ parent }),
               onClosings: setClosingsLine,
               onRemove: setRemoveTarget,
+              onAddVariance: setVarianceParent,
+              onOpenVariance: setOpenVarianceId,
+              onPay: setPayLine,
             }}
           />
         )
       ) : view === 'contingency' ? (
         <ContingencyLedger projectId={projectId} />
+      ) : view === 'variances' ? (
+        <VarianceList projectId={projectId} readOnly={readOnly} />
       ) : (
         <BidVsBudgetView lines={lines} />
       )}
@@ -407,6 +433,25 @@ export function BudgetTab({ projectId, readOnly = false }: BudgetTabProps) {
       />
 
       <LandClosingsModal projectId={projectId} line={closingsLine} canEdit={canEdit} onClose={() => setClosingsLine(null)} />
+
+      {varianceParent && (
+        <VarianceFormModal
+          key={varianceParent.id}
+          parentLine={varianceParent}
+          contingencyNow={summary.contingency_now}
+          reserve={health.data?.reserve}
+          onClose={() => setVarianceParent(null)}
+        />
+      )}
+      {payLine && <PaymentRequestModal key={payLine.id} line={payLine} onClose={() => setPayLine(null)} />}
+      {openVarianceId && (
+        <VarianceDetailModal
+          key={openVarianceId}
+          varianceId={openVarianceId}
+          readOnly={readOnly}
+          onClose={() => setOpenVarianceId(null)}
+        />
+      )}
 
       <BudgetImportModal projectId={projectId} isOpen={showImport} onClose={() => setShowImport(false)} />
 

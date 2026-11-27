@@ -103,7 +103,7 @@ export function useReopenBidding(projectId: string) {
 export function useUpdateContingencySettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<Record<keyof ContingencySettings, string | string[]>>) => updateContingencySettings(body),
+    mutationFn: (body: Partial<ContingencySettings>) => updateContingencySettings(body),
     onSuccess: (data) => queryClient.setQueryData(queryKeys.contingencySettings, data),
   });
 }

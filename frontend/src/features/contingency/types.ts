@@ -129,10 +129,26 @@ export interface CheckpointResult extends Partial<ContingencySnapshot> {
   open_tasks: OpenBidTask[];
 }
 
+export interface AlertRecipients {
+  warning: string[];
+  urgent: string[];
+  critical: string[];
+}
+
 export interface ContingencySettings {
   default_contingency_percent: number | string;
   bidding_target_contingency_percent: number | string;
   bidding_escalation_percent: number | string;
+  default_field_approval_limit: number | string;
+  contingency_near_zero_percent: number | string;
+  alert_escalation_days: number | string;
+  alert_recipients: AlertRecipients;
+  executive_approval_threshold: number | string | null;
+  land_team_emails: string[];
+  po_number_format: string;
+  po_number_format_contract: string;
+  quickbooks_expense_account: string;
+  bond_renewal_reminder_days: number | string;
   finance_emails: string[];
   sales_emails: string[];
 }

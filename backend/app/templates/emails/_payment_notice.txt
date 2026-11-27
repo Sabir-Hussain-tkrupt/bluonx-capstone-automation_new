@@ -1,0 +1,20 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+*** {{ heading | upper }} ***
+
+{% block intro %}{{ intro }}{% endblock %}
+
+
+{% for label, value in rows %}
+{{ label }}: {{ value }}
+{% endfor %}
+{% block extra %}{% endblock %}
+{% if link %}
+
+{{ link_label | default("Open") }}: {{ link }}
+{% endif %}
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+Please do not reply directly to this email.

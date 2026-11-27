@@ -198,6 +198,10 @@ async def record_response(
     # milestone_status (the RPC re-reads it on the UNIQUE path), so gating on
     # the status alone would let a scanner double-click notify the PM twice.
     if result.outcome == "recorded":
+        # Physical progress feeds the contingency health check (Phase 5).
+        from app.services import financial_health_service
+
+        financial_health_service.after_milestone_change(db, milestone_id)
         await _notify_pm_of_outcome(
             db,
             email_service,

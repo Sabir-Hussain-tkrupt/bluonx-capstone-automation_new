@@ -18,6 +18,7 @@ import { AddressNotLocatableBadge } from '@/components/shared/AddressNotLocatabl
 import { TaskList } from '@/features/tasks/components/TaskList';
 import { BudgetTab } from '@/features/budgets/components/BudgetTab';
 import { InvoicesTab } from '@/features/invoices/components/InvoicesTab';
+import { LongTailTab } from '@/features/long-tail/components/LongTailTab';
 import { NotesTab } from '@/features/notes/components/NotesTab';
 import { useHasRole } from '@/lib/roles';
 import { useProject } from '@/features/projects/hooks/useProject';
@@ -43,6 +44,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'budget', label: 'Budget' },
+  { id: 'long-tail', label: 'Long-tail' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'notes', label: 'Notes' },
   { id: 'documents', label: 'Documents' },
@@ -301,6 +303,13 @@ export function ProjectDetailPage() {
         </Alert>
       )}
 
+      {project.status === 'on_hold' && !isArchived && (
+        <Alert variant="warning" title="This project is on hold">
+          New bid packages, awards, approvals and payments are blocked until the hold is lifted. A financial hold is
+          lifted on the Budget tab.
+        </Alert>
+      )}
+
       {/* Tabs */}
       <Tabs tabs={tabDefs} activeTab={activeTab} onChange={setActiveTab}>
         {activeTab === 'overview' && (
@@ -350,6 +359,8 @@ export function ProjectDetailPage() {
         )}
 
         {activeTab === 'budget' && <BudgetTab projectId={id!} readOnly={isArchived} />}
+
+        {activeTab === 'long-tail' && <LongTailTab projectId={id!} readOnly={isArchived} />}
 
         {activeTab === 'invoices' && canSeeInvoices && <InvoicesTab projectId={id!} readOnly={isArchived} />}
 

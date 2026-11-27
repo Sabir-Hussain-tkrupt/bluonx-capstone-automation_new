@@ -1,0 +1,4 @@
+{% extends "_financial_alert.txt" %}
+{% set heading = "Urgent contingency alert" %}
+
+{% block intro %}Contingency is nearly used up or already negative. This needs a decision now.{% endblock %}

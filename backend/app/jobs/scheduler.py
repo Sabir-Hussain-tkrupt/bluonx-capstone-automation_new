@@ -47,6 +47,9 @@ KNOWN_JOB_IDS = (
     "milestone_daily_checkin",
     "milestone_no_response",
     "holiday_seed",
+    "financial_health_sweep",
+    "finance_daily_summary",
+    "long_tail_reminders",
     "scheduler_self_check",
 )
 
@@ -150,7 +153,10 @@ def start_scheduler() -> None:
     # tracked_job / DEFAULT_JOB_KWARGS from this module.
     from app.jobs import (
         bid_reminders,
+        finance_daily_summary,
+        financial_health_sweep,
         holiday_seed,
+        long_tail_reminders,
         insurance_expiration,
         milestone_daily_checkin,
         milestone_no_response,
@@ -166,6 +172,9 @@ def start_scheduler() -> None:
     milestone_daily_checkin.register(scheduler)
     milestone_no_response.register(scheduler)
     holiday_seed.register(scheduler)
+    financial_health_sweep.register(scheduler)
+    finance_daily_summary.register(scheduler)
+    long_tail_reminders.register(scheduler)
     scheduler_self_check.register(scheduler)
 
     global _started_at

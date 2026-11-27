@@ -40,12 +40,23 @@ MOVEMENT_LABELS = {
     "variance_cancelled": "Variance cancelled",
     "top_up": "Top-up",
     "invoice_overage": "Invoice overage",
+    "long_tail": "Escrow / property tax",
 }
 
 SETTING_DEFAULTS: dict[str, Any] = {
     "default_contingency_percent": 15,
     "bidding_target_contingency_percent": 10,
     "bidding_escalation_percent": 5,
+    "default_field_approval_limit": 5000,
+    "contingency_near_zero_percent": 5,
+    "alert_escalation_days": 2,
+    "alert_recipients": {"warning": [], "urgent": [], "critical": []},
+    "executive_approval_threshold": None,
+    "land_team_emails": [],
+    "po_number_format": "PO-{YYYY}-{SEQ:05}",
+    "po_number_format_contract": "{CONTRACT}-{SEQ:03}",
+    "quickbooks_expense_account": "Job Expenses",
+    "bond_renewal_reminder_days": 60,
     "finance_emails": [],
     "sales_emails": [],
 }
@@ -96,6 +107,8 @@ def update_settings(db: Client, changes: dict[str, Any], actor_id: str) -> dict[
     for key, value in changes.items():
         if key not in SETTING_DEFAULTS or value is None:
             continue
+        if key == "executive_approval_threshold" and value == "off":
+            value = "off"  # stored as text: not a number, so no threshold
         if isinstance(value, Decimal):
             value = float(value) if value != value.to_integral_value() else int(value)
         db.table("financial_settings").upsert(

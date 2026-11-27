@@ -1,0 +1,14 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+*** APPROVED FOR PAYMENT: PO {{ payload.po_number }} ***
+
+The PO record is attached. No payment confirmation is needed back in the system.
+
+{% for label, value in [("Trade", payload.trade), ("Vendor", payload.vendor), ("Amount to pay", usd(payload.amount)), ("Work value", usd(payload.gross_amount)), ("Retainage held", usd(payload.retainage_amount)), ("Payment", kind), ("Project", payload.project), ("Line", payload.line), ("Approved on", payload.approved_on), ("Expected payment date", payload.expected_payment_date), ("Contract number", payload.contract_number), ("Invoice number", payload.invoice_number), ("Approvers", approvers)] %}
+{% if value %}
+{{ label }}: {{ value }}
+{% endif %}
+{% endfor %}
+
+Hand-off log and exports: {{ link }}

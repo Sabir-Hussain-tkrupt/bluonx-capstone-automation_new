@@ -37,6 +37,10 @@ import { UserManagementPage } from '@/features/user-management';
 import { HolidayCalendarPage } from '@/features/holidays';
 import { ContractSignersPage } from '@/features/contract-signers';
 import { BudgetTemplatePage } from '@/features/budget-templates/pages/BudgetTemplatePage';
+import { VariancesPage } from '@/features/variances/pages/VariancesPage';
+import { FinancialAlertPage } from '@/features/financial-health/pages/FinancialAlertPage';
+import { FinancialAlertsPage } from '@/features/financial-health/pages/FinancialAlertsPage';
+import { PaymentsPage } from '@/features/payments/pages/PaymentsPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
@@ -109,6 +113,11 @@ export function AppRoutes() {
         <Route path={ROUTES.MILESTONE_DETAIL} element={<MilestoneDetailPage />} />
         <Route path={ROUTES.MILESTONES} element={<MilestoneListPage />} />
         <Route path={ROUTES.BID_PACKAGES} element={<BidPackageListPage />} />
+        <Route path={ROUTES.VARIANCES} element={<VariancesPage />} />
+        <Route path={ROUTES.FINANCIAL_ALERTS} element={<FinancialAlertsPage />} />
+        <Route path={ROUTES.PAYMENTS} element={<PaymentsPage />} />
+        <Route path={ROUTES.PAYMENT_DETAIL} element={<PaymentsPage />} />
+        <Route path={ROUTES.FINANCIAL_ALERT_DETAIL} element={<FinancialAlertPage />} />
         <Route path={ROUTES.BID_TEMPLATES} element={<BidTemplateListPage />} />
         <Route path={ROUTES.TASK_TEMPLATES} element={<TaskTemplateListPage />} />
         <Route path={ROUTES.BID_TEMPLATE_NEW} element={<BidTemplateFormPage />} />

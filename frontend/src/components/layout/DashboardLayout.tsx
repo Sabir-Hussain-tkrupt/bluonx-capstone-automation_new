@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import {
+  CircleAlert,
+  BadgeDollarSign,
+  Diff,
   FileText,
   Flag,
   Folder,
@@ -101,6 +104,24 @@ export function DashboardLayout() {
             label: 'Bids',
             href: ROUTES.BID_PACKAGES,
             icon: <FileText className="h-5 w-5" aria-hidden="true" />,
+          },
+          {
+            id: 'variances',
+            label: 'Variances',
+            href: ROUTES.VARIANCES,
+            icon: <Diff className="h-5 w-5" aria-hidden="true" />,
+          },
+          {
+            id: 'payments',
+            label: 'Payments',
+            href: ROUTES.PAYMENTS,
+            icon: <BadgeDollarSign className="h-5 w-5" aria-hidden="true" />,
+          },
+          {
+            id: 'financial-alerts',
+            label: 'Financial Alerts',
+            href: ROUTES.FINANCIAL_ALERTS,
+            icon: <CircleAlert className="h-5 w-5" aria-hidden="true" />,
           },
           {
             id: 'bid-templates',

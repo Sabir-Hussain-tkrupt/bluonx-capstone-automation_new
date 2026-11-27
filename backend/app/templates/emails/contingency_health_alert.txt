@@ -1,0 +1,4 @@
+{% extends "_financial_alert.txt" %}
+{% set heading = "Contingency health alert" %}
+
+{% block intro %}Contingency is being used faster than the work is being completed.{% endblock %}

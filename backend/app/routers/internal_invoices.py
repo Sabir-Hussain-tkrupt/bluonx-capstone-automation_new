@@ -30,6 +30,7 @@ from app.models.internal_invoices import (
     InvoiceResponse,
     InvoiceUpdate,
 )
+from app.services import financial_health_service
 from app.services import internal_invoice_service as svc
 from app.services.financial_errors import FinancialError
 
@@ -134,13 +135,17 @@ async def categorise_invoice(
     An amount above the line's remaining allowance becomes a variance funded
     from contingency (baselined budgets)."""
     try:
-        return await run_in_threadpool(
+        result = await run_in_threadpool(
             lambda: svc.categorise_invoice(
                 db, invoice_id=str(invoice_id), line_id=str(payload.budget_line_id), user=user
             )
         )
+        invoice = await run_in_threadpool(svc.get_invoice, db, str(invoice_id), user)
     except FinancialError as exc:
         raise _http(exc) from exc
+    # An overage takes money out of contingency.
+    await financial_health_service.after_change(db, invoice["project_id"])
+    return result
 
 
 @router.post("/invoices/{invoice_id}/cancel", response_model=InvoiceResponse)

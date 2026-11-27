@@ -1,0 +1,2 @@
+{% extends "_payment_notice.txt" %}
+{% block intro %}{% if is_copy %}Copy for the field manager. {% endif %}A payment was approved and handed to finance. Approvers: {{ approvers }}.{% if cc %} Field manager (cc): {{ cc }}.{% endif %}{% endblock %}

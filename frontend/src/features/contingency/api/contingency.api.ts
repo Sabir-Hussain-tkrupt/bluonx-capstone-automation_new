@@ -88,7 +88,7 @@ export async function fetchContingencySettings(): Promise<ContingencySettings> {
   return data;
 }
 
-export async function updateContingencySettings(body: Partial<Record<keyof ContingencySettings, string | string[]>>) {
+export async function updateContingencySettings(body: Partial<ContingencySettings>) {
   const { data } = await api.put<ContingencySettings>(API_ENDPOINTS.CONTINGENCY_SETTINGS, body);
   return data;
 }

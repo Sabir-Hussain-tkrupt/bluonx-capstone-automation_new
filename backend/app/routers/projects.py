@@ -13,6 +13,7 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 from app.core.auth import get_current_active_user
+from app.services import financial_health_service
 from app.services.geocoding import (
     ADDRESS_FIELDS,
     address_fields_changed,
@@ -298,6 +299,8 @@ async def update_project(
             .execute()
         )
     except APIError as exc:
+        if exc.code == "PT409":  # financial hold
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
         logger.error("Supabase update failed for projects/%s: %s", project_id, exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -309,6 +312,10 @@ async def update_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
+
+    # Closing or reopening a project changes whether its guardrails apply.
+    if "status" in update_data and update_data["status"] != existing.get("status"):
+        await financial_health_service.after_change(db, project_id)
 
     return {**response.data[0], "geocode_warning": geocode_warning}
 

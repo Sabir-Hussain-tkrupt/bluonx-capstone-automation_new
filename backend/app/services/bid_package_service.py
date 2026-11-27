@@ -383,6 +383,8 @@ async def create_bid_package_with_invitations(
                 404,
                 "Task not found or a referenced record no longer exists.",
             ) from exc
+        if exc.code == "PT409":  # project on hold
+            raise BidPackageValidationError(409, exc.message) from exc
         raise
 
     rpc_data = rpc_resp.data

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Download, MoreHorizontal, Send, XCircle } from 'lucide-react';
+import { BadgeDollarSign, Download, MoreHorizontal, Send, XCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -52,6 +53,7 @@ export function InvoicesTab({ projectId, readOnly = false }: InvoicesTabProps) {
   const [categoriseTarget, setCategoriseTarget] = useState<Invoice | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Invoice | null>(null);
 
+  const navigate = useNavigate();
   const hasBudget = !!summary && summary.budget_status !== 'none';
 
   const columns: Column<Invoice>[] = useMemo(
@@ -95,6 +97,11 @@ export function InvoicesTab({ projectId, readOnly = false }: InvoicesTabProps) {
             >
               Download
             </DropdownMenuItem>
+            {['in_approval', 'approved', 'rejected'].includes(row.status) && (
+              <DropdownMenuItem icon={<BadgeDollarSign className="h-4 w-4" />} onClick={() => navigate(`/payments?tab=${row.status === 'rejected' ? 'rejected' : row.status === 'approved' ? 'sent' : 'pending'}`)}>
+                Payment approval
+              </DropdownMenuItem>
+            )}
             {!readOnly && (row.status === 'received' || row.status === 'categorised') && (
               <>
                 <DropdownMenuItem
@@ -113,7 +120,7 @@ export function InvoicesTab({ projectId, readOnly = false }: InvoicesTabProps) {
         ),
       },
     ],
-    [download, downloadingId, readOnly, hasBudget],
+    [download, downloadingId, readOnly, hasBudget, navigate],
   );
 
   if (!canUse) {

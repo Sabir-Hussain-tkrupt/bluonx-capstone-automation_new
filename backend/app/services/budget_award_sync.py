@@ -115,12 +115,22 @@ def lock_for_contract(db: Client, contract: dict, actor_id: Any = None) -> str:
     return "locked"
 
 
+def _recalculate(db: Client, task_id: Any) -> None:
+    """The award changed committed money and contingency: check the guardrails."""
+    from app.services import financial_health_service
+
+    financial_health_service.after_task_change(db, task_id)
+
+
 # ── Hook wrappers: never raise ──────────────────────────────────────────────
 
 
 def safe_apply_award(db: Client, award: dict) -> str:
     try:
-        return apply_award(db, award)
+        result = apply_award(db, award)
+        if result == "applied":
+            _recalculate(db, award["task_id"])
+        return result
     except Exception:  # noqa: BLE001 - the award must stand regardless
         logger.exception("Budget hook: applying award %s to its budget line failed (use Sync awards)",
                          award.get("id"))
@@ -129,7 +139,10 @@ def safe_apply_award(db: Client, award: dict) -> str:
 
 def safe_reverse_award(db: Client, award_id: Any, reason: str) -> str:
     try:
-        return reverse_award(db, award_id, None, reason)
+        result = reverse_award(db, award_id, None, reason)
+        if result == "reversed":
+            _recalculate(db, (_award(db, award_id) or {}).get("task_id"))
+        return result
     except Exception:  # noqa: BLE001 - the webhook result must not change
         logger.exception("Budget hook: reversing award %s failed (use Sync awards)", award_id)
         return "failed"
@@ -141,7 +154,10 @@ def safe_lock_for_contract(db: Client, contract_id: Any) -> str:
         contract = resp.data if resp else None
         if not contract:
             return "skipped"
-        return lock_for_contract(db, contract)
+        result = lock_for_contract(db, contract)
+        if result == "locked":
+            _recalculate(db, contract["task_id"])
+        return result
     except Exception:  # noqa: BLE001 - the webhook result must not change
         logger.exception("Budget hook: locking the line for contract %s failed (use Sync awards)", contract_id)
         return "failed"

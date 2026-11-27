@@ -1,0 +1,5 @@
+{% extends "_financial_alert.txt" %}
+{% set heading = "Executive escalation" %}
+
+{% block intro %}{{ why }}{% endblock %}
+{% block next_step %}You receive this because you hold the Executive role.{% endblock %}

@@ -19,6 +19,12 @@ vi.mock('@/lib/roles', () => ({ useHasRole: () => isAdminMock() }));
 // The contingency panel and ledger have their own feature; not under test here.
 vi.mock('@/features/contingency/components/ContingencyPanel', () => ({ ContingencyPanel: () => null }));
 vi.mock('@/features/contingency/components/ContingencyLedger', () => ({ ContingencyLedger: () => null }));
+vi.mock('@/features/financial-health/components/HealthPanel', () => ({ HealthPanel: () => null }));
+vi.mock('@/features/financial-health/hooks/useFinancialHealth', () => ({ useFinancialHealth: () => ({ data: undefined }) }));
+vi.mock('@/features/payments/components/PaymentRequestModal', () => ({ PaymentRequestModal: () => null }));
+vi.mock('@/features/variances/components/VarianceList', () => ({ VarianceList: () => null }));
+vi.mock('@/features/variances/components/VarianceFormModal', () => ({ VarianceFormModal: () => null }));
+vi.mock('@/features/variances/components/VarianceDetailModal', () => ({ VarianceDetailModal: () => null }));
 vi.mock('@/features/contingency/hooks/useContingency', () => ({
   useContingencySettings: () => ({ data: { default_contingency_percent: 15 } }),
 }));

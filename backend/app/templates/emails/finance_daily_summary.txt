@@ -1,0 +1,12 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+*** DAILY FINANCE SUMMARY ***
+
+{{ new | length }} payment(s) approved in the last 24 hours. {{ pending | length }} hand-off(s) not yet exported are in the attached CSV.
+
+{% for r in pending %}
+- {{ r.po_number }}  {{ r.payload.vendor }}  {{ r.payload.project }} / {{ r.payload.line }}  {{ usd(r.amount) }}  expected {{ r.payload.expected_payment_date }}
+{% endfor %}
+
+Export to Excel or QuickBooks: {{ link }}

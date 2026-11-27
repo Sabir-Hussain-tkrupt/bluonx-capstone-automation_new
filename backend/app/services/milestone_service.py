@@ -273,6 +273,14 @@ def create_milestone(payload, *, created_by: str, db: Client) -> dict:
     row = _first(resp.data)
     if not row:
         raise MilestoneError(500, "Milestone creation failed.")
+    return _progress_changed(db, row)
+
+
+def _progress_changed(db: Client, row: dict) -> dict:
+    """Physical progress feeds the contingency health check (Phase 5)."""
+    from app.services import financial_health_service
+
+    financial_health_service.after_task_change(db, row.get("task_id"))
     return row
 
 
@@ -383,7 +391,7 @@ def _transition(
     row = _first(resp.data)
     if not row:
         raise MilestoneError(500, "Milestone transition failed.")
-    return row
+    return _progress_changed(db, row)
 
 
 def mark_started(

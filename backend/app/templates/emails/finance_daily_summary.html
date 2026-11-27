@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Daily finance summary{% endblock %}
+
+{% block preheader %}{{ new | length }} new approval(s), {{ pending | length }} not yet exported{% endblock %}
+
+{% block content %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr><td style="font-family:Arial, Helvetica, sans-serif; font-size:20px; color:#1a73e8; font-weight:bold; padding-bottom:16px;">Daily finance summary</td></tr>
+  <tr><td style="font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#333333; line-height:1.6; padding-bottom:20px;">{{ new | length }} payment(s) approved in the last 24 hours. {{ pending | length }} hand-off(s) not yet exported are in the attached CSV.</td></tr>
+</table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #e0e0e0; margin-bottom:24px;">
+  <tr>
+    {% for h in ["PO", "Vendor", "Project / line", "Amount", "Expected"] %}
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#1a73e8; background-color:#f8f9fa; padding:8px 10px; border-bottom:2px solid #e0e0e0;">{{ h }}</td>
+    {% endfor %}
+  </tr>
+  {% for r in pending %}
+  <tr>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; padding:8px 10px; border-bottom:1px solid #e0e0e0;">{{ r.po_number }}</td>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; padding:8px 10px; border-bottom:1px solid #e0e0e0;">{{ r.payload.vendor }}</td>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; padding:8px 10px; border-bottom:1px solid #e0e0e0;">{{ r.payload.project }} / {{ r.payload.line }}</td>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; padding:8px 10px; border-bottom:1px solid #e0e0e0; text-align:right;">{{ usd(r.amount) }}</td>
+    <td style="font-family:Arial, Helvetica, sans-serif; font-size:13px; padding:8px 10px; border-bottom:1px solid #e0e0e0;">{{ r.payload.expected_payment_date }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<a href="{{ link }}" style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#1a73e8;">Export to Excel or QuickBooks</a>
+{% endblock %}

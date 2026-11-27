@@ -236,6 +236,35 @@ export const queryKeys = {
     contingency: (projectId: string) => [...queryKeys.budgets.project(projectId), 'contingency'] as const,
     contingencyLedger: (projectId: string) => [...queryKeys.budgets.project(projectId), 'contingency_ledger'] as const,
     biddingCheckpoint: (projectId: string) => [...queryKeys.budgets.project(projectId), 'bidding_checkpoint'] as const,
+    health: (projectId: string) => [...queryKeys.budgets.project(projectId), 'health'] as const,
+  },
+
+  longTail: {
+    all: ['long_tail'] as const,
+    project: (projectId: string) => [...queryKeys.longTail.all, 'project', projectId] as const,
+    escrow: (id: string) => [...queryKeys.longTail.all, 'escrow', id] as const,
+    jurisdictions: () => [...queryKeys.longTail.all, 'jurisdictions'] as const,
+  },
+
+  payments: {
+    all: ['payment_approvals'] as const,
+    list: (filters: object) => [...queryKeys.payments.all, 'list', filters] as const,
+    detail: (id: string) => [...queryKeys.payments.all, 'detail', id] as const,
+    line: (lineId: string) => [...queryKeys.payments.all, 'line', lineId] as const,
+    handoffs: () => [...queryKeys.payments.all, 'handoffs'] as const,
+    approvers: () => [...queryKeys.payments.all, 'approvers'] as const,
+  },
+
+  financialAlerts: {
+    all: ['financial_alerts'] as const,
+    list: () => [...queryKeys.financialAlerts.all, 'list'] as const,
+    detail: (id: string) => [...queryKeys.financialAlerts.all, 'detail', id] as const,
+  },
+
+  variances: {
+    all: ['variances'] as const,
+    list: (filters: object) => [...queryKeys.variances.all, 'list', filters] as const,
+    detail: (id: string) => [...queryKeys.variances.all, 'detail', id] as const,
   },
 
   contingencySettings: ['financial_settings', 'contingency'] as const,

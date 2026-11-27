@@ -29,7 +29,7 @@ from app.models.contingency import (
     TopUpDecision,
     TopUpRequestCreate,
 )
-from app.services import contingency_notifications, contingency_service
+from app.services import contingency_notifications, contingency_service, financial_health_service
 from app.services.email_service import EmailService, get_email_service
 from app.services.financial_errors import FinancialError
 
@@ -210,6 +210,7 @@ async def decide_top_up(
         )
     except FinancialError as exc:
         raise _http(exc) from exc
+    await financial_health_service.after_change(db, bucket["project_id"], email_service)
     await contingency_notifications.top_up_decided(db, email_service, bucket=bucket, approver=user)
     return bucket
 

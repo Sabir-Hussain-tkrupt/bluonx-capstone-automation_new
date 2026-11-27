@@ -13,7 +13,25 @@ export interface Notification {
     | 'scheduler_alert'
     | 'milestone_delayed'
     | 'milestone_unresponsive'
-    | 'milestone_completed';
+    | 'milestone_completed'
+    | 'milestone_delivery_failed'
+    | 'top_up_requested'
+    | 'top_up_decided'
+    | 'bidding_checkpoint_alert'
+    | 'variance_pending_approval'
+    | 'variance_approved'
+    | 'variance_rejected'
+    | 'contingency_health_alert'
+    | 'contingency_urgent_alert'
+    | 'long_tail_reserve_alert'
+    | 'contingency_escalation'
+    | 'financial_alert_decision'
+    | 'financial_hold_lifted'
+    | 'payment_approval_requested'
+    | 'payment_approved'
+    | 'payment_rejected'
+    | 'property_tax_due'
+    | 'bond_renewal_due';
   reference_type: string | null;
   reference_id: string | null;
   is_read: boolean;

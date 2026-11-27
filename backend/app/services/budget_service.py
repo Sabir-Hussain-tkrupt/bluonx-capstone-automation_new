@@ -228,17 +228,21 @@ def update_line(db: Client, *, line_id: str, payload: BudgetLineUpdate, actor_id
 
     if "name" in changes and line.get("task_id"):
         raise FinancialError(422, "This line's name follows its task. Rename the task instead.")
+    if "name" in changes and line["line_type"] == "variance":
+        raise FinancialError(422, "A variance's name follows its description. Edit the variance instead.")
     if "budget_amount" in changes:
         if line["line_type"] == "variance":
             raise FinancialError(422, "Variance amounts are changed through the variance itself.")
+        if line.get("is_locked"):
+            raise FinancialError(
+                422, "This line is locked because its contract is executed. Use a variance instead."
+            )
         if project["budget_status"] == "baselined":
             raise FinancialError(
                 409,
                 "The budget is baselined: amounts change only through bids, variances "
                 "and executive-approved top-ups.",
             )
-        if line.get("is_locked"):
-            raise FinancialError(409, "This line is locked because its contract is executed.")
 
     # Date pair must stay ordered after the merge.
     start = changes.get("anticipated_start_date", line.get("anticipated_start_date"))

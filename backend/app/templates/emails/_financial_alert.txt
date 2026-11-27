@@ -1,0 +1,31 @@
+{{ company_name | default("BluOnX Development LLC") }}
+================================================================
+
+*** {{ heading | upper }}: {{ project_name }} ***
+
+{% block intro %}{% endblock %}
+
+
+{{ message }}
+
+{% if contingency is not none %}
+Contingency left:   {{ contingency }}
+{% endif %}
+{% if left_pct is not none %}
+Contingency left %: {{ left_pct }}%
+{% endif %}
+{% if work_left_pct is not none %}
+Work left %:        {{ work_left_pct }}%
+{% endif %}
+{% if reserve is not none %}
+Reserve:            {{ reserve }}
+{% endif %}
+
+{% block next_step %}The manager talks to the field manager, then records OK to proceed or a hold, with a reason.{% endblock %}
+
+
+Open the alert: {{ link }}
+
+--
+{{ company_name | default("BluOnX Development LLC") }}
+Please do not reply directly to this email.

@@ -845,6 +845,56 @@ CREATE POLICY project_notes_select_authenticated
 
 
 -- ============================================================================
+-- VARIANCE HISTORY RLS (v4.5 — migration 20261125_financial_phase4_variances)
+-- ============================================================================
+-- Any active user reads; rows are written only by the variance procedures.
+ALTER TABLE public.variance_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.variance_events FROM anon, authenticated;
+GRANT SELECT ON TABLE public.variance_events TO authenticated;
+GRANT ALL ON TABLE public.variance_events TO service_role;
+
+DROP POLICY IF EXISTS variance_events_select_authenticated ON public.variance_events;
+CREATE POLICY variance_events_select_authenticated
+  ON public.variance_events FOR SELECT TO authenticated
+  USING ((SELECT private.is_active_user()));
+
+
+
+-- ============================================================================
+-- PAYMENT HISTORY RLS (v4.7 — migration 20261127_financial_phase6_payments)
+-- ============================================================================
+-- Any active user reads; rows are written only by the payment procedures.
+ALTER TABLE public.payment_approval_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.payment_approval_events FROM anon, authenticated;
+GRANT SELECT ON TABLE public.payment_approval_events TO authenticated;
+GRANT ALL ON TABLE public.payment_approval_events TO service_role;
+DROP POLICY IF EXISTS payment_approval_events_select_authenticated ON public.payment_approval_events;
+CREATE POLICY payment_approval_events_select_authenticated
+  ON public.payment_approval_events FOR SELECT TO authenticated
+  USING ((SELECT private.is_active_user()));
+
+
+-- ============================================================================
+-- LONG-TAIL RLS (v4.8 — migration 20261128_financial_phase7_long_tail)
+-- ============================================================================
+-- RLS for the new tables (same pattern as the other financial tables).
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['jurisdictions', 'escrow_defects', 'escrow_events'] LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM anon', t);
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM authenticated', t);
+    EXECUTE format('GRANT SELECT ON TABLE public.%I TO authenticated', t);
+    EXECUTE format('GRANT ALL ON TABLE public.%I TO service_role', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select_authenticated', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING ((SELECT private.is_active_user()))',
+                   t || '_select_authenticated', t);
+  END LOOP;
+END $$;
+
+
+-- ============================================================================
 -- STEP 6: VERIFICATION QUERY
 -- ============================================================================
 -- Run this after applying the migration to confirm RLS is enabled on

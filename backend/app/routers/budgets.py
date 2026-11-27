@@ -28,7 +28,7 @@ from app.models.budgets import (
     ReorderRequest,
     SyncAwardsResult,
 )
-from app.services import budget_award_sync, budget_import_export, budget_service
+from app.services import budget_award_sync, budget_import_export, budget_service, financial_health_service
 from app.services.financial_errors import FinancialError
 
 router = APIRouter()
@@ -78,6 +78,7 @@ async def baseline_budget(
         )
     except FinancialError as exc:
         raise _http(exc) from exc
+    await financial_health_service.after_change(db, project_id)
     return {
         "budget_status": project.get("budget_status"),
         "approved_budget_total": project.get("approved_budget_total"),
@@ -113,7 +114,9 @@ async def sync_awards(
         budget_service.get_project(db, str(project_id))
     except FinancialError as exc:
         raise _http(exc) from exc
-    return await run_in_threadpool(budget_award_sync.sync_project, db, str(project_id), user["user_id"])
+    result = await run_in_threadpool(budget_award_sync.sync_project, db, str(project_id), user["user_id"])
+    await financial_health_service.after_change(db, project_id)
+    return result
 
 
 # ── Lines ───────────────────────────────────────────────────────────────────
@@ -195,11 +198,13 @@ async def add_closing(
 ):
     """Add a phased land closing (admin only)."""
     try:
-        return await run_in_threadpool(
+        closing = await run_in_threadpool(
             budget_service.add_closing, db, line_id=str(line_id), payload=payload, actor_id=user["user_id"]
         )
     except FinancialError as exc:
         raise _http(exc) from exc
+    await financial_health_service.after_change(db, closing.get("project_id"))
+    return closing
 
 
 @router.patch("/land-closings/{closing_id}")
@@ -211,11 +216,13 @@ async def update_closing(
 ):
     """Edit, close or cancel a phased land closing (admin only)."""
     try:
-        return await run_in_threadpool(
+        closing = await run_in_threadpool(
             budget_service.update_closing, db, closing_id=str(closing_id), payload=payload
         )
     except FinancialError as exc:
         raise _http(exc) from exc
+    await financial_health_service.after_change(db, closing.get("project_id"))
+    return closing
 
 
 # ── Import / export (Task 2.8) ──────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import {
+import { BadgeDollarSign,
   ArrowDown,
   ArrowUp,
   CornerDownRight,
@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDateOnly } from '@/lib/format';
+import { VARIANCE_STATUS_VARIANT } from '@/features/variances/constants';
 import { CASH_BUCKET_LABELS, LINE_TYPE_LABELS } from '../constants';
 import type { BudgetLine } from '../types';
 import { formatCents, formatMoney, sumCents } from '../utils/money';
@@ -26,6 +27,9 @@ export interface BudgetTableActions {
   onAddTmPortion: (line: BudgetLine) => void;
   onClosings: (line: BudgetLine) => void;
   onRemove: (line: BudgetLine) => void;
+  onAddVariance: (line: BudgetLine) => void;
+  onOpenVariance: (varianceId: string) => void;
+  onPay?: (line: BudgetLine) => void;
 }
 
 interface BudgetTableProps {
@@ -33,6 +37,10 @@ interface BudgetTableProps {
   lines: BudgetLine[];
   /** Admin and not archived: show the row action menu. */
   canEdit: boolean;
+  /** Field / project manager on a baselined budget: may add variances. */
+  canAddVariance?: boolean;
+  /** Field / project manager: may approve awarded bid lines for payment. */
+  canPay?: boolean;
   actions: BudgetTableActions;
 }
 
@@ -72,7 +80,8 @@ function buildSections(lines: BudgetLine[]): Section[] {
 const TH = 'px-4 py-3 font-medium text-secondary-500';
 const NUM = 'px-4 py-3 text-right tabular-nums';
 
-export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableProps) {
+export function BudgetTable({ projectId, lines, canEdit, canAddVariance = false, canPay = false, actions }: BudgetTableProps) {
+  const showActions = canEdit || canAddVariance || canPay;
   const sections = useMemo(() => buildSections(lines), [lines]);
   const movable = useMemo(() => lines.filter((l) => l.line_type !== 'variance'), [lines]);
 
@@ -100,7 +109,7 @@ export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableP
               <th className={`${TH} hidden xl:table-cell`}>Dates</th>
               <th className={`${TH} hidden xl:table-cell`}>Terms</th>
               <th className={`${TH} hidden lg:table-cell`}>Bucket</th>
-              {canEdit && <th className={`${TH} text-right`}>Actions</th>}
+              {showActions && <th className={`${TH} text-right`}>Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-secondary-100">
@@ -109,7 +118,7 @@ export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableP
               return (
                 <Fragment key={`${section.name}-${sIdx}`}>
                   <tr className="bg-secondary-50">
-                    <td colSpan={canEdit ? 9 : 8} className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-secondary-500">
+                    <td colSpan={showActions ? 9 : 8} className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-secondary-500">
                       {section.name}
                     </td>
                   </tr>
@@ -121,6 +130,8 @@ export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableP
                         projectId={projectId}
                         line={line}
                         canEdit={canEdit}
+                        canAddVariance={canAddVariance}
+                        canPay={canPay}
                         canMoveUp={idx > 0}
                         canMoveDown={idx >= 0 && idx < movable.length - 1}
                         actions={actions}
@@ -130,7 +141,7 @@ export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableP
                   <tr>
                     <td className="px-4 py-2 text-right text-xs font-medium text-secondary-500">{section.name} subtotal</td>
                     <td className={`${NUM} py-2 text-xs font-semibold text-secondary-700`}>{formatCents(subtotal)}</td>
-                    <td colSpan={canEdit ? 7 : 6} />
+                    <td colSpan={showActions ? 7 : 6} />
                   </tr>
                 </Fragment>
               );
@@ -146,7 +157,7 @@ export function BudgetTable({ projectId, lines, canEdit, actions }: BudgetTableP
               <td className="hidden xl:table-cell" />
               <td className="hidden xl:table-cell" />
               <td className="hidden lg:table-cell" />
-              {canEdit && <td />}
+              {showActions && <td />}
             </tr>
           </tfoot>
         </table>
@@ -159,18 +170,23 @@ interface BudgetRowProps {
   projectId: string;
   line: BudgetLine;
   canEdit: boolean;
+  canAddVariance: boolean;
+  canPay: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   actions: BudgetTableActions;
 }
 
-function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }: BudgetRowProps) {
+function BudgetRow({ projectId, line, canEdit, canAddVariance, canPay, canMoveUp, canMoveDown, actions }: BudgetRowProps) {
   const isVariance = line.line_type === 'variance';
   const isUnallocated = line.line_subtype === 'unallocated';
   const needsDates = !line.has_dates && !['contingency', 'land'].includes(line.line_type) && !isUnallocated;
   const contingencyNegative = line.line_type === 'contingency' && Number(line.budget_amount) < 0;
   const removable = !line.task_id && !['contingency', 'variance'].includes(line.line_type);
+  const canHaveVariance =
+    canAddVariance && !isVariance && !isUnallocated && !['contingency', 'land'].includes(line.line_type);
   const canHaveTm = ['bid_activity', 'soft_cost'].includes(line.line_type);
+  const payable = canPay && !!actions.onPay && line.line_type === 'bid_activity' && !!line.award_id;
 
   return (
     <tr className="transition-colors hover:bg-secondary-50">
@@ -186,6 +202,14 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
                 >
                   {line.name}
                 </Link>
+              ) : isVariance && line.variance_id ? (
+                <button
+                  type="button"
+                  onClick={() => actions.onOpenVariance(line.variance_id!)}
+                  className="text-left font-medium text-secondary-900 hover:text-primary-600 hover:underline"
+                >
+                  {line.name}
+                </button>
               ) : (
                 <span className="font-medium text-secondary-900">{line.name}</span>
               )}
@@ -202,7 +226,12 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
               />
               {line.vendor_name && <span className="text-xs text-secondary-500">{line.vendor_name}</span>}
               {isVariance && line.variance_status && (
-                <StatusBadge status={line.variance_status} size="sm" />
+                <StatusBadge status={line.variance_status} variant={VARIANCE_STATUS_VARIANT[line.variance_status]} size="sm" />
+              )}
+              {!isVariance && line.variance_count > 0 && (
+                <span className="text-xs text-secondary-500">
+                  {line.variance_count} variance{line.variance_count === 1 ? '' : 's'} · {formatMoney(line.variance_total)}
+                </span>
               )}
               {line.closings_count > 0 && (
                 <span className="text-xs text-secondary-500">
@@ -229,9 +258,9 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
       </td>
       <td className="hidden px-4 py-3 text-secondary-700 xl:table-cell">{line.payment_terms_days} days</td>
       <td className="hidden px-4 py-3 text-secondary-700 lg:table-cell">{CASH_BUCKET_LABELS[line.cash_bucket]}</td>
-      {canEdit && (
+      {(canEdit || canAddVariance || canPay) && (
         <td className="px-4 py-3 text-right">
-          {!isVariance && (
+          {(isVariance ? !!line.variance_id : canEdit || canHaveVariance || payable) && (
             <DropdownMenu
               trigger={
                 <IconButton
@@ -242,6 +271,23 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
                 />
               }
             >
+              {isVariance && (
+                <DropdownMenuItem onClick={() => line.variance_id && actions.onOpenVariance(line.variance_id)}>
+                  Open variance
+                </DropdownMenuItem>
+              )}
+              {payable && (
+                <DropdownMenuItem icon={<BadgeDollarSign className="h-4 w-4" />} onClick={() => actions.onPay?.(line)}>
+                  Approve for payment
+                </DropdownMenuItem>
+              )}
+              {canHaveVariance && (
+                <DropdownMenuItem icon={<Plus className="h-4 w-4" />} onClick={() => actions.onAddVariance(line)}>
+                  Add variance
+                </DropdownMenuItem>
+              )}
+              {canEdit && !isVariance && (
+              <>
               <DropdownMenuItem icon={<Pencil className="h-4 w-4" />} onClick={() => actions.onEdit(line)}>
                 Edit
               </DropdownMenuItem>
@@ -265,6 +311,8 @@ function BudgetRow({ projectId, line, canEdit, canMoveUp, canMoveDown, actions }
                 <DropdownMenuItem icon={<Trash2 className="h-4 w-4" />} destructive onClick={() => actions.onRemove(line)}>
                   Remove line
                 </DropdownMenuItem>
+              )}
+              </>
               )}
             </DropdownMenu>
           )}

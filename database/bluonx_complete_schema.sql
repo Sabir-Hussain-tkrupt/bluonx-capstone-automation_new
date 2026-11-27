@@ -2,10 +2,10 @@
 -- BluOnX Bid Management & Vendor Coordination System
 -- Complete Database Schema — PostgreSQL / Supabase
 -- ============================================================================
--- Version:  4.4
+-- Version:  4.8
 -- Date:     November 11, 2026
 -- Author:   Awais Anwer (Tkrupt)
--- Tables:   53 (34 bid management + 19 financial, see Section 9)
+-- Tables:   58 (34 bid management + 24 financial, see Section 9)
 -- Engine:   PostgreSQL via Supabase
 -- ============================================================================
 --
@@ -7521,6 +7521,3081 @@ GRANT EXECUTE ON FUNCTION public.fn_approve_contingency_top_up(uuid, uuid, boole
 -- ============================================================================
 INSERT INTO public.financial_settings (setting_key, value, description)
 VALUES ('schema_version', '"4.4.0 (20261121_financial_phase3_contingency)"'::jsonb,
+        'Last financial migration applied to this database. Written by the migration itself.')
+ON CONFLICT (setting_key) DO UPDATE SET value = EXCLUDED.value;
+
+
+-- ############################################################################
+--
+--  SECTION 14: PHASE 4 VARIANCE LINE MANAGEMENT (v4.5)
+--
+--  Source of truth for EXISTING databases: the idempotent migration
+--    database/migrations/20261125_financial_phase4_variances/001_variance_management.sql
+--  Same DDL minus BEGIN/COMMIT and the RLS part (in rls_policies.sql).
+--  Replaces four Phase 1 functions from Section 9 (CREATE OR REPLACE).
+--
+-- ############################################################################
+
+-- ============================================================================
+-- SECTION A: variance_events (append-only history)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.variance_events (
+  id             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_no       BIGINT        GENERATED ALWAYS AS IDENTITY UNIQUE,
+  variance_id    UUID          NOT NULL REFERENCES public.variance_lines(id) ON DELETE RESTRICT,
+  project_id     UUID          NOT NULL REFERENCES public.projects(id) ON DELETE RESTRICT,
+  event_type     VARCHAR(30)   NOT NULL
+                               CHECK (event_type IN ('created', 'amount_changed', 'details_changed', 'resubmitted',
+                                                     'routed_to_manager', 'approved', 'rejected', 'cancelled')),
+  amount_before  DECIMAL(15,2),
+  amount_after   DECIMAL(15,2),
+  actor_user_id  UUID          NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+  note           TEXT,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_variance_events_variance ON public.variance_events (variance_id, event_no);
+CREATE INDEX IF NOT EXISTS idx_variance_events_project  ON public.variance_events (project_id);
+
+COMMENT ON TABLE public.variance_events IS
+  'Append-only history of a variance: estimate, edits, approvals, rejection, cancellation. Order by event_no.';
+
+CREATE OR REPLACE FUNCTION public.fn_block_variance_event_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'Variance history is append-only and cannot be changed.' USING ERRCODE = 'PT403';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_variance_events_immutable ON public.variance_events;
+CREATE TRIGGER trg_variance_events_immutable
+  BEFORE UPDATE OR DELETE ON public.variance_events
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_variance_event_mutation();
+
+DROP TRIGGER IF EXISTS trg_variance_events_no_truncate ON public.variance_events;
+CREATE TRIGGER trg_variance_events_no_truncate
+  BEFORE TRUNCATE ON public.variance_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.fn_block_variance_event_mutation();
+
+-- Every variance starts its history, whichever procedure created it
+-- (fn_create_variance or an invoice overage).
+CREATE OR REPLACE FUNCTION public.fn_variance_created_event()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note)
+  VALUES (NEW.id, NEW.project_id, 'created', NEW.estimated_amount, NEW.created_by, NEW.description);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_variance_lines_created_event ON public.variance_lines;
+CREATE TRIGGER trg_variance_lines_created_event
+  AFTER INSERT ON public.variance_lines
+  FOR EACH ROW EXECUTE FUNCTION public.fn_variance_created_event();
+
+INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note, created_at)
+SELECT v.id, v.project_id, 'created', v.estimated_amount, v.created_by, v.description, v.created_at
+  FROM public.variance_lines v
+ WHERE NOT EXISTS (SELECT 1 FROM public.variance_events e WHERE e.variance_id = v.id AND e.event_type = 'created');
+
+
+-- ============================================================================
+-- SECTION B: GUARDRAIL RECALCULATION (after every contingency movement)
+-- ============================================================================
+-- left % = contingency now ÷ contingency funded (initial + approved top-ups).
+CREATE OR REPLACE FUNCTION private.fin_recalc_guardrails(p_project_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_cont    NUMERIC;
+  v_funded  NUMERIC;
+  v_left    NUMERIC;
+  v_near    NUMERIC;
+  v_type    TEXT;
+  v_active  BOOLEAN;
+  v_msg     TEXT;
+BEGIN
+  SELECT budget_amount INTO v_cont FROM public.budget_lines
+   WHERE project_id = p_project_id AND line_type = 'contingency' AND deleted_at IS NULL;
+  IF v_cont IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT COALESCE(SUM(approved_amount), 0) INTO v_funded
+    FROM public.contingency_buckets WHERE project_id = p_project_id AND status = 'approved';
+  v_near := COALESCE((SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                       WHERE setting_key = 'contingency_near_zero_percent'), 5);
+  -- Clamped to the DECIMAL(7,2) alert column.
+  v_left := CASE WHEN v_funded > 0
+                 THEN GREATEST(LEAST(round(v_cont * 100 / v_funded, 2), 99999.99), -99999.99) END;
+
+  FOREACH v_type IN ARRAY ARRAY['contingency_near_zero', 'contingency_negative'] LOOP
+    IF v_type = 'contingency_negative' THEN
+      v_active := v_cont < 0;
+      v_msg    := format('Contingency is negative: %s.', v_cont);
+    ELSE
+      v_active := v_cont >= 0 AND v_left IS NOT NULL AND v_left <= v_near;
+      v_msg    := format('Contingency is nearly used up: %s left (%s%% of the funded contingency, alert at %s%%).',
+                         v_cont, v_left, v_near);
+    END IF;
+
+    IF v_active THEN
+      UPDATE public.financial_alerts
+         SET contingency_left_pct = v_left, contingency_remaining = v_cont, message = v_msg
+       WHERE project_id = p_project_id AND alert_type = v_type
+         AND status IN ('open', 'acknowledged', 'proceed_approved', 'on_hold');
+      IF NOT FOUND THEN
+        INSERT INTO public.financial_alerts (project_id, alert_type, severity, contingency_left_pct, contingency_remaining, message)
+        VALUES (p_project_id, v_type,
+                CASE WHEN v_type = 'contingency_negative' THEN 'critical' ELSE 'urgent' END,
+                v_left, v_cont, v_msg);
+      END IF;
+    ELSE
+      UPDATE public.financial_alerts SET status = 'resolved', resolved_at = NOW()
+       WHERE project_id = p_project_id AND alert_type = v_type
+         AND status IN ('open', 'acknowledged', 'proceed_approved', 'on_hold');
+    END IF;
+  END LOOP;
+END;
+$$;
+
+COMMENT ON FUNCTION private.fin_recalc_guardrails(UUID) IS
+  'Opens / refreshes / resolves the near-zero and negative contingency alerts of a project.';
+
+CREATE OR REPLACE FUNCTION public.fn_ledger_recalc_guardrails()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  PERFORM private.fin_recalc_guardrails(NEW.project_id);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_contingency_ledger_guardrails ON public.contingency_ledger;
+CREATE TRIGGER trg_contingency_ledger_guardrails
+  AFTER INSERT ON public.contingency_ledger
+  FOR EACH ROW EXECUTE FUNCTION public.fn_ledger_recalc_guardrails();
+
+
+-- ============================================================================
+-- SECTION C: 4.5 LOCK RULES (Phase 1 functions; locked / frozen = PT422)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_guard_budget_lines()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_auth        BOOLEAN := private.fin_write_authorized();
+  v_baselined   BOOLEAN;
+  v_task        RECORD;
+  v_parent_proj UUID;
+BEGIN
+  -- Immutable identity columns
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+      RAISE EXCEPTION 'A budget line cannot move to another project (line %)', OLD.id USING ERRCODE = 'PT422';
+    END IF;
+    IF NEW.line_type IS DISTINCT FROM OLD.line_type THEN
+      RAISE EXCEPTION 'line_type cannot change after a line is created (line %: % → %). Remove the line and add a new one.',
+        OLD.id, OLD.line_type, NEW.line_type USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+
+  -- Task consistency
+  IF NEW.task_id IS NOT NULL
+     AND (TG_OP = 'INSERT' OR NEW.task_id IS DISTINCT FROM OLD.task_id) THEN
+    SELECT project_id, bid_type, deleted_at INTO v_task FROM public.tasks WHERE id = NEW.task_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Task % not found', NEW.task_id USING ERRCODE = 'PT404';
+    END IF;
+    IF v_task.project_id <> NEW.project_id THEN
+      RAISE EXCEPTION 'Task % belongs to project %, not %', NEW.task_id, v_task.project_id, NEW.project_id
+        USING ERRCODE = 'PT422';
+    END IF;
+    IF (NEW.line_type = 'bid_activity' AND v_task.bid_type NOT IN ('competitive', 'direct_assign'))
+       OR (NEW.line_type = 'internal_tm' AND v_task.bid_type <> 'internal') THEN
+      RAISE EXCEPTION 'Line type % does not match task bid_type % (bid_activity ↔ competitive/direct_assign, internal_tm ↔ internal)',
+        NEW.line_type, v_task.bid_type USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+
+  -- Parent consistency
+  IF NEW.parent_line_id IS NOT NULL
+     AND (TG_OP = 'INSERT' OR NEW.parent_line_id IS DISTINCT FROM OLD.parent_line_id) THEN
+    SELECT project_id INTO v_parent_proj FROM public.budget_lines WHERE id = NEW.parent_line_id;
+    IF v_parent_proj IS DISTINCT FROM NEW.project_id THEN
+      RAISE EXCEPTION 'Parent line % is not in project %', NEW.parent_line_id, NEW.project_id USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+
+  -- Authoritative writer: everything below is the procedures' business.
+  IF v_auth THEN
+    RETURN NEW;
+  END IF;
+
+  -- Lock rules (always)
+  IF TG_OP = 'UPDATE' AND OLD.is_locked THEN
+    IF NEW.is_locked = FALSE
+       OR NEW.budget_amount    IS DISTINCT FROM OLD.budget_amount
+       OR NEW.committed_amount IS DISTINCT FROM OLD.committed_amount
+       OR NEW.award_id         IS DISTINCT FROM OLD.award_id
+       OR NEW.contract_id      IS DISTINCT FROM OLD.contract_id THEN
+      RAISE EXCEPTION 'Budget line % is locked (contract executed). Locked amounts cannot be edited; use a variance line.',
+        OLD.id USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+
+  SELECT budget_status = 'baselined' INTO v_baselined FROM public.projects WHERE id = NEW.project_id;
+
+  IF COALESCE(v_baselined, FALSE) THEN
+    IF TG_OP = 'INSERT' THEN
+      IF NEW.budget_amount <> 0 OR NEW.committed_amount <> 0 OR NEW.award_id IS NOT NULL THEN
+        RAISE EXCEPTION 'Project budget is baselined: a new line must start at $0 and be funded through a financial procedure (total budget must stay flat).'
+          USING ERRCODE = 'PT409';
+      END IF;
+    ELSE
+      IF NEW.budget_amount     IS DISTINCT FROM OLD.budget_amount
+         OR NEW.committed_amount  IS DISTINCT FROM OLD.committed_amount
+         OR NEW.award_id          IS DISTINCT FROM OLD.award_id
+         OR NEW.original_estimate IS DISTINCT FROM OLD.original_estimate THEN
+        RAISE EXCEPTION 'Project budget is baselined: amounts on line % change only through financial procedures (bid, variance, top-up) so contingency and the ledger stay in step.',
+          OLD.id USING ERRCODE = 'PT409';
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.fn_guard_variance_lines()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF private.fin_write_authorized() THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION 'Variances are created only through fn_create_variance (it moves contingency and writes the ledger).'
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  IF OLD.status IN ('approved', 'cancelled') THEN
+    RAISE EXCEPTION 'Variance % is % and frozen. Create a new variance instead.', OLD.id, OLD.status
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  IF NEW.status = 'cancelled' THEN
+    RAISE EXCEPTION 'Cancel a variance through fn_adjust_variance(…, 0, …) so its amount returns to contingency.'
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  IF NEW.project_id IS DISTINCT FROM OLD.project_id
+     OR NEW.budget_line_id IS DISTINCT FROM OLD.budget_line_id
+     OR NEW.parent_budget_line_id IS DISTINCT FROM OLD.parent_budget_line_id
+     OR NEW.estimated_amount IS DISTINCT FROM OLD.estimated_amount
+     OR NEW.created_by IS DISTINCT FROM OLD.created_by THEN
+    RAISE EXCEPTION 'Variance identity / history columns cannot change (variance %).', OLD.id USING ERRCODE = 'PT422';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.fn_apply_bid_to_line(
+  p_budget_line_id UUID,
+  p_award_id       UUID,
+  p_amount         NUMERIC,
+  p_actor          UUID
+)
+RETURNS SETOF public.budget_lines
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_line     public.budget_lines;
+  v_award    public.awards;
+  v_project  public.projects;
+  v_delta    NUMERIC;
+  v_result   public.budget_lines;
+BEGIN
+  IF p_amount IS NULL OR p_amount < 0 THEN
+    RAISE EXCEPTION 'Bid amount must be zero or more (got %)', p_amount USING ERRCODE = 'PT422';
+  END IF;
+  IF p_actor IS NULL THEN
+    RAISE EXCEPTION 'p_actor is required' USING ERRCODE = 'PT422';
+  END IF;
+
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = p_budget_line_id;
+  IF NOT FOUND OR v_line.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Budget line % not found', p_budget_line_id USING ERRCODE = 'PT404';
+  END IF;
+
+  -- Lock order everywhere: project → lines (avoids deadlocks).
+  v_project := private.fin_lock_project(v_line.project_id, FALSE, TRUE);
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = p_budget_line_id FOR UPDATE;
+
+  IF v_line.line_type <> 'bid_activity' THEN
+    RAISE EXCEPTION 'Bids apply only to bid_activity lines (line % is %)', v_line.id, v_line.line_type
+      USING ERRCODE = 'PT422';
+  END IF;
+  IF v_line.is_locked THEN
+    RAISE EXCEPTION 'Budget line % is locked (contract executed). Locked bid amounts cannot be edited; use a variance.', v_line.id USING ERRCODE = 'PT422';
+  END IF;
+
+  SELECT * INTO v_award FROM public.awards WHERE id = p_award_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Award % not found', p_award_id USING ERRCODE = 'PT404';
+  END IF;
+  IF v_award.task_id IS DISTINCT FROM v_line.task_id THEN
+    RAISE EXCEPTION 'Award % is for task %, not this line''s task %', p_award_id, v_award.task_id, v_line.task_id
+      USING ERRCODE = 'PT422';
+  END IF;
+  IF v_award.status IN ('declined_by_vendor', 'cancelled') THEN
+    RAISE EXCEPTION 'Award % is % and cannot be applied', p_award_id, v_award.status USING ERRCODE = 'PT409';
+  END IF;
+  IF v_line.award_id IS NOT NULL AND v_line.award_id <> p_award_id THEN
+    RAISE EXCEPTION 'Line % already carries award %; reverse it first', v_line.id, v_line.award_id
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  -- Idempotent retry: same award, same amount → nothing to do.
+  IF v_line.award_id = p_award_id AND v_line.budget_amount = p_amount AND v_line.committed_amount = p_amount THEN
+    RETURN NEXT v_line;
+    RETURN;
+  END IF;
+
+  v_delta := p_amount - v_line.budget_amount;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  UPDATE public.budget_lines
+     SET pre_award_budget_amount = CASE WHEN award_id IS NULL THEN budget_amount ELSE pre_award_budget_amount END,
+         budget_amount           = p_amount,
+         committed_amount        = p_amount,
+         award_id                = p_award_id,
+         updated_by              = p_actor
+   WHERE id = v_line.id
+   RETURNING * INTO v_result;
+
+  -- Draft budgets have no ledger yet: the line simply takes the bid.
+  IF v_project.budget_status = 'baselined' AND v_delta <> 0 THEN
+    PERFORM private.fin_move_contingency(
+      v_line.project_id, -v_delta,
+      CASE WHEN v_delta > 0 THEN 'bid_overrun' ELSE 'bid_savings' END,
+      p_actor,
+      format('Bid applied to "%s": %s → %s', v_line.name, v_line.budget_amount, p_amount),
+      v_line.id, NULL, p_award_id, NULL);
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+
+  RETURN NEXT v_result;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION D: 4.2 EDIT / CANCEL
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_adjust_variance(
+  p_variance_id UUID,
+  p_new_amount  NUMERIC,
+  p_actor       UUID,
+  p_reason      TEXT DEFAULT NULL
+)
+RETURNS SETOF public.variance_lines
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_variance  public.variance_lines;
+  v_line      public.budget_lines;
+  v_delta     NUMERIC;
+BEGIN
+  IF p_new_amount IS NULL OR p_new_amount < 0 THEN
+    RAISE EXCEPTION 'New variance amount must be zero (cancel) or more (got %)', p_new_amount USING ERRCODE = 'PT422';
+  END IF;
+  IF p_actor IS NULL THEN
+    RAISE EXCEPTION 'p_actor is required' USING ERRCODE = 'PT422';
+  END IF;
+
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id;
+  IF NOT FOUND OR v_variance.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Variance % not found', p_variance_id USING ERRCODE = 'PT404';
+  END IF;
+
+  -- Adjustments may be needed on a held project to free contingency, so no hold block.
+  PERFORM private.fin_lock_project(v_variance.project_id, TRUE, FALSE);
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id FOR UPDATE;
+  SELECT * INTO v_line     FROM public.budget_lines   WHERE id = v_variance.budget_line_id FOR UPDATE;
+
+  IF v_variance.status NOT IN ('draft', 'pending_approval', 'rejected') THEN
+    RAISE EXCEPTION 'This variance is % and can no longer be changed. Create a new variance instead.', v_variance.status
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  v_delta := p_new_amount - v_line.budget_amount;
+
+  -- An invoice overage is the invoice's own amount: it cannot drift from it.
+  IF v_delta <> 0 AND EXISTS (SELECT 1 FROM public.payment_approvals
+                               WHERE budget_line_id = v_line.id AND internal_invoice_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'This variance comes from an invoice, so its amount cannot be changed or cancelled here.'
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  -- A changed amount restarts the approval: earlier sign-offs were for the old one.
+  IF v_delta <> 0 THEN
+    UPDATE public.payment_approvals SET status = 'cancelled'
+     WHERE budget_line_id = v_line.id AND status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive');
+    UPDATE public.budget_lines SET approval_state = 'not_requested'
+     WHERE id = v_line.id AND approval_state <> 'not_requested';
+  END IF;
+
+  IF p_new_amount = 0 THEN
+    -- Cancel: return the full amount, retire the line.
+    UPDATE public.budget_lines
+       SET budget_amount = 0, deleted_at = NOW(), updated_by = p_actor
+     WHERE id = v_line.id;
+
+    UPDATE public.variance_lines SET status = 'cancelled'
+     WHERE id = p_variance_id RETURNING * INTO v_variance;
+
+    IF v_delta <> 0 THEN
+      PERFORM private.fin_move_contingency(
+        v_variance.project_id, -v_delta, 'variance_cancelled', p_actor,
+        COALESCE(p_reason, 'Variance cancelled'), v_line.id, p_variance_id, NULL, NULL);
+    END IF;
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_before, amount_after, actor_user_id, note)
+    VALUES (p_variance_id, v_variance.project_id, 'cancelled', v_line.budget_amount, 0, p_actor, p_reason);
+  ELSIF v_delta <> 0 THEN
+    UPDATE public.budget_lines
+       SET budget_amount = p_new_amount, updated_by = p_actor
+     WHERE id = v_line.id;
+
+    PERFORM private.fin_move_contingency(
+      v_variance.project_id, -v_delta, 'variance_adjusted', p_actor,
+      COALESCE(p_reason, format('Variance adjusted %s → %s', v_line.budget_amount, p_new_amount)),
+      v_line.id, p_variance_id, NULL, NULL);
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_before, amount_after, actor_user_id, note)
+    VALUES (p_variance_id, v_variance.project_id, 'amount_changed', v_line.budget_amount, p_new_amount, p_actor, p_reason);
+
+    SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id;
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+
+  RETURN NEXT v_variance;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_adjust_variance(UUID, NUMERIC, UUID, TEXT) IS
+  'Changes a not-yet-approved variance amount; the difference flows back to (or out of) contingency with a ledger row and a history event, and any approval in progress restarts. 0 cancels. Approved / cancelled = PT422.';
+
+
+-- Amount and details together, in one transaction. A rejected variance goes
+-- back to pending approval when it is edited.
+CREATE OR REPLACE FUNCTION public.fn_edit_variance(
+  p_variance_id UUID,
+  p_amount      NUMERIC,
+  p_description TEXT,
+  p_trade_id    UUID,
+  p_vendor_id   UUID,
+  p_actor       UUID,
+  p_reason      TEXT DEFAULT NULL
+)
+RETURNS SETOF public.variance_lines
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_old  public.variance_lines;
+  v_new  public.variance_lines;
+BEGIN
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RAISE EXCEPTION 'Variance amount must be greater than zero. To drop the variance, cancel it.' USING ERRCODE = 'PT422';
+  END IF;
+  IF btrim(COALESCE(p_description, '')) = '' THEN
+    RAISE EXCEPTION 'A variance needs a description' USING ERRCODE = 'PT422';
+  END IF;
+
+  -- Locks, checks the status, moves the money.
+  PERFORM * FROM public.fn_adjust_variance(p_variance_id, p_amount, p_actor, p_reason);
+  SELECT * INTO v_old FROM public.variance_lines WHERE id = p_variance_id;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  UPDATE public.variance_lines
+     SET description      = btrim(p_description),
+         trade_id         = p_trade_id,
+         vendor_id        = p_vendor_id,
+         status           = 'pending_approval',
+         rejected_by      = NULL,
+         rejected_at      = NULL,
+         rejection_reason = NULL
+   WHERE id = p_variance_id
+   RETURNING * INTO v_new;
+
+  IF v_old.description IS DISTINCT FROM v_new.description
+     OR v_old.trade_id IS DISTINCT FROM v_new.trade_id
+     OR v_old.vendor_id IS DISTINCT FROM v_new.vendor_id THEN
+    UPDATE public.budget_lines
+       SET name = left('Variance: ' || v_new.description, 255), description = v_new.description, updated_by = p_actor
+     WHERE id = v_new.budget_line_id;
+    -- A first sign-off was for the old details: start the approval again.
+    -- (A pending invoice request has no sign-off yet, so it stays.)
+    UPDATE public.payment_approvals SET status = 'cancelled'
+     WHERE budget_line_id = v_new.budget_line_id AND status IN ('field_approved', 'awaiting_manager', 'awaiting_executive');
+    UPDATE public.payment_approvals SET vendor_id = v_new.vendor_id
+     WHERE budget_line_id = v_new.budget_line_id AND status = 'pending' AND internal_invoice_id IS NULL;
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, actor_user_id, note)
+    VALUES (p_variance_id, v_new.project_id, 'details_changed', p_actor, p_reason);
+  END IF;
+
+  UPDATE public.budget_lines SET approval_state = 'not_requested', updated_by = p_actor
+   WHERE id = v_new.budget_line_id AND approval_state <> 'not_requested'
+     AND NOT EXISTS (SELECT 1 FROM public.payment_approvals pa
+                      WHERE pa.budget_line_id = v_new.budget_line_id
+                        AND pa.status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive'));
+
+  IF v_old.status = 'rejected' THEN
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, actor_user_id, note)
+    VALUES (p_variance_id, v_new.project_id, 'resubmitted', p_actor, p_reason);
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_new;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_edit_variance(UUID, NUMERIC, TEXT, UUID, UUID, UUID, TEXT) IS
+  'Edits a not-yet-approved variance (amount, description, trade, vendor) in one transaction; a rejected one returns to pending approval.';
+
+
+-- ============================================================================
+-- SECTION E: 4.3 APPROVE FOR PAYMENT / REJECT
+-- ============================================================================
+-- Who gets the second approval: the person's manager, else the project's
+-- manager. Each is replaced by an active delegate or, when unavailable, by the
+-- standing backup. NULL = nobody specific: any manager may approve.
+CREATE OR REPLACE FUNCTION private.fin_route_manager(p_from_user UUID, p_project_id UUID, p_exclude UUID[])
+RETURNS UUID
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_manager   UUID;
+  v_candidate UUID;
+BEGIN
+  FOREACH v_manager IN ARRAY ARRAY[
+    (SELECT reports_to FROM public.users WHERE id = p_from_user),
+    (SELECT manager_id FROM public.projects WHERE id = p_project_id)
+  ] LOOP
+    CONTINUE WHEN v_manager IS NULL;
+    FOREACH v_candidate IN ARRAY ARRAY[
+      (SELECT delegate_user_id FROM public.approval_delegations
+        WHERE delegator_user_id = v_manager AND revoked_at IS NULL
+          AND NOW() >= starts_at AND NOW() < ends_at
+        ORDER BY created_at DESC LIMIT 1),
+      v_manager,
+      (SELECT backup_approver_id FROM public.users WHERE id = v_manager)
+    ] LOOP
+      IF v_candidate IS NOT NULL AND NOT (v_candidate = ANY (p_exclude))
+         AND EXISTS (SELECT 1 FROM public.users
+                      WHERE id = v_candidate AND is_active AND deleted_at IS NULL) THEN
+        RETURN v_candidate;
+      END IF;
+    END LOOP;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_approve_variance(
+  p_variance_id UUID,
+  p_actor       UUID,
+  p_note        TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_variance  public.variance_lines;
+  v_line      public.budget_lines;
+  v_pa        public.payment_approvals;
+  v_manager   BOOLEAN;
+  v_field     BOOLEAN;
+  v_limit     NUMERIC;
+  v_second    BOOLEAN;
+  v_routed    UUID;
+BEGIN
+  IF p_actor IS NULL THEN
+    RAISE EXCEPTION 'p_actor is required' USING ERRCODE = 'PT422';
+  END IF;
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id;
+  IF NOT FOUND OR v_variance.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Variance % not found', p_variance_id USING ERRCODE = 'PT404';
+  END IF;
+
+  PERFORM private.fin_lock_project(v_variance.project_id, TRUE, TRUE);
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id FOR UPDATE;
+  SELECT * INTO v_line     FROM public.budget_lines   WHERE id = v_variance.budget_line_id FOR UPDATE;
+
+  IF v_variance.status <> 'pending_approval' THEN
+    RAISE EXCEPTION 'This variance is % and cannot be approved.', replace(v_variance.status, '_', ' ') USING ERRCODE = 'PT422';
+  END IF;
+  IF p_actor = v_variance.created_by THEN
+    RAISE EXCEPTION 'You created this variance, so a different person must approve it.' USING ERRCODE = 'PT403';
+  END IF;
+
+  v_manager := private.user_has_role(p_actor, 'project_manager') OR private.user_has_role(p_actor, 'executive')
+               OR private.user_has_role(p_actor, 'admin');
+  v_field   := private.user_has_role(p_actor, 'field_manager');
+
+  SELECT * INTO v_pa FROM public.payment_approvals
+   WHERE budget_line_id = v_line.id
+     AND status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive')
+   ORDER BY created_at DESC LIMIT 1 FOR UPDATE;
+  v_second := COALESCE(v_pa.status = 'awaiting_manager', FALSE);
+
+  IF v_second THEN
+    IF p_actor = v_pa.field_approved_by THEN
+      RAISE EXCEPTION 'You gave the first approval, so a manager must give the second one.' USING ERRCODE = 'PT403';
+    END IF;
+    IF NOT v_manager AND p_actor IS DISTINCT FROM v_pa.routed_to_user_id THEN
+      RAISE EXCEPTION 'This amount is above the field manager limit and needs a manager''s approval.' USING ERRCODE = 'PT403';
+    END IF;
+  ELSIF NOT (v_manager OR v_field) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can approve a variance.' USING ERRCODE = 'PT403';
+  END IF;
+
+  -- Personal limit first; a field manager without one gets the default.
+  SELECT approval_limit INTO v_limit FROM public.users WHERE id = p_actor;
+  IF v_limit IS NULL AND NOT v_manager THEN
+    v_limit := COALESCE((SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                          WHERE setting_key = 'default_field_approval_limit'), 5000);
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  IF v_pa.id IS NULL THEN
+    INSERT INTO public.payment_approvals (
+      project_id, budget_line_id, internal_invoice_id, vendor_id, amount, payment_kind, status, requested_by
+    ) VALUES (
+      v_variance.project_id, v_line.id,
+      (SELECT internal_invoice_id FROM public.payment_approvals
+        WHERE budget_line_id = v_line.id AND internal_invoice_id IS NOT NULL ORDER BY created_at DESC LIMIT 1),
+      v_variance.vendor_id, v_line.budget_amount, 'full', 'pending', v_variance.created_by
+    ) RETURNING * INTO v_pa;
+  END IF;
+
+  IF NOT v_second AND v_limit IS NOT NULL AND v_line.budget_amount > v_limit THEN
+    v_routed := private.fin_route_manager(p_actor, v_variance.project_id, ARRAY[p_actor, v_variance.created_by]);
+    UPDATE public.payment_approvals
+       SET status = 'awaiting_manager', field_approved_by = p_actor, field_approved_at = NOW(),
+           routed_to_user_id = v_routed, comments = COALESCE(p_note, comments)
+     WHERE id = v_pa.id RETURNING * INTO v_pa;
+    UPDATE public.budget_lines SET approval_state = 'field_approved', updated_by = p_actor WHERE id = v_line.id;
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note)
+    VALUES (p_variance_id, v_variance.project_id, 'routed_to_manager', v_line.budget_amount, p_actor, p_note);
+  ELSE
+    UPDATE public.payment_approvals
+       SET status                = 'approved',
+           vendor_id             = COALESCE(vendor_id, v_variance.vendor_id),
+           field_approved_by     = CASE WHEN v_second OR v_manager THEN field_approved_by ELSE p_actor END,
+           field_approved_at     = CASE WHEN v_second OR v_manager THEN field_approved_at ELSE NOW() END,
+           manager_approved_by   = CASE WHEN v_second OR v_manager THEN p_actor ELSE manager_approved_by END,
+           manager_approved_at   = CASE WHEN v_second OR v_manager THEN NOW() ELSE manager_approved_at END,
+           expected_payment_date = CURRENT_DATE + v_line.payment_terms_days,
+           comments              = COALESCE(p_note, comments)
+     WHERE id = v_pa.id RETURNING * INTO v_pa;
+    UPDATE public.variance_lines
+       SET status = 'approved', approved_by = p_actor, approved_at = NOW()
+     WHERE id = p_variance_id RETURNING * INTO v_variance;
+    UPDATE public.budget_lines
+       SET approval_state = CASE WHEN v_second OR v_manager THEN 'manager_approved' ELSE 'field_approved' END,
+           updated_by = p_actor
+     WHERE id = v_line.id;
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note)
+    VALUES (p_variance_id, v_variance.project_id, 'approved', v_line.budget_amount, p_actor, p_note);
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+
+  RETURN jsonb_build_object(
+    'variance_id', p_variance_id, 'status', v_variance.status, 'payment_status', v_pa.status,
+    'payment_approval_id', v_pa.id, 'routed_to_user_id', v_pa.routed_to_user_id, 'limit', v_limit);
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_approve_variance(UUID, UUID, TEXT) IS
+  'Approve for payment, independent of the parent bid line. The creator can never approve. Above the approver''s limit the first approval is recorded and the request is routed to a manager (a different person). Final approval freezes the variance.';
+
+
+CREATE OR REPLACE FUNCTION public.fn_reject_variance(
+  p_variance_id UUID,
+  p_actor       UUID,
+  p_reason      TEXT
+)
+RETURNS SETOF public.variance_lines
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_variance public.variance_lines;
+  v_line     public.budget_lines;
+BEGIN
+  IF p_actor IS NULL THEN
+    RAISE EXCEPTION 'p_actor is required' USING ERRCODE = 'PT422';
+  END IF;
+  IF btrim(COALESCE(p_reason, '')) = '' THEN
+    RAISE EXCEPTION 'A rejection needs a reason' USING ERRCODE = 'PT422';
+  END IF;
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id;
+  IF NOT FOUND OR v_variance.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Variance % not found', p_variance_id USING ERRCODE = 'PT404';
+  END IF;
+
+  PERFORM private.fin_lock_project(v_variance.project_id, TRUE, FALSE);
+  SELECT * INTO v_variance FROM public.variance_lines WHERE id = p_variance_id FOR UPDATE;
+  SELECT * INTO v_line     FROM public.budget_lines   WHERE id = v_variance.budget_line_id FOR UPDATE;
+
+  IF v_variance.status <> 'pending_approval' THEN
+    RAISE EXCEPTION 'This variance is % and cannot be rejected.', replace(v_variance.status, '_', ' ') USING ERRCODE = 'PT422';
+  END IF;
+  IF p_actor = v_variance.created_by THEN
+    RAISE EXCEPTION 'You created this variance: edit or cancel it instead of rejecting it.' USING ERRCODE = 'PT403';
+  END IF;
+  IF NOT (private.user_has_role(p_actor, 'field_manager') OR private.user_has_role(p_actor, 'project_manager')
+          OR private.user_has_role(p_actor, 'executive') OR private.user_has_role(p_actor, 'admin')
+          OR EXISTS (SELECT 1 FROM public.payment_approvals
+                      WHERE budget_line_id = v_line.id AND status = 'awaiting_manager' AND routed_to_user_id = p_actor)) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can reject a variance.' USING ERRCODE = 'PT403';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  UPDATE public.payment_approvals
+     SET status = 'rejected', rejected_by = p_actor, rejected_at = NOW(), rejection_reason = btrim(p_reason)
+   WHERE budget_line_id = v_line.id AND status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive');
+  UPDATE public.budget_lines SET approval_state = 'rejected', updated_by = p_actor WHERE id = v_line.id;
+  UPDATE public.variance_lines
+     SET status = 'rejected', rejected_by = p_actor, rejected_at = NOW(), rejection_reason = btrim(p_reason)
+   WHERE id = p_variance_id RETURNING * INTO v_variance;
+  INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note)
+  VALUES (p_variance_id, v_variance.project_id, 'rejected', v_line.budget_amount, p_actor, btrim(p_reason));
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_variance;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_reject_variance(UUID, UUID, TEXT) IS
+  'Sends a variance back with a reason. The amount stays reserved until the variance is edited (back to pending approval) or cancelled (returned to contingency).';
+
+
+-- ============================================================================
+-- SECTION F: 4.4 READ SURFACE
+-- ============================================================================
+CREATE OR REPLACE VIEW public.v_variances
+WITH (security_invoker = true) AS
+SELECT
+  v.id, v.project_id, p.name AS project_name, v.budget_line_id, v.parent_budget_line_id,
+  pl.name AS parent_line_name, pl.line_type AS parent_line_type, pl.budget_amount AS parent_budget_amount,
+  pl.is_locked AS parent_is_locked, pl.approval_state AS parent_approval_state,
+  v.trade_id, t.name AS trade_name, v.vendor_id, vd.company_name AS vendor_name,
+  v.description, v.estimated_amount, bl.budget_amount AS amount, v.status,
+  bl.payment_terms_days,
+  v.created_by, cu.full_name AS created_by_name, v.created_at, v.updated_at,
+  v.approved_by, au.full_name AS approved_by_name, v.approved_at,
+  v.rejected_by, ru.full_name AS rejected_by_name, v.rejected_at, v.rejection_reason,
+  pa.id AS payment_approval_id,
+  -- A resubmitted variance has no request yet: its old rejection is history.
+  CASE WHEN pa.status = 'rejected' AND v.status = 'pending_approval' THEN 'not_requested'
+       ELSE COALESCE(pa.status, 'not_requested') END AS payment_status,
+  pa.field_approved_by, fu.full_name AS field_approved_by_name,
+  pa.routed_to_user_id, mu.full_name AS routed_to_name,
+  pa.expected_payment_date,
+  inv.id AS internal_invoice_id
+FROM public.variance_lines v
+JOIN public.projects          p  ON p.id  = v.project_id AND p.deleted_at IS NULL
+JOIN public.budget_lines      bl ON bl.id = v.budget_line_id
+JOIN public.budget_lines      pl ON pl.id = v.parent_budget_line_id
+LEFT JOIN public.trades       t  ON t.id  = v.trade_id
+LEFT JOIN public.vendors      vd ON vd.id = v.vendor_id
+LEFT JOIN public.users        cu ON cu.id = v.created_by
+LEFT JOIN public.users        au ON au.id = v.approved_by
+LEFT JOIN public.users        ru ON ru.id = v.rejected_by
+LEFT JOIN LATERAL (
+  SELECT * FROM public.payment_approvals x
+   WHERE x.budget_line_id = v.budget_line_id AND x.status <> 'cancelled'
+   ORDER BY x.created_at DESC LIMIT 1
+) pa ON TRUE
+LEFT JOIN LATERAL (
+  SELECT x.internal_invoice_id AS id FROM public.payment_approvals x
+   WHERE x.budget_line_id = v.budget_line_id AND x.internal_invoice_id IS NOT NULL LIMIT 1
+) inv ON TRUE
+LEFT JOIN public.users        fu ON fu.id = pa.field_approved_by
+LEFT JOIN public.users        mu ON mu.id = pa.routed_to_user_id
+WHERE v.deleted_at IS NULL;
+
+COMMENT ON VIEW public.v_variances IS
+  'Variances with project, parent line, trade, vendor, people, current amount and own payment status. security_invoker = true.';
+
+
+-- ============================================================================
+-- SECTION G: PRIVILEGES
+-- ============================================================================
+REVOKE ALL ON public.v_variances FROM PUBLIC, anon;
+GRANT SELECT ON public.v_variances TO authenticated, service_role;
+
+-- Run inside triggers / procedures as the calling role.
+REVOKE ALL ON FUNCTION private.fin_recalc_guardrails(uuid)             FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_route_manager(uuid, uuid, uuid[])   FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION private.fin_recalc_guardrails(uuid)           TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_route_manager(uuid, uuid, uuid[]) TO service_role;
+
+REVOKE ALL ON FUNCTION public.fn_block_variance_event_mutation()       FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_variance_created_event()              FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_ledger_recalc_guardrails()            FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_adjust_variance(uuid, numeric, uuid, text)                        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_edit_variance(uuid, numeric, text, uuid, uuid, uuid, text)        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_approve_variance(uuid, uuid, text)                                FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_reject_variance(uuid, uuid, text)                                 FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_adjust_variance(uuid, numeric, uuid, text)                     TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_edit_variance(uuid, numeric, text, uuid, uuid, uuid, text)     TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_approve_variance(uuid, uuid, text)                             TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_reject_variance(uuid, uuid, text)                              TO service_role;
+
+
+-- ============================================================================
+-- SECTION H: VERSION MARKER
+-- ============================================================================
+INSERT INTO public.financial_settings (setting_key, value, description)
+VALUES ('schema_version', '"4.5.0 (20261125_financial_phase4_variances)"'::jsonb,
+        'Last financial migration applied to this database. Written by the migration itself.')
+ON CONFLICT (setting_key) DO UPDATE SET value = EXCLUDED.value;
+
+
+-- ############################################################################
+--
+--  SECTION 15: PHASE 5 CONTINGENCY HEALTH GUARDRAIL & ALERTS (v4.6)
+--
+--  Source of truth for EXISTING databases: the idempotent migration
+--    database/migrations/20261126_financial_phase5_health/001_contingency_health.sql
+--  Same DDL minus BEGIN/COMMIT. Retires the Section 14 guardrail trigger.
+--
+-- ############################################################################
+
+-- ============================================================================
+-- SECTION A: COLUMNS
+-- ============================================================================
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS groundbreaking_at            TIMESTAMPTZ;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS groundbreaking_by            UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS status_before_hold           VARCHAR(20);
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS long_tail_reserve_updated_at TIMESTAMPTZ;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS long_tail_reserve_updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN public.projects.contingency_at_groundbreaking IS 'Contingency when groundbreaking was recorded: denominator of contingency left %. NULL = not recorded yet; the initial contingency at baseline is used.';
+COMMENT ON COLUMN public.projects.groundbreaking_at             IS 'When groundbreaking was recorded (fn_record_groundbreaking).';
+COMMENT ON COLUMN public.projects.status_before_hold            IS 'Status to return to when a financial hold is lifted.';
+
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS discussed_with     UUID REFERENCES public.users(id) ON DELETE RESTRICT;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS conversation_notes TEXT;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS hold_lifted_by     UUID REFERENCES public.users(id) ON DELETE RESTRICT;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS hold_lifted_at     TIMESTAMPTZ;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS hold_lift_reason   TEXT;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS notified_at        TIMESTAMPTZ;
+ALTER TABLE public.financial_alerts ADD COLUMN IF NOT EXISTS escalated_at       TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.financial_alerts.discussed_with     IS 'Field manager the deciding manager spoke with.';
+COMMENT ON COLUMN public.financial_alerts.conversation_notes IS 'What the field manager and the manager discussed.';
+COMMENT ON COLUMN public.financial_alerts.notified_at        IS 'When the alert was sent (in-app + email). NULL = not sent yet; the daily sweep sends it.';
+COMMENT ON COLUMN public.financial_alerts.escalated_at       IS 'When the executives were told.';
+
+
+-- ============================================================================
+-- SECTION B: 5.2 ONE ENGINE (retire the Phase 4 SQL guardrails)
+-- ============================================================================
+DROP TRIGGER IF EXISTS trg_contingency_ledger_guardrails ON public.contingency_ledger;
+DROP FUNCTION IF EXISTS public.fn_ledger_recalc_guardrails();
+DROP FUNCTION IF EXISTS private.fin_recalc_guardrails(uuid);
+
+-- Same function as Phase 1, but the hold message names the project.
+CREATE OR REPLACE FUNCTION private.fin_lock_project(
+  p_project_id       UUID,
+  p_require_baseline BOOLEAN,
+  p_block_on_hold    BOOLEAN
+)
+RETURNS public.projects
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_project public.projects;
+BEGIN
+  SELECT * INTO v_project FROM public.projects WHERE id = p_project_id FOR UPDATE;
+  IF NOT FOUND OR v_project.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Project % not found', p_project_id USING ERRCODE = 'PT404';
+  END IF;
+  IF p_require_baseline AND v_project.budget_status <> 'baselined' THEN
+    RAISE EXCEPTION 'Project % budget is not baselined yet (status %)', p_project_id, v_project.budget_status
+      USING ERRCODE = 'PT409';
+  END IF;
+  IF p_block_on_hold AND v_project.status = 'on_hold' THEN
+    RAISE EXCEPTION 'Project "%" is on hold; financial changes are blocked until the hold is lifted.', v_project.name
+      USING ERRCODE = 'PT409';
+  END IF;
+  RETURN v_project;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION C: 5.1 INPUTS FOR THE CALCULATION
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_project_health_inputs(p_project_id UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SET search_path = ''
+AS $$
+  SELECT jsonb_build_object(
+    'project_id',            p.id,
+    'project_name',          p.name,
+    'status',                p.status,
+    'budget_status',         p.budget_status,
+    'archived',              p.archived_at IS NOT NULL,
+    'manager_id',            p.manager_id,
+    'field_manager_id',      p.field_manager_id,
+    'groundbreaking_at',     p.groundbreaking_at,
+    'reserve',               p.long_tail_reserve_amount,
+    'contingency',           (SELECT b.budget_amount FROM public.budget_lines b
+                               WHERE b.project_id = p.id AND b.line_type = 'contingency' AND b.deleted_at IS NULL),
+    'contingency_base',      COALESCE(p.contingency_at_groundbreaking,
+                               (SELECT cb.approved_amount FROM public.contingency_buckets cb
+                                 WHERE cb.project_id = p.id AND cb.bucket_kind = 'initial')),
+    'total_budget',          (SELECT COALESCE(SUM(b.budget_amount), 0) FROM public.budget_lines b
+                               WHERE b.project_id = p.id AND b.deleted_at IS NULL),
+    'lines',                 (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                                'committed',   b.committed_amount,
+                                'approved',    COALESCE(pay.approved, 0),
+                                'sent',        COALESCE(pay.sent, 0),
+                                'land_closed', COALESCE(lc.closed, 0))), '[]'::jsonb)
+                               FROM public.budget_lines b
+                               LEFT JOIN LATERAL (
+                                 SELECT SUM(x.amount) FILTER (WHERE x.status = 'approved')        AS approved,
+                                        SUM(x.amount) FILTER (WHERE x.status = 'sent_to_finance') AS sent
+                                   FROM public.payment_approvals x WHERE x.budget_line_id = b.id
+                               ) pay ON TRUE
+                               LEFT JOIN LATERAL (
+                                 SELECT SUM(y.amount) AS closed FROM public.land_closings y
+                                  WHERE y.budget_line_id = b.id AND y.status = 'closed'
+                               ) lc ON TRUE
+                              WHERE b.project_id = p.id AND b.deleted_at IS NULL AND b.line_type <> 'contingency'),
+    'milestones_total',      ms.total,
+    'milestones_completed',  ms.done,
+    'near_zero_percent',     COALESCE((SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                                        WHERE setting_key = 'contingency_near_zero_percent'), 5)
+  )
+  FROM public.projects p
+  CROSS JOIN LATERAL (
+    SELECT count(*) AS total, count(*) FILTER (WHERE m.status = 'completed') AS done
+      FROM public.milestones m
+      JOIN public.tasks t ON t.id = m.task_id
+     WHERE t.project_id = p.id AND t.deleted_at IS NULL AND m.status <> 'cancelled'
+  ) ms
+  WHERE p.id = p_project_id AND p.deleted_at IS NULL;
+$$;
+
+COMMENT ON FUNCTION public.fn_project_health_inputs(UUID) IS
+  'Every number the health calculation (app/services/financial_health.py) needs, read in one statement.';
+
+CREATE OR REPLACE FUNCTION public.fn_record_groundbreaking(p_project_id UUID, p_actor UUID)
+RETURNS SETOF public.projects
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_project public.projects;
+  v_cont    NUMERIC;
+BEGIN
+  IF NOT (private.user_has_role(p_actor, 'project_manager') OR private.user_has_role(p_actor, 'executive')
+          OR private.user_has_role(p_actor, 'admin')) THEN
+    RAISE EXCEPTION 'Only a project manager, executive or admin can record groundbreaking.' USING ERRCODE = 'PT403';
+  END IF;
+  v_project := private.fin_lock_project(p_project_id, TRUE, FALSE);
+  IF v_project.groundbreaking_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Groundbreaking is already recorded for this project.' USING ERRCODE = 'PT409';
+  END IF;
+  SELECT budget_amount INTO v_cont FROM public.budget_lines
+   WHERE project_id = p_project_id AND line_type = 'contingency' AND deleted_at IS NULL;
+  IF COALESCE(v_cont, 0) <= 0 THEN
+    RAISE EXCEPTION 'Groundbreaking needs contingency above $0, because later checks are measured against it.'
+      USING ERRCODE = 'PT422';
+  END IF;
+  UPDATE public.projects
+     SET contingency_at_groundbreaking = v_cont, groundbreaking_at = NOW(), groundbreaking_by = p_actor
+   WHERE id = p_project_id RETURNING * INTO v_project;
+  RETURN NEXT v_project;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION D: 5.2 / 5.3 ALERT SYNC
+-- ============================================================================
+-- p_checks: [{type, active, severity, left_pct, work_left_pct, remaining, reserve, message}]
+--   no live alert       → open one
+--   open                → refresh its numbers
+--   OK to proceed given → stays quiet until contingency drops below the amount
+--                         it was decided at, then a new decision is needed
+--   on hold             → untouched until the hold is lifted
+--   no longer active    → resolved
+CREATE OR REPLACE FUNCTION public.fn_sync_financial_alerts(p_project_id UUID, p_checks JSONB)
+RETURNS JSONB
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  c         JSONB;
+  v_alert   public.financial_alerts;
+  v_type    TEXT;
+  v_remain  NUMERIC;
+  v_new     UUID;
+  v_found   BOOLEAN;
+  v_opened  JSONB := '[]'::jsonb;
+BEGIN
+  PERFORM private.fin_lock_project(p_project_id, FALSE, FALSE);
+
+  FOR c IN SELECT value FROM jsonb_array_elements(p_checks) LOOP
+    v_type   := c ->> 'type';
+    v_remain := (c ->> 'remaining')::numeric;
+
+    IF NOT (c ->> 'active')::boolean THEN
+      UPDATE public.financial_alerts SET status = 'resolved', resolved_at = NOW()
+       WHERE project_id = p_project_id AND alert_type = v_type
+         AND status IN ('open', 'acknowledged', 'proceed_approved');
+      CONTINUE;
+    END IF;
+
+    SELECT * INTO v_alert FROM public.financial_alerts
+     WHERE project_id = p_project_id AND alert_type = v_type
+       AND status IN ('open', 'acknowledged', 'proceed_approved', 'on_hold')
+     ORDER BY created_at DESC LIMIT 1;
+    v_found := FOUND;
+
+    IF v_found AND v_alert.status IN ('open', 'acknowledged') THEN
+      UPDATE public.financial_alerts
+         SET severity = c ->> 'severity', contingency_left_pct = (c ->> 'left_pct')::numeric,
+             work_left_pct = (c ->> 'work_left_pct')::numeric, contingency_remaining = v_remain,
+             reserve_required = (c ->> 'reserve')::numeric, message = c ->> 'message'
+       WHERE id = v_alert.id;
+      CONTINUE;
+    END IF;
+    IF v_found AND (v_alert.status = 'on_hold'
+                    OR v_remain >= COALESCE(v_alert.contingency_remaining, v_remain)) THEN
+      CONTINUE;
+    END IF;
+    IF v_found THEN
+      UPDATE public.financial_alerts SET status = 'superseded' WHERE id = v_alert.id;
+    END IF;
+
+    INSERT INTO public.financial_alerts (
+      project_id, alert_type, severity, contingency_left_pct, work_left_pct,
+      contingency_remaining, reserve_required, message
+    ) VALUES (
+      p_project_id, v_type, c ->> 'severity', (c ->> 'left_pct')::numeric, (c ->> 'work_left_pct')::numeric,
+      v_remain, (c ->> 'reserve')::numeric, c ->> 'message'
+    ) RETURNING id INTO v_new;
+    v_opened := v_opened || to_jsonb(v_new);
+  END LOOP;
+
+  RETURN v_opened;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_sync_financial_alerts(UUID, JSONB) IS
+  'Brings a project''s guardrail alerts in line with the calculated checks. Returns the ids of newly opened alerts.';
+
+
+-- ============================================================================
+-- SECTION E: 5.4 DECISION AND HOLD
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_decide_financial_alert(
+  p_alert_id       UUID,
+  p_actor          UUID,
+  p_decision       TEXT,
+  p_reason         TEXT,
+  p_discussed_with UUID,
+  p_notes          TEXT
+)
+RETURNS SETOF public.financial_alerts
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_alert   public.financial_alerts;
+  v_project public.projects;
+BEGIN
+  IF p_decision IS NULL OR p_decision NOT IN ('proceed', 'hold') THEN
+    RAISE EXCEPTION 'The decision must be proceed or hold.' USING ERRCODE = 'PT422';
+  END IF;
+  IF btrim(COALESCE(p_reason, '')) = '' THEN
+    RAISE EXCEPTION 'A decision needs a reason.' USING ERRCODE = 'PT422';
+  END IF;
+  IF btrim(COALESCE(p_notes, '')) = '' THEN
+    RAISE EXCEPTION 'Record what was discussed with the field manager.' USING ERRCODE = 'PT422';
+  END IF;
+  IF NOT (private.user_has_role(p_actor, 'project_manager') OR private.user_has_role(p_actor, 'executive')
+          OR private.user_has_role(p_actor, 'admin')) THEN
+    RAISE EXCEPTION 'Only a project manager, executive or admin can decide this alert.' USING ERRCODE = 'PT403';
+  END IF;
+
+  SELECT * INTO v_alert FROM public.financial_alerts WHERE id = p_alert_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Alert not found' USING ERRCODE = 'PT404';
+  END IF;
+  IF v_alert.alert_type = 'bidding_checkpoint' THEN
+    RAISE EXCEPTION 'The bidding checkpoint has no proceed / hold decision.' USING ERRCODE = 'PT422';
+  END IF;
+
+  v_project := private.fin_lock_project(v_alert.project_id, FALSE, FALSE);
+  SELECT * INTO v_alert FROM public.financial_alerts WHERE id = p_alert_id FOR UPDATE;
+  IF v_alert.status NOT IN ('open', 'acknowledged') THEN
+    RAISE EXCEPTION 'This alert is already decided or resolved.' USING ERRCODE = 'PT409';
+  END IF;
+  IF v_project.archived_at IS NOT NULL OR v_project.status IN ('completed', 'cancelled') THEN
+    RAISE EXCEPTION 'This project is closed or archived.' USING ERRCODE = 'PT409';
+  END IF;
+
+  -- The conversation is between two people, one of them a field manager.
+  IF p_discussed_with IS NULL OR p_discussed_with = p_actor
+     OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_discussed_with AND is_active AND deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'Choose the field manager you spoke with (someone other than yourself).' USING ERRCODE = 'PT422';
+  END IF;
+  IF p_discussed_with IS DISTINCT FROM v_project.field_manager_id
+     AND NOT private.user_has_role(p_discussed_with, 'field_manager') THEN
+    RAISE EXCEPTION 'The person you spoke with must be a field manager.' USING ERRCODE = 'PT422';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  -- One conversation settles every open guardrail alert of the project.
+  UPDATE public.financial_alerts
+     SET status             = CASE WHEN p_decision = 'proceed' THEN 'proceed_approved' ELSE 'on_hold' END,
+         decision           = p_decision,
+         decision_reason    = btrim(p_reason),
+         decided_by         = p_actor,
+         decided_at         = NOW(),
+         discussed_with     = p_discussed_with,
+         conversation_notes = btrim(p_notes)
+   WHERE project_id = v_project.id AND status IN ('open', 'acknowledged')
+     AND alert_type <> 'bidding_checkpoint';
+
+  IF p_decision = 'hold' AND v_project.status <> 'on_hold' THEN
+    UPDATE public.projects SET status_before_hold = status, status = 'on_hold' WHERE id = v_project.id;
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+
+  RETURN QUERY SELECT * FROM public.financial_alerts WHERE id = p_alert_id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_decide_financial_alert(UUID, UUID, TEXT, TEXT, UUID, TEXT) IS
+  'Manager''s OK-to-proceed or hold, with the reason and the field manager conversation. Hold moves the project to on_hold.';
+
+CREATE OR REPLACE FUNCTION public.fn_lift_financial_hold(p_project_id UUID, p_actor UUID, p_reason TEXT)
+RETURNS SETOF public.projects
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_project public.projects;
+BEGIN
+  IF btrim(COALESCE(p_reason, '')) = '' THEN
+    RAISE EXCEPTION 'Lifting the hold needs a reason.' USING ERRCODE = 'PT422';
+  END IF;
+  IF NOT (private.user_has_role(p_actor, 'project_manager') OR private.user_has_role(p_actor, 'executive')
+          OR private.user_has_role(p_actor, 'admin')) THEN
+    RAISE EXCEPTION 'Only a project manager, executive or admin can lift the hold.' USING ERRCODE = 'PT403';
+  END IF;
+
+  v_project := private.fin_lock_project(p_project_id, FALSE, FALSE);
+  IF v_project.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'This project is archived. Unarchive it first.' USING ERRCODE = 'PT409';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.financial_alerts WHERE project_id = p_project_id AND status = 'on_hold') THEN
+    RAISE EXCEPTION 'This project has no financial hold.' USING ERRCODE = 'PT409';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  -- Lifting is an OK to proceed at today's contingency: a further drop alerts again.
+  UPDATE public.financial_alerts
+     SET status = 'proceed_approved', hold_lifted_by = p_actor, hold_lifted_at = NOW(),
+         hold_lift_reason = btrim(p_reason),
+         contingency_remaining = COALESCE((SELECT budget_amount FROM public.budget_lines
+                                            WHERE project_id = p_project_id AND line_type = 'contingency'
+                                              AND deleted_at IS NULL), contingency_remaining)
+   WHERE project_id = p_project_id AND status = 'on_hold';
+  UPDATE public.projects
+     SET status = CASE WHEN status = 'on_hold' THEN COALESCE(status_before_hold, 'active') ELSE status END,
+         status_before_hold = NULL
+   WHERE id = p_project_id RETURNING * INTO v_project;
+
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_project;
+END;
+$$;
+
+-- Project guard: a financial hold is lifted only through the procedure, and the
+-- long-tail reserve is released only at project close.
+CREATE OR REPLACE FUNCTION public.fn_guard_project_health()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NOT private.fin_write_authorized()
+     AND NEW.status IS DISTINCT FROM OLD.status AND OLD.status = 'on_hold'
+     AND EXISTS (SELECT 1 FROM public.financial_alerts WHERE project_id = OLD.id AND status = 'on_hold') THEN
+    RAISE EXCEPTION 'This project is on a financial hold. Lift the hold from its financial alert, with a reason.'
+      USING ERRCODE = 'PT409';
+  END IF;
+  IF COALESCE(NEW.long_tail_reserve_amount, 0) < COALESCE(OLD.long_tail_reserve_amount, 0)
+     AND OLD.groundbreaking_at IS NOT NULL AND NEW.status <> 'completed' THEN
+    RAISE EXCEPTION 'The long-tail reserve can only be released when the project is completed.' USING ERRCODE = 'PT409';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_projects_guard_health ON public.projects;
+CREATE TRIGGER trg_projects_guard_health
+  BEFORE UPDATE OF status, long_tail_reserve_amount ON public.projects
+  FOR EACH ROW EXECUTE FUNCTION public.fn_guard_project_health();
+
+-- On hold = no new bid packages, awards, approvals or payments. Two functions,
+-- because bid packages / awards reach the project through their task.
+CREATE OR REPLACE FUNCTION public.fn_block_on_hold_task()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_status TEXT;
+BEGIN
+  -- FOR SHARE: waits for a hold that is being placed right now.
+  SELECT p.status INTO v_status FROM public.projects p
+   WHERE p.id = (SELECT t.project_id FROM public.tasks t WHERE t.id = NEW.task_id) FOR SHARE;
+  IF v_status = 'on_hold' THEN
+    RAISE EXCEPTION 'This project is on hold. New bid packages, awards, approvals and payments are blocked until the hold is lifted.'
+      USING ERRCODE = 'PT409';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_block_on_hold_payment()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_status TEXT;
+BEGIN
+  SELECT p.status INTO v_status FROM public.projects p WHERE p.id = NEW.project_id FOR SHARE;
+  IF v_status = 'on_hold' THEN
+    RAISE EXCEPTION 'This project is on hold. New bid packages, awards, approvals and payments are blocked until the hold is lifted.'
+      USING ERRCODE = 'PT409';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_bid_packages_block_on_hold ON public.bid_packages;
+CREATE TRIGGER trg_bid_packages_block_on_hold BEFORE INSERT ON public.bid_packages
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_on_hold_task();
+DROP TRIGGER IF EXISTS trg_awards_block_on_hold ON public.awards;
+CREATE TRIGGER trg_awards_block_on_hold BEFORE INSERT ON public.awards
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_on_hold_task();
+DROP TRIGGER IF EXISTS trg_payment_approvals_block_on_hold_ins ON public.payment_approvals;
+CREATE TRIGGER trg_payment_approvals_block_on_hold_ins BEFORE INSERT ON public.payment_approvals
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_on_hold_payment();
+-- Rejecting and cancelling stay possible on a held project.
+DROP TRIGGER IF EXISTS trg_payment_approvals_block_on_hold_upd ON public.payment_approvals;
+CREATE TRIGGER trg_payment_approvals_block_on_hold_upd BEFORE UPDATE OF status ON public.payment_approvals
+  FOR EACH ROW
+  WHEN (NEW.status IS DISTINCT FROM OLD.status AND NEW.status NOT IN ('pending', 'rejected', 'cancelled'))
+  EXECUTE FUNCTION public.fn_block_on_hold_payment();
+DROP TRIGGER IF EXISTS trg_finance_handoffs_block_on_hold ON public.finance_handoffs;
+CREATE TRIGGER trg_finance_handoffs_block_on_hold BEFORE INSERT ON public.finance_handoffs
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_on_hold_payment();
+
+
+-- ============================================================================
+-- SECTION F: READ SURFACE
+-- ============================================================================
+CREATE OR REPLACE VIEW public.v_financial_alerts
+WITH (security_invoker = true) AS
+SELECT a.id, a.project_id, p.name AS project_name, p.status AS project_status,
+       p.manager_id, p.field_manager_id, p.archived_at AS project_archived_at,
+       a.alert_type, a.severity, a.status, a.contingency_left_pct, a.work_left_pct,
+       a.contingency_remaining, a.reserve_required, a.message,
+       a.decision, a.decision_reason, a.decided_by, du.full_name AS decided_by_name, a.decided_at,
+       a.discussed_with, wu.full_name AS discussed_with_name, a.conversation_notes,
+       a.hold_lifted_by, lu.full_name AS hold_lifted_by_name, a.hold_lifted_at, a.hold_lift_reason,
+       a.notified_at, a.escalated_at, a.resolved_at, a.created_at, a.updated_at
+  FROM public.financial_alerts a
+  JOIN public.projects p ON p.id = a.project_id AND p.deleted_at IS NULL
+  LEFT JOIN public.users du ON du.id = a.decided_by
+  LEFT JOIN public.users wu ON wu.id = a.discussed_with
+  LEFT JOIN public.users lu ON lu.id = a.hold_lifted_by;
+
+COMMENT ON VIEW public.v_financial_alerts IS
+  'Financial alerts with project and people names. security_invoker = true.';
+
+
+-- ============================================================================
+-- SECTION G: PRIVILEGES
+-- ============================================================================
+REVOKE ALL ON public.v_financial_alerts FROM PUBLIC, anon;
+GRANT SELECT ON public.v_financial_alerts TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.fn_project_health_inputs(uuid)                                   FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_record_groundbreaking(uuid, uuid)                             FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_sync_financial_alerts(uuid, jsonb)                            FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_decide_financial_alert(uuid, uuid, text, text, uuid, text)    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_lift_financial_hold(uuid, uuid, text)                         FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_guard_project_health()                                        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_block_on_hold_task()                                          FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_block_on_hold_payment()                                       FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_project_health_inputs(uuid)                                TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_record_groundbreaking(uuid, uuid)                          TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_sync_financial_alerts(uuid, jsonb)                         TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_decide_financial_alert(uuid, uuid, text, text, uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_lift_financial_hold(uuid, uuid, text)                      TO service_role;
+
+
+-- ============================================================================
+-- SECTION H: SETTINGS AND VERSION MARKER
+-- ============================================================================
+INSERT INTO public.financial_settings (setting_key, value, description) VALUES
+  ('contingency_near_zero_percent', '5'::jsonb, 'Contingency left % at or below which the urgent near-zero alert fires.'),
+  ('alert_escalation_days', '2'::jsonb, 'Days an alert may stay undecided before the executives are emailed.'),
+  ('alert_recipients', '{"warning": [], "urgent": [], "critical": []}'::jsonb, 'Emails per alert severity, besides the project''s manager and field manager.')
+ON CONFLICT (setting_key) DO NOTHING;
+
+INSERT INTO public.financial_settings (setting_key, value, description)
+VALUES ('schema_version', '"4.6.0 (20261126_financial_phase5_health)"'::jsonb,
+        'Last financial migration applied to this database. Written by the migration itself.')
+ON CONFLICT (setting_key) DO UPDATE SET value = EXCLUDED.value;
+
+
+-- ############################################################################
+--
+--  SECTION 16: PHASE 6 PAYMENT APPROVAL WORKFLOW & FINANCE HAND-OFF (v4.7)
+--
+--  Source of truth for EXISTING databases: the idempotent migration
+--    database/migrations/20261127_financial_phase6_payments/001_payment_approvals.sql
+--  Same DDL minus BEGIN/COMMIT and the RLS part (in rls_policies.sql).
+--
+-- ############################################################################
+
+-- ============================================================================
+-- SECTION A: COLUMNS
+-- ============================================================================
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS gross_amount          DECIMAL(15,2);
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS work_confirmed_by     UUID REFERENCES public.users(id) ON DELETE RESTRICT;
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS work_confirmed_at     TIMESTAMPTZ;
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS confirmed_by_external BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS executive_required    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS resubmitted_from      UUID REFERENCES public.payment_approvals(id) ON DELETE RESTRICT;
+ALTER TABLE public.payment_approvals ADD COLUMN IF NOT EXISTS approved_at           TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.payment_approvals.amount                IS 'Net amount to pay = gross_amount − retainage_amount (a retainage release pays the retainage held).';
+COMMENT ON COLUMN public.payment_approvals.gross_amount          IS 'Value of the work being paid (full: what is left on the line; progress: % of the line). NULL on Phase 2 invoice requests = amount.';
+COMMENT ON COLUMN public.payment_approvals.work_confirmed_by     IS 'Field manager who confirmed the work is complete (may be external).';
+COMMENT ON COLUMN public.payment_approvals.confirmed_by_external IS 'TRUE when the work was confirmed by an external / temporary field manager: a second, internal approval is always needed.';
+COMMENT ON COLUMN public.payment_approvals.executive_required    IS 'Above financial_settings.executive_approval_threshold: an executive approval is also needed.';
+
+ALTER TABLE public.finance_handoffs ADD COLUMN IF NOT EXISTS handoff_error TEXT;
+COMMENT ON COLUMN public.finance_handoffs.handoff_error IS 'Why the last hand-off email failed. The daily summary job retries failed hand-offs.';
+
+
+-- ============================================================================
+-- SECTION B: HISTORY (append-only)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.payment_approval_events (
+  id                   UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_no             BIGINT        GENERATED ALWAYS AS IDENTITY UNIQUE,
+  payment_approval_id  UUID          NOT NULL REFERENCES public.payment_approvals(id) ON DELETE RESTRICT,
+  project_id           UUID          NOT NULL REFERENCES public.projects(id) ON DELETE RESTRICT,
+  event_type           VARCHAR(30)   NOT NULL
+                                     CHECK (event_type IN ('requested', 'work_confirmed', 'field_approved', 'routed_to_manager',
+                                                           'manager_approved', 'routed_to_executive', 'executive_approved',
+                                                           'approved', 'rejected', 'resubmitted', 'cancelled',
+                                                           'sent_to_finance', 'handoff_failed')),
+  status_after         VARCHAR(20)   NOT NULL,
+  actor_user_id        UUID          REFERENCES public.users(id) ON DELETE RESTRICT,
+  routed_to_user_id    UUID          REFERENCES public.users(id) ON DELETE SET NULL,
+  note                 TEXT,
+  created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_approval_events_pa ON public.payment_approval_events (payment_approval_id, event_no);
+
+COMMENT ON TABLE public.payment_approval_events IS
+  'Append-only audit trail of every payment approval: request, work confirmation, each approval, routing, rejection, hand-off to finance.';
+
+CREATE OR REPLACE FUNCTION public.fn_block_payment_event_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'Payment approval history is append-only and cannot be changed.' USING ERRCODE = 'PT403';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_payment_approval_events_immutable ON public.payment_approval_events;
+CREATE TRIGGER trg_payment_approval_events_immutable
+  BEFORE UPDATE OR DELETE ON public.payment_approval_events
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_payment_event_mutation();
+DROP TRIGGER IF EXISTS trg_payment_approval_events_no_truncate ON public.payment_approval_events;
+CREATE TRIGGER trg_payment_approval_events_no_truncate
+  BEFORE TRUNCATE ON public.payment_approval_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.fn_block_payment_event_mutation();
+
+-- RLS for this table: rls_policies.sql (PAYMENT HISTORY RLS).
+
+
+-- ============================================================================
+-- SECTION C: HELPERS
+-- ============================================================================
+-- Amount a user may approve alone. NULL = no limit (a manager without a
+-- personal limit). A field manager without one gets the default.
+CREATE OR REPLACE FUNCTION private.fin_effective_limit(p_user UUID)
+RETURNS NUMERIC
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT CASE
+           WHEN u.approval_limit IS NOT NULL THEN u.approval_limit
+           WHEN private.user_has_role(p_user, 'project_manager') OR private.user_has_role(p_user, 'executive')
+                OR private.user_has_role(p_user, 'admin') THEN NULL
+           ELSE COALESCE((SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                           WHERE setting_key = 'default_field_approval_limit'), 5000)
+         END
+    FROM public.users u WHERE u.id = p_user;
+$$;
+
+-- The contract behind a line: retainage %, payment terms, number.
+CREATE OR REPLACE FUNCTION private.fin_line_contract(p_line_id UUID)
+RETURNS public.contracts
+LANGUAGE sql
+STABLE
+SET search_path = ''
+AS $$
+  SELECT c.* FROM public.budget_lines b
+    JOIN public.contracts c ON c.id = b.contract_id
+                            OR (b.contract_id IS NULL AND c.award_id = b.award_id AND c.status <> 'terminated')
+   WHERE b.id = p_line_id
+   ORDER BY (c.id = b.contract_id) DESC, c.created_at DESC
+   LIMIT 1;
+$$;
+
+-- Line roll-up of its latest live payment request.
+CREATE OR REPLACE FUNCTION private.fin_rollup_line_approval(p_line_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_status TEXT;
+BEGIN
+  SELECT status INTO v_status FROM public.payment_approvals
+   WHERE budget_line_id = p_line_id AND status <> 'cancelled'
+   ORDER BY created_at DESC LIMIT 1;
+  UPDATE public.budget_lines
+     SET approval_state = CASE
+           WHEN v_status IS NULL THEN 'not_requested'
+           WHEN v_status = 'pending' THEN 'pending'
+           WHEN v_status IN ('field_approved', 'awaiting_manager', 'awaiting_executive') THEN 'field_approved'
+           WHEN v_status = 'approved' THEN 'manager_approved'
+           WHEN v_status = 'sent_to_finance' THEN 'sent_to_finance'
+           ELSE 'rejected' END
+   WHERE id = p_line_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION private.fin_payment_event(
+  p_pa public.payment_approvals, p_type TEXT, p_actor UUID, p_note TEXT, p_routed UUID DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE sql
+SET search_path = ''
+AS $$
+  INSERT INTO public.payment_approval_events (payment_approval_id, project_id, event_type, status_after,
+                                              actor_user_id, routed_to_user_id, note)
+  VALUES (p_pa.id, p_pa.project_id, p_type, p_pa.status, p_actor, p_routed, NULLIF(btrim(COALESCE(p_note, '')), ''));
+$$;
+
+CREATE OR REPLACE FUNCTION private.fin_is_approver(p_user UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SET search_path = ''
+AS $$
+  SELECT private.user_has_role(p_user, 'field_manager') OR private.user_has_role(p_user, 'project_manager')
+      OR private.user_has_role(p_user, 'executive') OR private.user_has_role(p_user, 'admin');
+$$;
+
+-- PO number from the configured formats: {CONTRACT} {YYYY} {MM} {SEQ:n}.
+CREATE OR REPLACE FUNCTION private.fin_next_po_number(p_contract TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_fmt    TEXT;
+  v_width  INT;
+  v_prefix TEXT;
+  v_suffix TEXT;
+  v_seq    INT;
+  v_po     TEXT;
+BEGIN
+  IF p_contract IS NOT NULL THEN
+    v_fmt := COALESCE((SELECT value #>> '{}' FROM public.financial_settings WHERE setting_key = 'po_number_format_contract'),
+                      '{CONTRACT}-{SEQ:03}');
+  ELSE
+    v_fmt := COALESCE((SELECT value #>> '{}' FROM public.financial_settings WHERE setting_key = 'po_number_format'),
+                      'PO-{YYYY}-{SEQ:05}');
+  END IF;
+  IF v_fmt !~ '\{SEQ(:\d+)?\}' THEN
+    v_fmt := v_fmt || '-{SEQ:03}';
+  END IF;
+  v_fmt := replace(replace(replace(v_fmt, '{CONTRACT}', COALESCE(p_contract, '')),
+                           '{YYYY}', to_char(CURRENT_DATE, 'YYYY')), '{MM}', to_char(CURRENT_DATE, 'MM'));
+  v_width  := COALESCE((regexp_match(v_fmt, '\{SEQ:(\d+)\}'))[1]::int, 1);
+  v_prefix := split_part(regexp_replace(v_fmt, '\{SEQ(:\d+)?\}', '#SEQ#'), '#SEQ#', 1);
+  v_suffix := split_part(regexp_replace(v_fmt, '\{SEQ(:\d+)?\}', '#SEQ#'), '#SEQ#', 2);
+
+  PERFORM pg_advisory_xact_lock(hashtext('bluonx.po_number'));
+  SELECT count(*) + 1 INTO v_seq FROM public.finance_handoffs
+   WHERE left(po_number, length(v_prefix)) = v_prefix;
+  LOOP
+    v_po := left(v_prefix || lpad(v_seq::text, v_width, '0') || v_suffix, 50);
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.finance_handoffs WHERE po_number = v_po);
+    v_seq := v_seq + 1;
+  END LOOP;
+  RETURN v_po;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION D: 6.1 REQUEST
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_request_payment(
+  p_line_id  UUID,
+  p_actor    UUID,
+  p_kind     TEXT,
+  p_percent  NUMERIC,
+  p_note     TEXT
+)
+RETURNS SETOF public.payment_approvals
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_line      public.budget_lines;
+  v_contract  public.contracts;
+  v_variance  public.variance_lines;
+  v_total     NUMERIC;
+  v_used      NUMERIC;
+  v_gross     NUMERIC;
+  v_ret       NUMERIC := 0;
+  v_amount    NUMERIC;
+  v_vendor    UUID;
+  v_pa        public.payment_approvals;
+BEGIN
+  IF p_kind IS NULL OR p_kind NOT IN ('full', 'progress', 'retainage_release') THEN
+    RAISE EXCEPTION 'Choose a full payment, a progress payment or a retainage release.' USING ERRCODE = 'PT422';
+  END IF;
+  IF NOT private.fin_is_approver(p_actor) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can request a payment.' USING ERRCODE = 'PT403';
+  END IF;
+
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = p_line_id;
+  IF NOT FOUND OR v_line.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Budget line % not found', p_line_id USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_line.project_id, FALSE, TRUE);
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = p_line_id FOR UPDATE;
+
+  IF v_line.line_type = 'bid_activity' THEN
+    IF v_line.award_id IS NULL OR v_line.committed_amount <= 0 THEN
+      RAISE EXCEPTION 'This line has no award yet, so there is nothing to pay.' USING ERRCODE = 'PT422';
+    END IF;
+    v_total    := v_line.committed_amount;
+    v_contract := private.fin_line_contract(p_line_id);
+    v_ret      := COALESCE(v_contract.retainage_percent, 0);
+    SELECT vendor_id INTO v_vendor FROM public.awards WHERE id = v_line.award_id;
+  ELSIF v_line.line_type = 'variance' THEN
+    SELECT * INTO v_variance FROM public.variance_lines WHERE budget_line_id = p_line_id;
+    IF v_variance.status IS DISTINCT FROM 'pending_approval' THEN
+      RAISE EXCEPTION 'Only a variance waiting for approval can be sent for payment.' USING ERRCODE = 'PT422';
+    END IF;
+    IF p_kind <> 'full' THEN
+      RAISE EXCEPTION 'A variance is paid in full.' USING ERRCODE = 'PT422';
+    END IF;
+    v_total  := v_line.budget_amount;
+    v_vendor := v_variance.vendor_id;
+  ELSE
+    RAISE EXCEPTION 'Payments on % lines start from their invoices (Invoices tab).', replace(v_line.line_type, '_', ' ')
+      USING ERRCODE = 'PT422';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.payment_approvals WHERE budget_line_id = p_line_id
+              AND status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive')) THEN
+    RAISE EXCEPTION 'This line already has a payment waiting for approval.' USING ERRCODE = 'PT409';
+  END IF;
+
+  SELECT COALESCE(SUM(COALESCE(gross_amount, amount)), 0) INTO v_used FROM public.payment_approvals
+   WHERE budget_line_id = p_line_id AND status NOT IN ('rejected', 'cancelled') AND payment_kind <> 'retainage_release';
+
+  IF p_kind = 'retainage_release' THEN
+    IF v_used < v_total THEN
+      RAISE EXCEPTION 'Retainage is released once the whole line has been approved for payment.' USING ERRCODE = 'PT422';
+    END IF;
+    SELECT COALESCE(SUM(retainage_amount) FILTER (WHERE payment_kind <> 'retainage_release'), 0)
+           - COALESCE(SUM(amount) FILTER (WHERE payment_kind = 'retainage_release'), 0)
+      INTO v_amount FROM public.payment_approvals
+     WHERE budget_line_id = p_line_id AND status NOT IN ('rejected', 'cancelled');
+    IF v_amount <= 0 THEN
+      RAISE EXCEPTION 'No retainage is held on this line.' USING ERRCODE = 'PT422';
+    END IF;
+    v_gross := v_amount;
+    v_ret   := NULL;
+  ELSE
+    IF p_kind = 'full' THEN
+      v_gross := v_total - v_used;
+    ELSE
+      IF p_percent IS NULL OR p_percent <= 0 OR p_percent > 100 THEN
+        RAISE EXCEPTION 'Enter a progress %% above 0 and up to 100.' USING ERRCODE = 'PT422';
+      END IF;
+      v_gross := round(v_total * p_percent / 100, 2);
+    END IF;
+    IF v_gross <= 0 THEN
+      RAISE EXCEPTION 'This line is already fully approved for payment.' USING ERRCODE = 'PT422';
+    END IF;
+    IF v_gross > v_total - v_used THEN
+      RAISE EXCEPTION 'That is more than is left to pay on this line (%).', v_total - v_used USING ERRCODE = 'PT422';
+    END IF;
+    v_ret    := round(v_gross * v_ret / 100, 2);
+    v_amount := v_gross - v_ret;
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  INSERT INTO public.payment_approvals (
+    project_id, budget_line_id, vendor_id, amount, gross_amount, payment_kind, progress_percent,
+    retainage_amount, status, requested_by, comments
+  ) VALUES (
+    v_line.project_id, p_line_id, v_vendor, v_amount, v_gross, p_kind,
+    CASE WHEN p_kind = 'progress' THEN p_percent END, NULLIF(v_ret, 0), 'pending', p_actor,
+    NULLIF(btrim(COALESCE(p_note, '')), '')
+  ) RETURNING * INTO v_pa;
+  PERFORM private.fin_payment_event(v_pa, 'requested', p_actor, p_note);
+  PERFORM private.fin_rollup_line_approval(p_line_id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_pa;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_request_payment(UUID, UUID, TEXT, NUMERIC, TEXT) IS
+  'Starts a payment on a bid or variance line: full (what is left), progress (% of the line) or retainage release (after the line is fully paid). Retainage follows the contract.';
+
+
+-- ============================================================================
+-- SECTION E: 6.2 / 6.3 APPROVAL STEP
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_payment_approval_step(
+  p_id               UUID,
+  p_actor            UUID,
+  p_expected_status  TEXT,
+  p_step             TEXT,
+  p_next_status      TEXT,
+  p_routed_to        UUID,
+  p_note             TEXT,
+  p_work_confirmed   BOOLEAN
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_pa        public.payment_approvals;
+  v_project   UUID;
+  v_actor     public.users;
+  v_line      public.budget_lines;
+  v_variance  public.variance_lines;
+  v_contract  public.contracts;
+  v_gross     NUMERIC;
+  v_limit     NUMERIC;
+  v_threshold NUMERIC;
+  v_terms     INT;
+  v_handoff   UUID;
+  v_po        TEXT;
+  v_names     JSONB;
+BEGIN
+  SELECT project_id INTO v_project FROM public.payment_approvals WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payment approval not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_project, FALSE, FALSE);
+  SELECT * INTO v_pa FROM public.payment_approvals WHERE id = p_id FOR UPDATE;
+  IF v_pa.status IS DISTINCT FROM p_expected_status THEN
+    RAISE EXCEPTION 'This payment changed a moment ago (now %). Reload and try again.', replace(v_pa.status, '_', ' ')
+      USING ERRCODE = 'PT409';
+  END IF;
+
+  SELECT * INTO v_actor FROM public.users WHERE id = p_actor AND is_active AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Your account is not active.' USING ERRCODE = 'PT403';
+  END IF;
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = v_pa.budget_line_id FOR UPDATE;
+  SELECT * INTO v_variance FROM public.variance_lines WHERE budget_line_id = v_line.id;
+  IF v_variance.created_by = p_actor THEN
+    RAISE EXCEPTION 'You created this variance, so a different person must approve it.' USING ERRCODE = 'PT403';
+  END IF;
+
+  v_gross     := COALESCE(v_pa.gross_amount, v_pa.amount);
+  v_threshold := (SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                   WHERE setting_key = 'executive_approval_threshold' AND jsonb_typeof(value) = 'number');
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  IF p_step = 'field' THEN
+    IF v_pa.status <> 'pending' OR p_next_status NOT IN ('awaiting_manager', 'awaiting_executive', 'approved') THEN
+      RAISE EXCEPTION 'Work confirmation is the first step.' USING ERRCODE = 'PT409';
+    END IF;
+    IF NOT COALESCE(p_work_confirmed, FALSE) THEN
+      RAISE EXCEPTION 'Confirm the work is complete before approving.' USING ERRCODE = 'PT422';
+    END IF;
+    IF NOT private.fin_is_approver(p_actor) THEN
+      RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can confirm work.' USING ERRCODE = 'PT403';
+    END IF;
+    IF NOT v_actor.is_employee AND p_next_status <> 'awaiting_manager' THEN
+      RAISE EXCEPTION 'External field managers can confirm work but never authorise payment.' USING ERRCODE = 'PT403';
+    END IF;
+    UPDATE public.payment_approvals
+       SET work_confirmed_by = p_actor, work_confirmed_at = NOW(),
+           field_approved_by = p_actor, field_approved_at = NOW(),
+           confirmed_by_external = NOT v_actor.is_employee
+     WHERE id = p_id RETURNING * INTO v_pa;
+    PERFORM private.fin_payment_event(v_pa, 'work_confirmed', p_actor, p_note);
+  ELSIF p_step = 'manager' THEN
+    IF v_pa.status <> 'awaiting_manager' OR p_next_status NOT IN ('awaiting_executive', 'approved') THEN
+      RAISE EXCEPTION 'This payment is not waiting for a manager.' USING ERRCODE = 'PT409';
+    END IF;
+    IF NOT v_actor.is_employee THEN
+      RAISE EXCEPTION 'Only internal employees can authorise payment.' USING ERRCODE = 'PT403';
+    END IF;
+    IF p_actor IN (v_pa.field_approved_by, v_pa.work_confirmed_by) THEN
+      RAISE EXCEPTION 'You gave the first approval, so a different person must give the second.' USING ERRCODE = 'PT403';
+    END IF;
+    IF NOT (private.user_has_role(p_actor, 'project_manager') OR private.user_has_role(p_actor, 'executive')
+            OR private.user_has_role(p_actor, 'admin') OR p_actor = v_pa.routed_to_user_id) THEN
+      RAISE EXCEPTION 'Only a manager can give the second approval.' USING ERRCODE = 'PT403';
+    END IF;
+    IF v_actor.approval_limit IS NOT NULL AND v_gross > v_actor.approval_limit THEN
+      RAISE EXCEPTION 'This amount is above your approval limit of %.', v_actor.approval_limit USING ERRCODE = 'PT403';
+    END IF;
+    UPDATE public.payment_approvals SET manager_approved_by = p_actor, manager_approved_at = NOW()
+     WHERE id = p_id RETURNING * INTO v_pa;
+    PERFORM private.fin_payment_event(v_pa, 'manager_approved', p_actor, p_note);
+  ELSIF p_step = 'executive' THEN
+    IF v_pa.status <> 'awaiting_executive' OR p_next_status <> 'approved' THEN
+      RAISE EXCEPTION 'This payment is not waiting for an executive.' USING ERRCODE = 'PT409';
+    END IF;
+    IF NOT v_actor.is_employee OR NOT private.user_has_role(p_actor, 'executive') THEN
+      RAISE EXCEPTION 'Only an internal executive can give the executive approval.' USING ERRCODE = 'PT403';
+    END IF;
+    IF p_actor IN (v_pa.field_approved_by, v_pa.work_confirmed_by, v_pa.manager_approved_by) THEN
+      RAISE EXCEPTION 'You already approved this payment, so a different executive must approve it.' USING ERRCODE = 'PT403';
+    END IF;
+    UPDATE public.payment_approvals SET executive_approved_by = p_actor, executive_approved_at = NOW()
+     WHERE id = p_id RETURNING * INTO v_pa;
+    PERFORM private.fin_payment_event(v_pa, 'executive_approved', p_actor, p_note);
+  ELSE
+    RAISE EXCEPTION 'Unknown approval step %', p_step USING ERRCODE = 'PT422';
+  END IF;
+
+  -- The rules that must hold whatever the caller decided.
+  IF p_next_status IN ('awaiting_executive', 'approved') THEN
+    v_limit := private.fin_effective_limit(v_pa.field_approved_by);
+    IF (v_pa.confirmed_by_external OR (v_limit IS NOT NULL AND v_gross > v_limit)) AND v_pa.manager_approved_by IS NULL THEN
+      RAISE EXCEPTION 'This payment needs a second approval by a manager.' USING ERRCODE = 'PT422';
+    END IF;
+  END IF;
+  IF p_next_status = 'approved' AND v_threshold IS NOT NULL AND v_gross > v_threshold
+     AND v_pa.executive_approved_by IS NULL THEN
+    RAISE EXCEPTION 'This payment is above the executive threshold and needs an executive approval.' USING ERRCODE = 'PT422';
+  END IF;
+
+  UPDATE public.payment_approvals
+     SET status = p_next_status,
+         routed_to_user_id = CASE WHEN p_next_status IN ('awaiting_manager', 'awaiting_executive') THEN p_routed_to END,
+         executive_required = v_threshold IS NOT NULL AND v_gross > v_threshold,
+         comments = COALESCE(NULLIF(btrim(COALESCE(p_note, '')), ''), comments)
+   WHERE id = p_id RETURNING * INTO v_pa;
+
+  IF p_next_status = 'awaiting_manager' THEN
+    PERFORM private.fin_payment_event(v_pa, 'routed_to_manager', p_actor, NULL, p_routed_to);
+  ELSIF p_next_status = 'awaiting_executive' THEN
+    PERFORM private.fin_payment_event(v_pa, 'routed_to_executive', p_actor, NULL, p_routed_to);
+  ELSE
+    -- 6.4 / 6.5: final approval.
+    v_contract := private.fin_line_contract(v_line.id);
+    v_terms := COALESCE(v_contract.payment_terms_days, v_line.payment_terms_days);
+    UPDATE public.payment_approvals
+       SET approved_at = NOW(), expected_payment_date = CURRENT_DATE + v_terms
+     WHERE id = p_id RETURNING * INTO v_pa;
+
+    INSERT INTO public.cash_flow_entries (project_id, budget_line_id, payment_approval_id, period_month,
+                                          direction, cash_bucket, amount, entry_kind, source_note)
+    VALUES (v_pa.project_id, v_line.id, v_pa.id, date_trunc('month', v_pa.expected_payment_date)::date,
+            'out', v_line.cash_bucket, v_pa.amount, 'expected', 'Approved payment, expected ' || v_pa.expected_payment_date);
+
+    IF v_variance.id IS NOT NULL AND v_variance.status = 'pending_approval' THEN
+      UPDATE public.variance_lines SET status = 'approved', approved_by = p_actor, approved_at = NOW()
+       WHERE id = v_variance.id;
+      INSERT INTO public.variance_events (variance_id, project_id, event_type, amount_after, actor_user_id, note)
+      VALUES (v_variance.id, v_variance.project_id, 'approved', v_line.budget_amount, p_actor, p_note);
+    END IF;
+    IF v_pa.internal_invoice_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.payment_approvals
+          WHERE internal_invoice_id = v_pa.internal_invoice_id
+            AND status NOT IN ('approved', 'sent_to_finance', 'cancelled')) THEN
+      UPDATE public.internal_invoices SET status = 'approved' WHERE id = v_pa.internal_invoice_id;
+    END IF;
+
+    SELECT jsonb_object_agg(k, u.full_name) INTO v_names
+      FROM (VALUES ('work_confirmed_by', v_pa.work_confirmed_by), ('field_approved_by', v_pa.field_approved_by),
+                   ('manager_approved_by', v_pa.manager_approved_by),
+                   ('executive_approved_by', v_pa.executive_approved_by)) AS a(k, id)
+      JOIN public.users u ON u.id = a.id;
+
+    v_po := private.fin_next_po_number(v_contract.contract_number);
+    INSERT INTO public.finance_handoffs (payment_approval_id, project_id, po_number, vendor_id, amount, payload, status)
+    SELECT v_pa.id, v_pa.project_id, v_po, v_pa.vendor_id, v_pa.amount,
+           jsonb_build_object(
+             'po_number', v_po,
+             'project', p.name,
+             'line', v_line.name,
+             'line_type', v_line.line_type,
+             'trade', COALESCE(tr.name, vt.name),
+             'vendor', COALESCE(vd.company_name, inv.payee_name),
+             'invoice_number', inv.invoice_number,
+             'contract_number', v_contract.contract_number,
+             'payment_kind', v_pa.payment_kind,
+             'progress_percent', v_pa.progress_percent,
+             'gross_amount', COALESCE(v_pa.gross_amount, v_pa.amount),
+             'retainage_amount', COALESCE(v_pa.retainage_amount, 0),
+             'amount', v_pa.amount,
+             'approved_on', CURRENT_DATE,
+             'expected_payment_date', v_pa.expected_payment_date,
+             'payment_terms_days', v_terms,
+             'approvers', COALESCE(v_names, '{}'::jsonb)),
+           'pending'
+      FROM public.projects p
+      LEFT JOIN public.tasks t ON t.id = COALESCE(v_line.task_id, (SELECT task_id FROM public.budget_lines WHERE id = v_line.parent_line_id))
+      LEFT JOIN public.trades tr ON tr.id = t.trade_id
+      LEFT JOIN public.trades vt ON vt.id = v_variance.trade_id
+      LEFT JOIN public.vendors vd ON vd.id = v_pa.vendor_id
+      LEFT JOIN public.internal_invoices inv ON inv.id = v_pa.internal_invoice_id
+     WHERE p.id = v_pa.project_id
+    RETURNING id INTO v_handoff;
+
+    PERFORM private.fin_payment_event(v_pa, 'approved', p_actor, 'PO ' || v_po);
+  END IF;
+
+  PERFORM private.fin_rollup_line_approval(v_line.id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+
+  RETURN jsonb_build_object('id', v_pa.id, 'status', v_pa.status, 'routed_to_user_id', v_pa.routed_to_user_id,
+                            'handoff_id', v_handoff, 'po_number', v_po);
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_payment_approval_step(UUID, UUID, TEXT, TEXT, TEXT, UUID, TEXT, BOOLEAN) IS
+  'Records one approval step decided by app/services/payment_rules.py and re-checks the hard rules. Final approval writes the expected cash-flow entry, approves the variance / invoice and creates the finance hand-off with its PO number.';
+
+
+-- ============================================================================
+-- SECTION F: REJECT / RESUBMIT / CANCEL
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_reject_payment(p_id UUID, p_actor UUID, p_reason TEXT)
+RETURNS SETOF public.payment_approvals
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_pa       public.payment_approvals;
+  v_project  UUID;
+  v_variance public.variance_lines;
+BEGIN
+  IF btrim(COALESCE(p_reason, '')) = '' THEN
+    RAISE EXCEPTION 'A rejection needs a reason.' USING ERRCODE = 'PT422';
+  END IF;
+  SELECT project_id INTO v_project FROM public.payment_approvals WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payment approval not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_project, FALSE, FALSE);
+  SELECT * INTO v_pa FROM public.payment_approvals WHERE id = p_id FOR UPDATE;
+  IF v_pa.status NOT IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive') THEN
+    RAISE EXCEPTION 'This payment is % and cannot be rejected.', replace(v_pa.status, '_', ' ') USING ERRCODE = 'PT409';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_actor AND is_active AND is_employee AND deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'Only internal employees can reject a payment.' USING ERRCODE = 'PT403';
+  END IF;
+  IF NOT (private.fin_is_approver(p_actor) OR p_actor = v_pa.routed_to_user_id) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can reject a payment.' USING ERRCODE = 'PT403';
+  END IF;
+  SELECT * INTO v_variance FROM public.variance_lines WHERE budget_line_id = v_pa.budget_line_id;
+  IF v_variance.created_by = p_actor THEN
+    RAISE EXCEPTION 'You created this variance: edit or cancel it instead of rejecting it.' USING ERRCODE = 'PT403';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.payment_approvals
+     SET status = 'rejected', rejected_by = p_actor, rejected_at = NOW(), rejection_reason = btrim(p_reason),
+         routed_to_user_id = NULL
+   WHERE id = p_id RETURNING * INTO v_pa;
+  IF v_variance.id IS NOT NULL AND v_variance.status = 'pending_approval' THEN
+    UPDATE public.variance_lines
+       SET status = 'rejected', rejected_by = p_actor, rejected_at = NOW(), rejection_reason = btrim(p_reason)
+     WHERE id = v_variance.id;
+    INSERT INTO public.variance_events (variance_id, project_id, event_type, actor_user_id, note)
+    VALUES (v_variance.id, v_variance.project_id, 'rejected', p_actor, btrim(p_reason));
+  END IF;
+  IF v_pa.internal_invoice_id IS NOT NULL THEN
+    UPDATE public.internal_invoices SET status = 'rejected' WHERE id = v_pa.internal_invoice_id;
+  END IF;
+  PERFORM private.fin_payment_event(v_pa, 'rejected', p_actor, p_reason);
+  PERFORM private.fin_rollup_line_approval(v_pa.budget_line_id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_pa;
+END;
+$$;
+
+-- A rejected payment goes back to the field manager, who fixes it and sends a
+-- copy (same amounts) for approval again. Variances resubmit by being edited.
+CREATE OR REPLACE FUNCTION public.fn_resubmit_payment(p_id UUID, p_actor UUID, p_note TEXT)
+RETURNS SETOF public.payment_approvals
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_old public.payment_approvals;
+  v_new public.payment_approvals;
+BEGIN
+  SELECT * INTO v_old FROM public.payment_approvals WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payment approval not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_old.project_id, FALSE, TRUE);
+  SELECT * INTO v_old FROM public.payment_approvals WHERE id = p_id FOR UPDATE;
+  IF v_old.status <> 'rejected' THEN
+    RAISE EXCEPTION 'Only a rejected payment can be resubmitted.' USING ERRCODE = 'PT409';
+  END IF;
+  IF NOT private.fin_is_approver(p_actor) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager, executive or admin can resubmit a payment.' USING ERRCODE = 'PT403';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.variance_lines WHERE budget_line_id = v_old.budget_line_id) THEN
+    RAISE EXCEPTION 'Edit the variance to resubmit it.' USING ERRCODE = 'PT422';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.payment_approvals WHERE budget_line_id = v_old.budget_line_id
+              AND status IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive')) THEN
+    RAISE EXCEPTION 'This line already has a payment waiting for approval.' USING ERRCODE = 'PT409';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  INSERT INTO public.payment_approvals (
+    project_id, budget_line_id, internal_invoice_id, vendor_id, amount, gross_amount, payment_kind,
+    progress_percent, retainage_amount, status, requested_by, comments, resubmitted_from
+  ) VALUES (
+    v_old.project_id, v_old.budget_line_id, v_old.internal_invoice_id, v_old.vendor_id, v_old.amount,
+    v_old.gross_amount, v_old.payment_kind, v_old.progress_percent, v_old.retainage_amount, 'pending', p_actor,
+    COALESCE(NULLIF(btrim(COALESCE(p_note, '')), ''), v_old.comments), v_old.id
+  ) RETURNING * INTO v_new;
+  IF v_new.internal_invoice_id IS NOT NULL THEN
+    UPDATE public.internal_invoices SET status = 'in_approval' WHERE id = v_new.internal_invoice_id;
+  END IF;
+  PERFORM private.fin_payment_event(v_new, 'resubmitted', p_actor, p_note);
+  PERFORM private.fin_rollup_line_approval(v_new.budget_line_id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_new;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_cancel_payment(p_id UUID, p_actor UUID, p_note TEXT)
+RETURNS SETOF public.payment_approvals
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_pa public.payment_approvals;
+BEGIN
+  SELECT * INTO v_pa FROM public.payment_approvals WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payment approval not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_pa.project_id, FALSE, FALSE);
+  SELECT * INTO v_pa FROM public.payment_approvals WHERE id = p_id FOR UPDATE;
+  IF v_pa.status NOT IN ('pending', 'field_approved', 'awaiting_manager', 'awaiting_executive', 'rejected') THEN
+    RAISE EXCEPTION 'This payment is % and cannot be withdrawn.', replace(v_pa.status, '_', ' ') USING ERRCODE = 'PT409';
+  END IF;
+  IF v_pa.internal_invoice_id IS NOT NULL
+     OR EXISTS (SELECT 1 FROM public.variance_lines WHERE budget_line_id = v_pa.budget_line_id) THEN
+    RAISE EXCEPTION 'Invoice and variance payments are withdrawn by cancelling the invoice or the variance.' USING ERRCODE = 'PT422';
+  END IF;
+  IF p_actor <> v_pa.requested_by AND NOT (private.user_has_role(p_actor, 'project_manager')
+                                           OR private.user_has_role(p_actor, 'admin')) THEN
+    RAISE EXCEPTION 'Only the person who asked for the payment, a project manager or an admin can withdraw it.' USING ERRCODE = 'PT403';
+  END IF;
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.payment_approvals SET status = 'cancelled', routed_to_user_id = NULL
+   WHERE id = p_id RETURNING * INTO v_pa;
+  PERFORM private.fin_payment_event(v_pa, 'cancelled', p_actor, p_note);
+  PERFORM private.fin_rollup_line_approval(v_pa.budget_line_id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_pa;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION G: 6.6 HAND-OFF DELIVERED
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_mark_finance_handoff(
+  p_handoff_id   UUID,
+  p_sent         BOOLEAN,
+  p_email_log_id UUID,
+  p_document     TEXT,
+  p_error        TEXT
+)
+RETURNS SETOF public.finance_handoffs
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_h  public.finance_handoffs;
+  v_pa public.payment_approvals;
+BEGIN
+  SELECT * INTO v_h FROM public.finance_handoffs WHERE id = p_handoff_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Hand-off not found' USING ERRCODE = 'PT404';
+  END IF;
+  UPDATE public.finance_handoffs
+     SET document_path = COALESCE(p_document, document_path),
+         email_log_id  = COALESCE(p_email_log_id, email_log_id),
+         status        = CASE WHEN p_sent THEN 'sent' WHEN status = 'sent' THEN status ELSE 'failed' END,
+         sent_at       = CASE WHEN p_sent THEN COALESCE(sent_at, NOW()) ELSE sent_at END,
+         handoff_error = CASE WHEN p_sent THEN NULL ELSE p_error END
+   WHERE id = p_handoff_id RETURNING * INTO v_h;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.payment_approvals SET status = 'sent_to_finance'
+   WHERE id = v_h.payment_approval_id AND status = 'approved' AND p_sent
+   RETURNING * INTO v_pa;
+  IF v_pa.id IS NOT NULL THEN
+    PERFORM private.fin_payment_event(v_pa, 'sent_to_finance', NULL, 'PO ' || v_h.po_number);
+    PERFORM private.fin_rollup_line_approval(v_pa.budget_line_id);
+  ELSIF NOT p_sent THEN
+    SELECT * INTO v_pa FROM public.payment_approvals WHERE id = v_h.payment_approval_id;
+    PERFORM private.fin_payment_event(v_pa, 'handoff_failed', NULL, p_error);
+  END IF;
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_h;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION H: READ SURFACE
+-- ============================================================================
+CREATE OR REPLACE VIEW public.v_payment_approvals
+WITH (security_invoker = true) AS
+SELECT pa.id, pa.project_id, p.name AS project_name, p.status AS project_status,
+       pa.budget_line_id, bl.name AS line_name, bl.line_type, bl.committed_amount AS line_committed,
+       bl.budget_amount AS line_budget, bl.payment_terms_days,
+       COALESCE(tr.name, vt.name) AS trade_name,
+       pa.vendor_id, COALESCE(vd.company_name, inv.payee_name) AS vendor_name,
+       pa.internal_invoice_id, inv.invoice_number,
+       vl.id AS variance_id, vl.created_by AS variance_created_by,
+       c.contract_number, c.retainage_percent,
+       pa.amount, COALESCE(pa.gross_amount, pa.amount) AS gross_amount, COALESCE(pa.retainage_amount, 0) AS retainage_amount,
+       pa.payment_kind, pa.progress_percent, pa.status, pa.comments,
+       pa.requested_by, ru.full_name AS requested_by_name, pa.created_at,
+       pa.work_confirmed_by, wu.full_name AS work_confirmed_by_name, pa.work_confirmed_at, pa.confirmed_by_external,
+       pa.field_approved_by, fu.full_name AS field_approved_by_name, pa.field_approved_at,
+       pa.routed_to_user_id, tu.full_name AS routed_to_name,
+       pa.manager_approved_by, mu.full_name AS manager_approved_by_name, pa.manager_approved_at,
+       pa.executive_required, pa.executive_approved_by, eu.full_name AS executive_approved_by_name, pa.executive_approved_at,
+       pa.rejected_by, xu.full_name AS rejected_by_name, pa.rejected_at, pa.rejection_reason,
+       pa.approved_at, pa.expected_payment_date, pa.resubmitted_from,
+       fh.id AS handoff_id, fh.po_number, fh.status AS handoff_status, fh.sent_at AS handoff_sent_at,
+       el.status AS handoff_delivery_status, pa.updated_at
+  FROM public.payment_approvals pa
+  JOIN public.projects p ON p.id = pa.project_id AND p.deleted_at IS NULL
+  JOIN public.budget_lines bl ON bl.id = pa.budget_line_id
+  LEFT JOIN public.variance_lines vl ON vl.budget_line_id = bl.id
+  LEFT JOIN public.tasks t ON t.id = COALESCE(bl.task_id, (SELECT b2.task_id FROM public.budget_lines b2 WHERE b2.id = bl.parent_line_id))
+  LEFT JOIN public.trades tr ON tr.id = t.trade_id
+  LEFT JOIN public.trades vt ON vt.id = vl.trade_id
+  LEFT JOIN public.vendors vd ON vd.id = pa.vendor_id
+  LEFT JOIN public.internal_invoices inv ON inv.id = pa.internal_invoice_id
+  LEFT JOIN LATERAL (SELECT * FROM private.fin_line_contract(bl.id)) c ON TRUE
+  LEFT JOIN public.users ru ON ru.id = pa.requested_by
+  LEFT JOIN public.users wu ON wu.id = pa.work_confirmed_by
+  LEFT JOIN public.users fu ON fu.id = pa.field_approved_by
+  LEFT JOIN public.users tu ON tu.id = pa.routed_to_user_id
+  LEFT JOIN public.users mu ON mu.id = pa.manager_approved_by
+  LEFT JOIN public.users eu ON eu.id = pa.executive_approved_by
+  LEFT JOIN public.users xu ON xu.id = pa.rejected_by
+  LEFT JOIN public.finance_handoffs fh ON fh.payment_approval_id = pa.id
+  LEFT JOIN public.email_log el ON el.id = fh.email_log_id;
+
+COMMENT ON VIEW public.v_payment_approvals IS
+  'Payment approvals with project, line, trade, vendor, contract, every approver and the finance hand-off. security_invoker = true.';
+
+CREATE OR REPLACE VIEW public.v_finance_handoffs
+WITH (security_invoker = true) AS
+SELECT fh.id, fh.payment_approval_id, fh.project_id, p.name AS project_name, fh.po_number, fh.vendor_id,
+       fh.amount, fh.payload, fh.document_path, fh.status, fh.sent_at, fh.exported_at, fh.handoff_error,
+       fh.email_log_id, el.recipient_email AS delivered_to, el.status AS delivery_status, el.sent_at AS email_sent_at,
+       fh.created_at
+  FROM public.finance_handoffs fh
+  JOIN public.projects p ON p.id = fh.project_id AND p.deleted_at IS NULL
+  LEFT JOIN public.email_log el ON el.id = fh.email_log_id;
+
+COMMENT ON VIEW public.v_finance_handoffs IS
+  'Finance hand-off log with the email_log delivery status of each PO. security_invoker = true.';
+
+
+-- ============================================================================
+-- SECTION I: PRIVILEGES
+-- ============================================================================
+REVOKE ALL ON public.v_payment_approvals, public.v_finance_handoffs FROM PUBLIC, anon;
+GRANT SELECT ON public.v_payment_approvals TO authenticated, service_role;
+GRANT SELECT ON public.v_finance_handoffs TO service_role;
+
+REVOKE ALL ON FUNCTION private.fin_effective_limit(uuid)          FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION private.fin_line_contract(uuid)            FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION private.fin_is_approver(uuid)              FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.fin_effective_limit(uuid)       TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION private.fin_line_contract(uuid)         TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION private.fin_is_approver(uuid)           TO authenticated, service_role;
+REVOKE ALL ON FUNCTION private.fin_rollup_line_approval(uuid)     FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_next_po_number(text)           FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_payment_event(public.payment_approvals, text, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION private.fin_rollup_line_approval(uuid)  TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_next_po_number(text)        TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_payment_event(public.payment_approvals, text, uuid, text, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.fn_block_payment_event_mutation() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_request_payment(uuid, uuid, text, numeric, text)                          FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_payment_approval_step(uuid, uuid, text, text, text, uuid, text, boolean)  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_reject_payment(uuid, uuid, text)                                          FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_resubmit_payment(uuid, uuid, text)                                        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_cancel_payment(uuid, uuid, text)                                          FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_mark_finance_handoff(uuid, boolean, uuid, text, text)                     FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_request_payment(uuid, uuid, text, numeric, text)                       TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_payment_approval_step(uuid, uuid, text, text, text, uuid, text, boolean) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_reject_payment(uuid, uuid, text)                                       TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_resubmit_payment(uuid, uuid, text)                                     TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_cancel_payment(uuid, uuid, text)                                       TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_mark_finance_handoff(uuid, boolean, uuid, text, text)                  TO service_role;
+
+
+-- ============================================================================
+-- SECTION J: SETTINGS AND VERSION MARKER
+-- ============================================================================
+INSERT INTO public.financial_settings (setting_key, value, description) VALUES
+  ('po_number_format_contract', '"{CONTRACT}-{SEQ:03}"'::jsonb, 'PO number when the line has a contract: the contract number is the default reference. Tokens {CONTRACT} {YYYY} {MM} {SEQ:n}.'),
+  ('quickbooks_expense_account', '"Job Expenses"'::jsonb, 'Expense account written on every line of the QuickBooks bill import.')
+ON CONFLICT (setting_key) DO NOTHING;
+
+INSERT INTO public.financial_settings (setting_key, value, description)
+VALUES ('schema_version', '"4.7.0 (20261127_financial_phase6_payments)"'::jsonb,
+        'Last financial migration applied to this database. Written by the migration itself.')
+ON CONFLICT (setting_key) DO UPDATE SET value = EXCLUDED.value;
+
+
+-- ############################################################################
+--
+--  SECTION 17: PHASE 7 LONG-TAIL ITEMS: ESCROWS & PROPERTY TAXES (v4.8)
+--
+--  Source of truth for EXISTING databases: the idempotent migration
+--    database/migrations/20261128_financial_phase7_long_tail/001_long_tail.sql
+--  Same DDL minus BEGIN/COMMIT and the RLS part (in rls_policies.sql).
+--
+-- ############################################################################
+
+-- ============================================================================
+-- SECTION A: TABLES AND COLUMNS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.jurisdictions (
+  id                       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                     VARCHAR(150)  NOT NULL CHECK (btrim(name) <> ''),
+  kind                     VARCHAR(10)   NOT NULL DEFAULT 'city' CHECK (kind IN ('city', 'county', 'hoa', 'other')),
+  state                    VARCHAR(50),
+  repair_estimate_percent  DECIMAL(5,2)  CHECK (repair_estimate_percent IS NULL OR repair_estimate_percent BETWEEN 0 AND 100),
+  tax_installments         JSONB         NOT NULL DEFAULT '[{"month": 12, "day": 31}]'::jsonb,
+  reminder_days_before     INTEGER       NOT NULL DEFAULT 30 CHECK (reminder_days_before BETWEEN 1 AND 180),
+  notes                    TEXT,
+  created_by               UUID          REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  deleted_at               TIMESTAMPTZ,
+  CONSTRAINT chk_jurisdictions_installments CHECK (jsonb_typeof(tax_installments) = 'array' AND jsonb_array_length(tax_installments) BETWEEN 1 AND 12)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_jurisdictions_name ON public.jurisdictions (lower(name), kind, COALESCE(state, '')) WHERE deleted_at IS NULL;
+
+COMMENT ON TABLE public.jurisdictions IS
+  'Cities / counties / HOAs. Standards vary, so each holds its own repair estimate % (escrow repairs to city standard), property tax instalment dates [{month, day}] and reminder lead time.';
+
+DROP TRIGGER IF EXISTS trg_jurisdictions_updated_at ON public.jurisdictions;
+CREATE TRIGGER trg_jurisdictions_updated_at BEFORE UPDATE ON public.jurisdictions
+  FOR EACH ROW EXECUTE FUNCTION public.fn_set_updated_at();
+
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS jurisdiction_id        UUID REFERENCES public.jurisdictions(id) ON DELETE RESTRICT;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS repair_estimate        DECIMAL(15,2) NOT NULL DEFAULT 0 CHECK (repair_estimate >= 0);
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS premium_frequency      VARCHAR(10) NOT NULL DEFAULT 'one_time' CHECK (premium_frequency IN ('one_time', 'yearly'));
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS premium_total          DECIMAL(15,2) NOT NULL DEFAULT 0 CHECK (premium_total >= 0);
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS works_built_date       DATE;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS inspection_date        DATE;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS inspection_notes       TEXT;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS signoff_date           DATE;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS signoff_by             VARCHAR(255);
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS expected_release_date  DATE;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS bond_reminder_sent_for DATE;
+ALTER TABLE public.escrows ADD COLUMN IF NOT EXISTS document_name          VARCHAR(255);
+
+COMMENT ON COLUMN public.escrows.repair_estimate        IS 'Internal estimate of repairs to city standard. The repairs line = the higher of this and the defect list.';
+COMMENT ON COLUMN public.escrows.premium_total          IS 'All bond / insurance premiums so far (first + renewals) = the premium line.';
+COMMENT ON COLUMN public.escrows.bond_reminder_sent_for IS 'Bond expiry date the last renewal reminder was sent for.';
+
+CREATE TABLE IF NOT EXISTS public.escrow_defects (
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  escrow_id     UUID          NOT NULL REFERENCES public.escrows(id) ON DELETE RESTRICT,
+  description   TEXT          NOT NULL CHECK (btrim(description) <> ''),
+  location      VARCHAR(255),
+  repair_cost   DECIMAL(15,2) NOT NULL DEFAULT 0 CHECK (repair_cost >= 0),
+  status        VARCHAR(10)   NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'repaired', 'waived')),
+  repaired_at   DATE,
+  recorded_by   UUID          REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_escrow_defects_escrow ON public.escrow_defects (escrow_id);
+COMMENT ON TABLE public.escrow_defects IS 'Defect list from the inspection walk, with the repair cost of each item.';
+DROP TRIGGER IF EXISTS trg_escrow_defects_updated_at ON public.escrow_defects;
+CREATE TRIGGER trg_escrow_defects_updated_at BEFORE UPDATE ON public.escrow_defects
+  FOR EACH ROW EXECUTE FUNCTION public.fn_set_updated_at();
+
+CREATE TABLE IF NOT EXISTS public.escrow_events (
+  id             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_no       BIGINT        GENERATED ALWAYS AS IDENTITY UNIQUE,
+  escrow_id      UUID          NOT NULL REFERENCES public.escrows(id) ON DELETE RESTRICT,
+  project_id     UUID          NOT NULL REFERENCES public.projects(id) ON DELETE RESTRICT,
+  event_type     VARCHAR(30)   NOT NULL,
+  status_after   VARCHAR(20)   NOT NULL,
+  actor_user_id  UUID          REFERENCES public.users(id) ON DELETE RESTRICT,
+  note           TEXT,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_escrow_events_escrow ON public.escrow_events (escrow_id, event_no);
+COMMENT ON TABLE public.escrow_events IS 'Append-only history of an escrow: created, each status, defects, renewals, cost changes.';
+
+CREATE OR REPLACE FUNCTION public.fn_block_escrow_event_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  RAISE EXCEPTION 'Escrow history is append-only and cannot be changed.' USING ERRCODE = 'PT403';
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_escrow_events_immutable ON public.escrow_events;
+CREATE TRIGGER trg_escrow_events_immutable BEFORE UPDATE OR DELETE ON public.escrow_events
+  FOR EACH ROW EXECUTE FUNCTION public.fn_block_escrow_event_mutation();
+
+ALTER TABLE public.property_taxes ADD COLUMN IF NOT EXISTS jurisdiction_id    UUID REFERENCES public.jurisdictions(id) ON DELETE RESTRICT;
+ALTER TABLE public.property_taxes ADD COLUMN IF NOT EXISTS assessed_value     DECIMAL(15,2) CHECK (assessed_value IS NULL OR assessed_value >= 0);
+ALTER TABLE public.property_taxes ADD COLUMN IF NOT EXISTS tax_rate_percent   DECIMAL(7,4) CHECK (tax_rate_percent IS NULL OR tax_rate_percent BETWEEN 0 AND 100);
+ALTER TABLE public.property_taxes ADD COLUMN IF NOT EXISTS reminded_days      INTEGER;
+ALTER TABLE public.property_taxes ADD COLUMN IF NOT EXISTS paid_at            DATE;
+COMMENT ON COLUMN public.property_taxes.reminded_days IS 'Days before the due date the last reminder went out (dedupe for the reminder job).';
+COMMENT ON COLUMN public.property_taxes.status        IS 'estimated | billed | in_approval | sent_to_finance (paid) | cancelled.';
+
+-- RLS for the new tables: rls_policies.sql (LONG-TAIL RLS).
+
+
+-- ============================================================================
+-- SECTION B: LEDGER MOVEMENT TYPE
+-- ============================================================================
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT conname FROM pg_constraint
+            WHERE conrelid = 'public.contingency_ledger'::regclass AND contype = 'c'
+              AND pg_get_constraintdef(oid) ILIKE '%movement_type%' LOOP
+    EXECUTE format('ALTER TABLE public.contingency_ledger DROP CONSTRAINT %I', r.conname);
+  END LOOP;
+  ALTER TABLE public.contingency_ledger ADD CONSTRAINT chk_contingency_ledger_movement_type
+    CHECK (movement_type IN ('initial_funding', 'bid_overrun', 'bid_savings', 'bid_reversal',
+                             'variance_created', 'variance_adjusted', 'variance_cancelled',
+                             'top_up', 'invoice_overage', 'long_tail'));
+END $$;
+
+
+-- ============================================================================
+-- SECTION C: HELPERS
+-- ============================================================================
+CREATE OR REPLACE FUNCTION private.fin_can(p_user UUID, p_roles TEXT[])
+RETURNS BOOLEAN LANGUAGE sql STABLE SET search_path = '' AS $$
+  SELECT private.user_has_role(p_user, 'admin')
+      OR EXISTS (SELECT 1 FROM unnest(p_roles) r WHERE private.user_has_role(p_user, r));
+$$;
+
+-- New long-tail line at the bottom of the budget, at $0.
+CREATE OR REPLACE FUNCTION private.fin_new_long_tail_line(p_project UUID, p_subtype TEXT, p_name TEXT, p_actor UUID)
+RETURNS UUID LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_id UUID;
+BEGIN
+  INSERT INTO public.budget_lines (project_id, line_type, line_subtype, name, section_name, sort_order,
+                                   budget_amount, cash_bucket, created_by, updated_by)
+  VALUES (p_project, 'long_tail', p_subtype, left(p_name, 255), 'Long-tail',
+          COALESCE((SELECT max(sort_order) FROM public.budget_lines WHERE project_id = p_project AND deleted_at IS NULL), 0) + 10,
+          0, 'land', p_actor, p_actor)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+-- Set a long-tail line's amount, keeping the total flat: an increase comes
+-- first from the template's placeholder line of the same kind (not linked to
+-- any escrow / tax), then from contingency (baselined, ledger row); a decrease
+-- goes back to contingency. Draft budgets: the Unallocated line absorbs it.
+CREATE OR REPLACE FUNCTION private.fin_set_long_tail_amount(p_line_id UUID, p_amount NUMERIC, p_actor UUID, p_reason TEXT)
+RETURNS VOID LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_line    public.budget_lines;
+  v_status  TEXT;
+  v_holder  public.budget_lines;
+  v_delta   NUMERIC;
+  v_take    NUMERIC := 0;
+BEGIN
+  SELECT * INTO v_line FROM public.budget_lines WHERE id = p_line_id FOR UPDATE;
+  v_delta := round(GREATEST(COALESCE(p_amount, 0), 0), 2) - v_line.budget_amount;
+  IF v_delta = 0 THEN
+    RETURN;
+  END IF;
+  SELECT budget_status INTO v_status FROM public.projects WHERE id = v_line.project_id;
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+
+  IF v_delta > 0 THEN
+    SELECT * INTO v_holder FROM public.budget_lines b
+     WHERE b.project_id = v_line.project_id AND b.line_type = 'long_tail' AND b.line_subtype = v_line.line_subtype
+       AND b.id <> p_line_id AND b.deleted_at IS NULL AND b.budget_amount > 0
+       AND NOT EXISTS (SELECT 1 FROM public.escrows e WHERE b.id IN (e.premium_line_id, e.repair_line_id))
+       AND NOT EXISTS (SELECT 1 FROM public.property_taxes t WHERE t.budget_line_id = b.id)
+     ORDER BY b.sort_order LIMIT 1 FOR UPDATE;
+    IF FOUND THEN
+      v_take := LEAST(v_delta, v_holder.budget_amount);
+      UPDATE public.budget_lines SET budget_amount = budget_amount - v_take, updated_by = p_actor WHERE id = v_holder.id;
+    END IF;
+  END IF;
+
+  UPDATE public.budget_lines SET budget_amount = budget_amount + v_delta, updated_by = p_actor WHERE id = p_line_id;
+  IF v_status = 'baselined' AND v_delta - v_take <> 0 THEN
+    PERFORM private.fin_move_contingency(v_line.project_id, -(v_delta - v_take), 'long_tail', p_actor,
+                                         COALESCE(p_reason, v_line.name), p_line_id, NULL, NULL, NULL);
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION private.fin_escrow_event(p_escrow public.escrows, p_type TEXT, p_actor UUID, p_note TEXT)
+RETURNS VOID LANGUAGE sql SET search_path = '' AS $$
+  INSERT INTO public.escrow_events (escrow_id, project_id, event_type, status_after, actor_user_id, note)
+  VALUES (p_escrow.id, p_escrow.project_id, p_type, p_escrow.status, p_actor, NULLIF(btrim(COALESCE(p_note, '')), ''));
+$$;
+
+-- Cash flow for the project's escrows and taxes (forecast rows, open months only).
+CREATE OR REPLACE FUNCTION private.fin_refresh_long_tail_cash(p_project UUID)
+RETURNS VOID LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  DELETE FROM public.cash_flow_entries c
+   WHERE c.project_id = p_project AND c.entry_kind = 'forecast'
+     AND (c.escrow_id IS NOT NULL
+          OR c.budget_line_id IN (SELECT budget_line_id FROM public.property_taxes WHERE project_id = p_project))
+     AND NOT EXISTS (SELECT 1 FROM public.accounting_periods a WHERE a.period_month = c.period_month AND a.status = 'closed');
+
+  INSERT INTO public.cash_flow_entries (project_id, budget_line_id, escrow_id, period_month, direction, cash_bucket,
+                                        amount, entry_kind, source_note)
+  SELECT p_project, x.line_id, x.escrow_id, date_trunc('month', x.d)::date, x.dir, 'land', x.amount, 'forecast', x.note
+    FROM (
+      -- posted cash goes out, and comes back in on release
+      SELECT NULL::uuid AS line_id, e.id AS escrow_id, e.posted_date AS d, 'out' AS dir, e.secured_amount AS amount,
+             'Escrow cash posted: ' || e.name AS note
+        FROM public.escrows e
+       WHERE e.project_id = p_project AND e.deleted_at IS NULL AND e.security_form = 'cash'
+         AND e.status NOT IN ('planned', 'cancelled') AND e.posted_date IS NOT NULL
+      UNION ALL
+      SELECT NULL, e.id, COALESCE(e.released_date, e.expected_release_date), 'in', e.secured_amount,
+             'Escrow cash returned: ' || e.name
+        FROM public.escrows e
+       WHERE e.project_id = p_project AND e.deleted_at IS NULL AND e.security_form = 'cash'
+         AND e.status NOT IN ('planned', 'cancelled') AND e.posted_date IS NOT NULL
+         AND COALESCE(e.released_date, e.expected_release_date) IS NOT NULL
+      UNION ALL
+      SELECT e.premium_line_id, e.id, COALESCE(e.posted_date, CURRENT_DATE), 'out', b.budget_amount,
+             'Escrow premium: ' || e.name
+        FROM public.escrows e JOIN public.budget_lines b ON b.id = e.premium_line_id
+       WHERE e.project_id = p_project AND e.deleted_at IS NULL AND e.status <> 'cancelled' AND b.budget_amount > 0
+      UNION ALL
+      SELECT e.repair_line_id, e.id,
+             COALESCE(e.signoff_date, e.inspection_date, e.expected_release_date, e.posted_date, CURRENT_DATE), 'out',
+             b.budget_amount, 'Escrow repairs: ' || e.name
+        FROM public.escrows e JOIN public.budget_lines b ON b.id = e.repair_line_id
+       WHERE e.project_id = p_project AND e.deleted_at IS NULL AND e.status <> 'cancelled' AND b.budget_amount > 0
+      UNION ALL
+      SELECT t.budget_line_id, NULL, COALESCE(t.paid_at, t.due_date, make_date(t.tax_year, 12, 31)), 'out',
+             COALESCE(t.actual_amount, round(t.estimated_amount * (100 - COALESCE(t.sold_portion_percent, 0)) / 100, 2)),
+             format('Property tax %s %s #%s', t.tax_year, t.jurisdiction, t.installment_number)
+        FROM public.property_taxes t
+       WHERE t.project_id = p_project AND t.status <> 'cancelled' AND t.budget_line_id IS NOT NULL
+    ) x
+   WHERE x.amount > 0 AND x.d IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.accounting_periods a
+                      WHERE a.period_month = date_trunc('month', x.d)::date AND a.status = 'closed');
+END;
+$$;
+
+-- Escrow lines = premiums so far, and the higher of the repair estimate and the defect list.
+CREATE OR REPLACE FUNCTION private.fin_sync_escrow(p_escrow_id UUID, p_actor UUID)
+RETURNS VOID LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_e       public.escrows;
+  v_defects NUMERIC;
+BEGIN
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id;
+  SELECT COALESCE(SUM(repair_cost), 0) INTO v_defects FROM public.escrow_defects
+   WHERE escrow_id = p_escrow_id AND status <> 'waived';
+  IF v_e.status = 'cancelled' THEN
+    PERFORM private.fin_set_long_tail_amount(v_e.premium_line_id, 0, p_actor, 'Escrow cancelled: ' || v_e.name);
+    PERFORM private.fin_set_long_tail_amount(v_e.repair_line_id, 0, p_actor, 'Escrow cancelled: ' || v_e.name);
+  ELSE
+    PERFORM private.fin_set_long_tail_amount(v_e.premium_line_id, v_e.premium_total, p_actor, 'Escrow premium: ' || v_e.name);
+    PERFORM private.fin_set_long_tail_amount(v_e.repair_line_id, GREATEST(v_e.repair_estimate, v_defects), p_actor,
+                                             'Escrow repairs: ' || v_e.name);
+  END IF;
+  PERFORM private.fin_refresh_long_tail_cash(v_e.project_id);
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION D: 7.1 / 7.2 ESCROWS
+-- ============================================================================
+-- p_data: name, beneficiary, covered_areas[], security_form, holder_type,
+-- holder_name, secured_amount, premium_amount, premium_frequency, bond_number,
+-- bond_expiry_date, jurisdiction_id, repair_estimate (NULL = jurisdiction %),
+-- expected_release_date, notes.
+CREATE OR REPLACE FUNCTION public.fn_save_escrow(p_project UUID, p_escrow_id UUID, p_actor UUID, p_data JSONB)
+RETURNS SETOF public.escrows
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_project public.projects;
+  v_e       public.escrows;
+  v_old     public.escrows;
+  v_pct     NUMERIC;
+  v_repair  NUMERIC;
+  v_secured NUMERIC := (p_data ->> 'secured_amount')::numeric;
+  v_premium NUMERIC := COALESCE((p_data ->> 'premium_amount')::numeric, 0);
+  v_areas   TEXT[]  := ARRAY(SELECT btrim(x) FROM jsonb_array_elements_text(COALESCE(p_data -> 'covered_areas', '[]'::jsonb)) x
+                              WHERE btrim(x) <> '');
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['project_manager']) THEN
+    RAISE EXCEPTION 'Only a project manager or admin can set up escrows.' USING ERRCODE = 'PT403';
+  END IF;
+  v_project := private.fin_lock_project(p_project, FALSE, FALSE);
+  IF v_project.budget_status = 'none' THEN
+    RAISE EXCEPTION 'Create the budget first: each escrow adds two budget lines.' USING ERRCODE = 'PT409';
+  END IF;
+  IF btrim(COALESCE(p_data ->> 'name', '')) = '' OR v_secured IS NULL OR v_secured < 0 THEN
+    RAISE EXCEPTION 'An escrow needs a name and the value of the works it secures.' USING ERRCODE = 'PT422';
+  END IF;
+  IF array_length(v_areas, 1) IS NULL THEN
+    RAISE EXCEPTION 'List at least one area the escrow covers (e.g. roads).' USING ERRCODE = 'PT422';
+  END IF;
+  IF p_data ->> 'security_form' = 'bond' AND btrim(COALESCE(p_data ->> 'holder_name', '')) = '' THEN
+    RAISE EXCEPTION 'A bond needs its holder (insurance company, bank or other).' USING ERRCODE = 'PT422';
+  END IF;
+  IF v_premium < 0 THEN
+    RAISE EXCEPTION 'The premium cannot be negative.' USING ERRCODE = 'PT422';
+  END IF;
+
+  v_repair := (p_data ->> 'repair_estimate')::numeric;
+  IF v_repair IS NULL THEN
+    SELECT repair_estimate_percent INTO v_pct FROM public.jurisdictions WHERE id = (p_data ->> 'jurisdiction_id')::uuid;
+    v_repair := round(v_secured * COALESCE(v_pct, 0) / 100, 2);
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  IF p_escrow_id IS NULL THEN
+    INSERT INTO public.escrows (
+      project_id, name, beneficiary, covered_areas, security_form, holder_type, holder_name, secured_amount,
+      premium_amount, premium_total, premium_frequency, bond_number, bond_expiry_date, jurisdiction_id,
+      repair_estimate, expected_release_date, notes, status, created_by,
+      premium_line_id, repair_line_id
+    ) VALUES (
+      p_project, btrim(p_data ->> 'name'), p_data ->> 'beneficiary', v_areas, p_data ->> 'security_form',
+      NULLIF(p_data ->> 'holder_type', ''), NULLIF(btrim(COALESCE(p_data ->> 'holder_name', '')), ''), v_secured,
+      v_premium, v_premium, COALESCE(p_data ->> 'premium_frequency', 'one_time'), NULLIF(p_data ->> 'bond_number', ''),
+      (p_data ->> 'bond_expiry_date')::date, (p_data ->> 'jurisdiction_id')::uuid, v_repair,
+      (p_data ->> 'expected_release_date')::date, NULLIF(p_data ->> 'notes', ''), 'planned', p_actor,
+      private.fin_new_long_tail_line(p_project, 'escrow_bond_premium', 'Escrow premium: ' || btrim(p_data ->> 'name'), p_actor),
+      private.fin_new_long_tail_line(p_project, 'escrow_repairs', 'Escrow repairs: ' || btrim(p_data ->> 'name'), p_actor)
+    ) RETURNING * INTO v_e;
+    PERFORM private.fin_escrow_event(v_e, 'created', p_actor, array_to_string(v_areas, ', '));
+  ELSE
+    SELECT * INTO v_old FROM public.escrows WHERE id = p_escrow_id AND project_id = p_project AND deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Escrow not found' USING ERRCODE = 'PT404';
+    END IF;
+    IF v_old.status IN ('released', 'cancelled') THEN
+      RAISE EXCEPTION 'This escrow is % and can no longer be changed.', v_old.status USING ERRCODE = 'PT409';
+    END IF;
+    UPDATE public.escrows SET
+      name = btrim(p_data ->> 'name'), beneficiary = p_data ->> 'beneficiary', covered_areas = v_areas,
+      security_form = p_data ->> 'security_form', holder_type = NULLIF(p_data ->> 'holder_type', ''),
+      holder_name = NULLIF(btrim(COALESCE(p_data ->> 'holder_name', '')), ''), secured_amount = v_secured,
+      premium_total = premium_total - premium_amount + v_premium, premium_amount = v_premium,
+      premium_frequency = COALESCE(p_data ->> 'premium_frequency', premium_frequency),
+      bond_number = NULLIF(p_data ->> 'bond_number', ''), bond_expiry_date = (p_data ->> 'bond_expiry_date')::date,
+      jurisdiction_id = (p_data ->> 'jurisdiction_id')::uuid, repair_estimate = v_repair,
+      expected_release_date = (p_data ->> 'expected_release_date')::date, notes = NULLIF(p_data ->> 'notes', ''),
+      bond_reminder_sent_for = CASE WHEN (p_data ->> 'bond_expiry_date')::date IS DISTINCT FROM bond_expiry_date
+                                    THEN NULL ELSE bond_reminder_sent_for END
+     WHERE id = p_escrow_id RETURNING * INTO v_e;
+    UPDATE public.budget_lines SET name = left('Escrow premium: ' || v_e.name, 255) WHERE id = v_e.premium_line_id;
+    UPDATE public.budget_lines SET name = left('Escrow repairs: ' || v_e.name, 255) WHERE id = v_e.repair_line_id;
+    PERFORM private.fin_escrow_event(v_e, 'updated', p_actor, NULL);
+  END IF;
+
+  PERFORM private.fin_sync_escrow(v_e.id, p_actor);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN QUERY SELECT * FROM public.escrows WHERE id = v_e.id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fn_save_escrow(UUID, UUID, UUID, JSONB) IS
+  'Creates (p_escrow_id NULL) or edits an escrow. A new escrow gets its two cost lines at the bottom of the budget: premium and repairs to city standard (estimate, or the jurisdiction % of the secured value).';
+
+-- 7.3 lifecycle. One step forward at a time; corrections only with open defects.
+CREATE OR REPLACE FUNCTION public.fn_escrow_transition(
+  p_escrow_id UUID, p_actor UUID, p_to TEXT, p_date DATE, p_note TEXT, p_signoff_by TEXT
+)
+RETURNS SETOF public.escrows
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_e     public.escrows;
+  v_open  INT;
+  v_ok    BOOLEAN;
+  v_date  DATE := COALESCE(p_date, CURRENT_DATE);
+BEGIN
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Escrow not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_e.project_id, FALSE, FALSE);
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id FOR UPDATE;
+
+  IF p_to IN ('posted', 'released', 'cancelled') THEN
+    IF NOT private.fin_can(p_actor, ARRAY['project_manager']) THEN
+      RAISE EXCEPTION 'Only a project manager or admin can post, release or cancel an escrow.' USING ERRCODE = 'PT403';
+    END IF;
+  ELSIF NOT private.fin_can(p_actor, ARRAY['field_manager', 'project_manager']) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager or admin can record the escrow works.' USING ERRCODE = 'PT403';
+  END IF;
+
+  SELECT count(*) INTO v_open FROM public.escrow_defects WHERE escrow_id = p_escrow_id AND status = 'open';
+  v_ok := CASE p_to
+    WHEN 'posted'      THEN v_e.status = 'planned'
+    WHEN 'works_built' THEN v_e.status = 'posted'
+    WHEN 'inspection'  THEN v_e.status IN ('works_built', 'corrections')
+    WHEN 'corrections' THEN v_e.status = 'inspection' AND v_open > 0
+    WHEN 'signed_off'  THEN v_e.status IN ('inspection', 'corrections')
+    WHEN 'released'    THEN v_e.status = 'signed_off'
+    WHEN 'cancelled'   THEN v_e.status IN ('planned', 'posted')
+    ELSE FALSE END;
+  IF NOT v_ok THEN
+    RAISE EXCEPTION 'An escrow that is % cannot move to %.', replace(v_e.status, '_', ' '), replace(p_to, '_', ' ')
+      USING ERRCODE = 'PT409';
+  END IF;
+  IF p_to = 'signed_off' AND v_open > 0 THEN
+    RAISE EXCEPTION 'Repair or waive the % open defect(s) before the government sign-off.', v_open USING ERRCODE = 'PT409';
+  END IF;
+  IF p_to = 'signed_off' AND btrim(COALESCE(p_signoff_by, '')) = '' THEN
+    RAISE EXCEPTION 'Record who signed off for the government.' USING ERRCODE = 'PT422';
+  END IF;
+  IF p_to = 'posted' AND v_e.security_form = 'bond' AND v_e.bond_expiry_date IS NULL THEN
+    RAISE EXCEPTION 'Enter the bond expiry date before posting.' USING ERRCODE = 'PT422';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.escrows SET
+    status           = p_to,
+    posted_date      = CASE WHEN p_to = 'posted' THEN v_date ELSE posted_date END,
+    works_built_date = CASE WHEN p_to = 'works_built' THEN v_date ELSE works_built_date END,
+    inspection_date  = CASE WHEN p_to = 'inspection' THEN v_date ELSE inspection_date END,
+    inspection_notes = CASE WHEN p_to = 'inspection' THEN NULLIF(btrim(COALESCE(p_note, '')), '') ELSE inspection_notes END,
+    signoff_date     = CASE WHEN p_to = 'signed_off' THEN v_date ELSE signoff_date END,
+    signoff_by       = CASE WHEN p_to = 'signed_off' THEN btrim(p_signoff_by) ELSE signoff_by END,
+    released_date    = CASE WHEN p_to = 'released' THEN GREATEST(v_date, COALESCE(posted_date, v_date)) ELSE released_date END
+   WHERE id = p_escrow_id RETURNING * INTO v_e;
+  PERFORM private.fin_escrow_event(v_e, p_to, p_actor, COALESCE(p_note, p_signoff_by));
+  PERFORM private.fin_sync_escrow(p_escrow_id, p_actor);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_e;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_save_escrow_defect(
+  p_escrow_id UUID, p_defect_id UUID, p_actor UUID, p_description TEXT, p_location TEXT, p_cost NUMERIC, p_status TEXT
+)
+RETURNS SETOF public.escrow_defects
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_e  public.escrows;
+  v_d  public.escrow_defects;
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['field_manager', 'project_manager']) THEN
+    RAISE EXCEPTION 'Only a field manager, project manager or admin can record defects.' USING ERRCODE = 'PT403';
+  END IF;
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Escrow not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_e.project_id, FALSE, FALSE);
+  IF v_e.status NOT IN ('inspection', 'corrections') THEN
+    RAISE EXCEPTION 'Defects are recorded at the inspection walk and during corrections.' USING ERRCODE = 'PT409';
+  END IF;
+  IF btrim(COALESCE(p_description, '')) = '' OR COALESCE(p_cost, 0) < 0 THEN
+    RAISE EXCEPTION 'A defect needs a description and a repair cost of $0 or more.' USING ERRCODE = 'PT422';
+  END IF;
+
+  IF p_defect_id IS NULL THEN
+    INSERT INTO public.escrow_defects (escrow_id, description, location, repair_cost, status, recorded_by)
+    VALUES (p_escrow_id, btrim(p_description), NULLIF(btrim(COALESCE(p_location, '')), ''), COALESCE(p_cost, 0),
+            COALESCE(p_status, 'open'), p_actor)
+    RETURNING * INTO v_d;
+  ELSE
+    UPDATE public.escrow_defects
+       SET description = btrim(p_description), location = NULLIF(btrim(COALESCE(p_location, '')), ''),
+           repair_cost = COALESCE(p_cost, 0), status = COALESCE(p_status, status),
+           repaired_at = CASE WHEN p_status = 'repaired' THEN COALESCE(repaired_at, CURRENT_DATE)
+                              WHEN p_status = 'open' THEN NULL ELSE repaired_at END
+     WHERE id = p_defect_id AND escrow_id = p_escrow_id RETURNING * INTO v_d;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Defect not found' USING ERRCODE = 'PT404';
+    END IF;
+  END IF;
+  PERFORM private.fin_escrow_event(v_e, 'defect_' || v_d.status, p_actor, format('%s (%s)', v_d.description, v_d.repair_cost));
+  PERFORM private.fin_sync_escrow(p_escrow_id, p_actor);
+  RETURN NEXT v_d;
+END;
+$$;
+
+-- Yearly bond renewal: the new premium is added to the premium line.
+CREATE OR REPLACE FUNCTION public.fn_renew_escrow_bond(p_escrow_id UUID, p_actor UUID, p_new_expiry DATE, p_premium NUMERIC)
+RETURNS SETOF public.escrows
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_e public.escrows;
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['project_manager', 'finance']) THEN
+    RAISE EXCEPTION 'Only a project manager, finance or admin can record a bond renewal.' USING ERRCODE = 'PT403';
+  END IF;
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Escrow not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_e.project_id, FALSE, FALSE);
+  SELECT * INTO v_e FROM public.escrows WHERE id = p_escrow_id FOR UPDATE;
+  IF v_e.security_form <> 'bond' OR v_e.status IN ('released', 'cancelled') THEN
+    RAISE EXCEPTION 'Only an open bond can be renewed.' USING ERRCODE = 'PT409';
+  END IF;
+  IF p_new_expiry IS NULL OR p_new_expiry <= COALESCE(v_e.bond_expiry_date, CURRENT_DATE) OR COALESCE(p_premium, -1) < 0 THEN
+    RAISE EXCEPTION 'Enter a new expiry date after the current one and the renewal premium.' USING ERRCODE = 'PT422';
+  END IF;
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.escrows SET bond_expiry_date = p_new_expiry, premium_total = premium_total + p_premium,
+                            bond_reminder_sent_for = NULL
+   WHERE id = p_escrow_id RETURNING * INTO v_e;
+  PERFORM private.fin_escrow_event(v_e, 'bond_renewed', p_actor, format('Until %s, premium %s', p_new_expiry, p_premium));
+  PERFORM private.fin_sync_escrow(p_escrow_id, p_actor);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_e;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION E: 7.4 PROPERTY TAXES
+-- ============================================================================
+CREATE OR REPLACE FUNCTION private.fin_sync_tax_line(p_line_id UUID, p_actor UUID)
+RETURNS VOID LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_total NUMERIC;
+BEGIN
+  SELECT COALESCE(SUM(COALESCE(actual_amount, round(estimated_amount * (100 - COALESCE(sold_portion_percent, 0)) / 100, 2))), 0)
+    INTO v_total FROM public.property_taxes WHERE budget_line_id = p_line_id AND status <> 'cancelled';
+  PERFORM private.fin_set_long_tail_amount(p_line_id, v_total, p_actor, 'Property tax');
+END;
+$$;
+
+-- One year for one jurisdiction: instalments on its due dates, estimate by
+-- basis (prior_year_actual | assessed_value | manual), split evenly.
+CREATE OR REPLACE FUNCTION public.fn_set_property_tax_year(
+  p_project UUID, p_actor UUID, p_year INT, p_jurisdiction_id UUID, p_basis TEXT,
+  p_amount NUMERIC, p_assessed NUMERIC, p_rate NUMERIC, p_sold_percent NUMERIC, p_parcel TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_project public.projects;
+  v_j       public.jurisdictions;
+  v_line    UUID;
+  v_total   NUMERIC;
+  v_n       INT;
+  v_i       INT := 0;
+  v_inst    JSONB;
+  v_each    NUMERIC;
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['project_manager', 'finance']) THEN
+    RAISE EXCEPTION 'Only a project manager, finance or admin can set property taxes.' USING ERRCODE = 'PT403';
+  END IF;
+  v_project := private.fin_lock_project(p_project, FALSE, FALSE);
+  IF v_project.budget_status = 'none' THEN
+    RAISE EXCEPTION 'Create the budget first: each tax year is a budget line.' USING ERRCODE = 'PT409';
+  END IF;
+  SELECT * INTO v_j FROM public.jurisdictions WHERE id = p_jurisdiction_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Choose the city or county the tax is paid to.' USING ERRCODE = 'PT422';
+  END IF;
+  IF p_year IS NULL OR p_year < 2000 OR p_year > 2200 THEN
+    RAISE EXCEPTION 'Enter a valid tax year.' USING ERRCODE = 'PT422';
+  END IF;
+  IF COALESCE(p_sold_percent, 0) NOT BETWEEN 0 AND 100 THEN
+    RAISE EXCEPTION 'The sold portion is a %% between 0 and 100.' USING ERRCODE = 'PT422';
+  END IF;
+
+  v_total := CASE p_basis
+    -- Last year's bills; an instalment not billed yet counts at its estimate.
+    WHEN 'prior_year_actual' THEN (SELECT SUM(COALESCE(actual_amount, estimated_amount)) FROM public.property_taxes
+                                    WHERE project_id = p_project AND jurisdiction_id = p_jurisdiction_id
+                                      AND tax_year = p_year - 1 AND status <> 'cancelled'
+                                   HAVING count(actual_amount) > 0)
+    WHEN 'assessed_value' THEN round(p_assessed * p_rate / 100, 2)
+    WHEN 'manual' THEN p_amount
+  END;
+  IF v_total IS NULL OR v_total < 0 THEN
+    RAISE EXCEPTION '%', CASE p_basis
+      WHEN 'prior_year_actual' THEN format('There is no actual for %s to start from. Enter the amount or the assessed value.', p_year - 1)
+      WHEN 'assessed_value' THEN 'Enter the assessed value and the tax rate %.'
+      ELSE 'Enter the estimated amount.' END USING ERRCODE = 'PT422';
+  END IF;
+
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  SELECT budget_line_id INTO v_line FROM public.property_taxes
+   WHERE project_id = p_project AND tax_year = p_year AND budget_line_id IS NOT NULL LIMIT 1;
+  IF v_line IS NULL THEN
+    v_line := private.fin_new_long_tail_line(p_project, 'property_tax', format('Property tax %s', p_year), p_actor);
+  END IF;
+
+  v_n := jsonb_array_length(v_j.tax_installments);
+  v_each := round(v_total / v_n, 2);
+  FOR v_inst IN SELECT value FROM jsonb_array_elements(v_j.tax_installments) LOOP
+    v_i := v_i + 1;
+    INSERT INTO public.property_taxes (
+      project_id, budget_line_id, tax_year, jurisdiction, jurisdiction_id, parcel_reference, installment_number,
+      due_date, estimate_basis, estimated_amount, assessed_value, tax_rate_percent, sold_portion_percent, status, created_by
+    ) VALUES (
+      p_project, v_line, p_year, v_j.name, v_j.id, NULLIF(btrim(COALESCE(p_parcel, '')), ''), v_i,
+      -- Day past the month's end (e.g. 31 in June) becomes the last day.
+      LEAST(make_date(p_year, (v_inst ->> 'month')::int, 1) + ((v_inst ->> 'day')::int - 1),
+            (make_date(p_year, (v_inst ->> 'month')::int, 1) + INTERVAL '1 month - 1 day')::date),
+      p_basis, CASE WHEN v_i = v_n THEN v_total - v_each * (v_n - 1) ELSE v_each END,
+      p_assessed, p_rate, p_sold_percent, 'estimated', p_actor
+    )
+    ON CONFLICT (project_id, tax_year, jurisdiction, installment_number) DO UPDATE
+       SET estimate_basis = EXCLUDED.estimate_basis, estimated_amount = EXCLUDED.estimated_amount,
+           assessed_value = EXCLUDED.assessed_value, tax_rate_percent = EXCLUDED.tax_rate_percent,
+           sold_portion_percent = EXCLUDED.sold_portion_percent, due_date = EXCLUDED.due_date,
+           parcel_reference = COALESCE(EXCLUDED.parcel_reference, public.property_taxes.parcel_reference),
+           jurisdiction_id = EXCLUDED.jurisdiction_id
+     WHERE public.property_taxes.status IN ('estimated', 'billed');
+  END LOOP;
+
+  PERFORM private.fin_sync_tax_line(v_line, p_actor);
+  PERFORM private.fin_refresh_long_tail_cash(p_project);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN jsonb_build_object('budget_line_id', v_line, 'estimated_total', v_total, 'installments', v_n);
+END;
+$$;
+
+-- Edit one instalment: billed / actual amount (catches increases), due date, paid, cancelled.
+CREATE OR REPLACE FUNCTION public.fn_update_property_tax(
+  p_id UUID, p_actor UUID, p_estimated NUMERIC, p_actual NUMERIC, p_due DATE, p_status TEXT, p_sold_percent NUMERIC
+)
+RETURNS SETOF public.property_taxes
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_t public.property_taxes;
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['project_manager', 'finance']) THEN
+    RAISE EXCEPTION 'Only a project manager, finance or admin can change property taxes.' USING ERRCODE = 'PT403';
+  END IF;
+  SELECT * INTO v_t FROM public.property_taxes WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Property tax not found' USING ERRCODE = 'PT404';
+  END IF;
+  PERFORM private.fin_lock_project(v_t.project_id, FALSE, FALSE);
+  IF p_status IS NOT NULL AND p_status NOT IN ('estimated', 'billed', 'sent_to_finance', 'cancelled') THEN
+    RAISE EXCEPTION 'Unknown property tax status' USING ERRCODE = 'PT422';
+  END IF;
+  IF COALESCE(p_estimated, 0) < 0 OR COALESCE(p_actual, 0) < 0 OR COALESCE(p_sold_percent, 0) NOT BETWEEN 0 AND 100 THEN
+    RAISE EXCEPTION 'Amounts must be $0 or more and the sold portion 0 to 100%%.' USING ERRCODE = 'PT422';
+  END IF;
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.property_taxes SET
+    estimated_amount = COALESCE(p_estimated, estimated_amount),
+    actual_amount = p_actual,
+    due_date = COALESCE(p_due, due_date),
+    sold_portion_percent = COALESCE(p_sold_percent, sold_portion_percent),
+    status = COALESCE(p_status, CASE WHEN p_actual IS NOT NULL AND status = 'estimated' THEN 'billed' ELSE status END),
+    paid_at = CASE WHEN COALESCE(p_status, status) = 'sent_to_finance' THEN COALESCE(paid_at, CURRENT_DATE) ELSE NULL END,
+    reminded_days = CASE WHEN p_due IS DISTINCT FROM NULL AND p_due <> due_date THEN NULL ELSE reminded_days END
+   WHERE id = p_id RETURNING * INTO v_t;
+  PERFORM private.fin_sync_tax_line(v_t.budget_line_id, p_actor);
+  PERFORM private.fin_refresh_long_tail_cash(v_t.project_id);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN NEXT v_t;
+END;
+$$;
+
+-- As lots / homes sell: the sold % on every open instalment from a year on.
+CREATE OR REPLACE FUNCTION public.fn_set_tax_sold_portion(p_project UUID, p_actor UUID, p_percent NUMERIC, p_from_year INT)
+RETURNS INT
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  v_line UUID;
+  v_n    INT;
+BEGIN
+  IF NOT private.fin_can(p_actor, ARRAY['project_manager', 'finance']) THEN
+    RAISE EXCEPTION 'Only a project manager, finance or admin can change property taxes.' USING ERRCODE = 'PT403';
+  END IF;
+  IF p_percent IS NULL OR p_percent NOT BETWEEN 0 AND 100 THEN
+    RAISE EXCEPTION 'The sold portion is a %% between 0 and 100.' USING ERRCODE = 'PT422';
+  END IF;
+  PERFORM private.fin_lock_project(p_project, FALSE, FALSE);
+  PERFORM set_config('bluonx.financial_write', 'on', TRUE);
+  UPDATE public.property_taxes SET sold_portion_percent = p_percent
+   WHERE project_id = p_project AND tax_year >= COALESCE(p_from_year, 0) AND status IN ('estimated', 'billed')
+     AND actual_amount IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  FOR v_line IN SELECT DISTINCT budget_line_id FROM public.property_taxes
+                 WHERE project_id = p_project AND budget_line_id IS NOT NULL LOOP
+    PERFORM private.fin_sync_tax_line(v_line, p_actor);
+  END LOOP;
+  PERFORM private.fin_refresh_long_tail_cash(p_project);
+  PERFORM set_config('bluonx.financial_write', 'off', TRUE);
+  RETURN v_n;
+END;
+$$;
+
+
+-- ============================================================================
+-- SECTION F: 5.1 HEALTH INPUTS — long-tail paid counts as spent
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.fn_project_health_inputs(p_project_id UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SET search_path = ''
+AS $$
+  SELECT jsonb_build_object(
+    'project_id',            p.id,
+    'project_name',          p.name,
+    'status',                p.status,
+    'budget_status',         p.budget_status,
+    'archived',              p.archived_at IS NOT NULL,
+    'manager_id',            p.manager_id,
+    'field_manager_id',      p.field_manager_id,
+    'groundbreaking_at',     p.groundbreaking_at,
+    'reserve',               p.long_tail_reserve_amount,
+    'contingency',           (SELECT b.budget_amount FROM public.budget_lines b
+                               WHERE b.project_id = p.id AND b.line_type = 'contingency' AND b.deleted_at IS NULL),
+    'contingency_base',      COALESCE(p.contingency_at_groundbreaking,
+                               (SELECT cb.approved_amount FROM public.contingency_buckets cb
+                                 WHERE cb.project_id = p.id AND cb.bucket_kind = 'initial')),
+    'total_budget',          (SELECT COALESCE(SUM(b.budget_amount), 0) FROM public.budget_lines b
+                               WHERE b.project_id = p.id AND b.deleted_at IS NULL),
+    'lines',                 (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                                'committed',   b.committed_amount,
+                                'approved',    COALESCE(pay.approved, 0),
+                                'sent',        COALESCE(pay.sent, 0),
+                                'land_closed', COALESCE(lc.closed, 0) + COALESCE(lt.paid, 0))), '[]'::jsonb)
+                               FROM public.budget_lines b
+                               LEFT JOIN LATERAL (
+                                 SELECT SUM(x.amount) FILTER (WHERE x.status = 'approved')        AS approved,
+                                        SUM(x.amount) FILTER (WHERE x.status = 'sent_to_finance') AS sent
+                                   FROM public.payment_approvals x WHERE x.budget_line_id = b.id
+                               ) pay ON TRUE
+                               LEFT JOIN LATERAL (
+                                 SELECT SUM(y.amount) AS closed FROM public.land_closings y
+                                  WHERE y.budget_line_id = b.id AND y.status = 'closed'
+                               ) lc ON TRUE
+                               -- Long-tail: taxes paid, and an escrow's costs once it is released.
+                               LEFT JOIN LATERAL (
+                                 SELECT COALESCE((SELECT SUM(t.actual_amount) FROM public.property_taxes t
+                                                   WHERE t.budget_line_id = b.id AND t.status = 'sent_to_finance'), 0)
+                                      + COALESCE((SELECT b.budget_amount FROM public.escrows e
+                                                   WHERE b.id IN (e.premium_line_id, e.repair_line_id)
+                                                     AND e.status = 'released' LIMIT 1), 0) AS paid
+                               ) lt ON b.line_type = 'long_tail'
+                              WHERE b.project_id = p.id AND b.deleted_at IS NULL AND b.line_type <> 'contingency'),
+    'milestones_total',      ms.total,
+    'milestones_completed',  ms.done,
+    'near_zero_percent',     COALESCE((SELECT (value #>> '{}')::numeric FROM public.financial_settings
+                                        WHERE setting_key = 'contingency_near_zero_percent'), 5)
+  )
+  FROM public.projects p
+  CROSS JOIN LATERAL (
+    SELECT count(*) AS total, count(*) FILTER (WHERE m.status = 'completed') AS done
+      FROM public.milestones m
+      JOIN public.tasks t ON t.id = m.task_id
+     WHERE t.project_id = p.id AND t.deleted_at IS NULL AND m.status <> 'cancelled'
+  ) ms
+  WHERE p.id = p_project_id AND p.deleted_at IS NULL;
+$$;
+
+
+-- ============================================================================
+-- SECTION G: 7.5 READ SURFACE
+-- ============================================================================
+CREATE OR REPLACE VIEW public.v_escrows
+WITH (security_invoker = true) AS
+SELECT e.id, e.project_id, p.name AS project_name, e.name, e.beneficiary, e.covered_areas, e.security_form,
+       e.holder_type, e.holder_name, e.secured_amount, e.premium_amount, e.premium_total, e.premium_frequency,
+       e.bond_number, e.bond_expiry_date, e.status, e.posted_date, e.works_built_date, e.inspection_date,
+       e.inspection_notes, e.signoff_date, e.signoff_by, e.expected_release_date, e.released_date,
+       e.jurisdiction_id, j.name AS jurisdiction_name, e.repair_estimate,
+       e.premium_line_id, pl.budget_amount AS premium_line_amount,
+       e.repair_line_id, rl.budget_amount AS repair_line_amount,
+       COALESCE(d.open_count, 0) AS open_defects, COALESCE(d.total, 0) AS defects_total,
+       e.document_path, e.document_name, e.notes, e.created_at, e.updated_at
+  FROM public.escrows e
+  JOIN public.projects p ON p.id = e.project_id AND p.deleted_at IS NULL
+  LEFT JOIN public.jurisdictions j ON j.id = e.jurisdiction_id
+  LEFT JOIN public.budget_lines pl ON pl.id = e.premium_line_id
+  LEFT JOIN public.budget_lines rl ON rl.id = e.repair_line_id
+  LEFT JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE status = 'open') AS open_count,
+           SUM(repair_cost) FILTER (WHERE status <> 'waived') AS total
+      FROM public.escrow_defects WHERE escrow_id = e.id
+  ) d ON TRUE
+ WHERE e.deleted_at IS NULL;
+
+CREATE OR REPLACE VIEW public.v_property_taxes
+WITH (security_invoker = true) AS
+SELECT t.id, t.project_id, p.name AS project_name, t.budget_line_id, t.tax_year, t.jurisdiction, t.jurisdiction_id,
+       t.parcel_reference, t.installment_number, t.due_date, t.estimate_basis, t.estimated_amount, t.actual_amount,
+       t.assessed_value, t.tax_rate_percent, t.sold_portion_percent,
+       COALESCE(t.actual_amount, round(t.estimated_amount * (100 - COALESCE(t.sold_portion_percent, 0)) / 100, 2)) AS amount_due,
+       t.actual_amount - t.estimated_amount AS increase, t.status, t.paid_at, t.reminded_days,
+       p.manager_id, t.created_at, t.updated_at
+  FROM public.property_taxes t
+  JOIN public.projects p ON p.id = t.project_id AND p.deleted_at IS NULL;
+
+COMMENT ON VIEW public.v_property_taxes IS
+  'Property tax instalments with the amount due (actual, else estimate less the sold portion) and the increase of actual over estimate.';
+
+
+-- ============================================================================
+-- SECTION H: PRIVILEGES
+-- ============================================================================
+REVOKE ALL ON public.v_escrows, public.v_property_taxes FROM PUBLIC, anon;
+GRANT SELECT ON public.v_escrows, public.v_property_taxes TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION private.fin_can(uuid, text[])                                      FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.fin_can(uuid, text[])                                   TO authenticated, service_role;
+REVOKE ALL ON FUNCTION private.fin_new_long_tail_line(uuid, text, text, uuid)             FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_set_long_tail_amount(uuid, numeric, uuid, text)        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_escrow_event(public.escrows, text, uuid, text)         FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_refresh_long_tail_cash(uuid)                           FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_sync_escrow(uuid, uuid)                                FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.fin_sync_tax_line(uuid, uuid)                              FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION private.fin_new_long_tail_line(uuid, text, text, uuid)          TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_set_long_tail_amount(uuid, numeric, uuid, text)     TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_escrow_event(public.escrows, text, uuid, text)      TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_refresh_long_tail_cash(uuid)                        TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_sync_escrow(uuid, uuid)                             TO service_role;
+GRANT EXECUTE ON FUNCTION private.fin_sync_tax_line(uuid, uuid)                           TO service_role;
+
+REVOKE ALL ON FUNCTION public.fn_block_escrow_event_mutation() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_save_escrow(uuid, uuid, uuid, jsonb)                                         FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_escrow_transition(uuid, uuid, text, date, text, text)                        FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_save_escrow_defect(uuid, uuid, uuid, text, text, numeric, text)              FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_renew_escrow_bond(uuid, uuid, date, numeric)                                 FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_set_property_tax_year(uuid, uuid, int, uuid, text, numeric, numeric, numeric, numeric, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_update_property_tax(uuid, uuid, numeric, numeric, date, text, numeric)       FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_set_tax_sold_portion(uuid, uuid, numeric, int)                               FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_save_escrow(uuid, uuid, uuid, jsonb)                                      TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_escrow_transition(uuid, uuid, text, date, text, text)                     TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_save_escrow_defect(uuid, uuid, uuid, text, text, numeric, text)           TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_renew_escrow_bond(uuid, uuid, date, numeric)                              TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_set_property_tax_year(uuid, uuid, int, uuid, text, numeric, numeric, numeric, numeric, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_update_property_tax(uuid, uuid, numeric, numeric, date, text, numeric)    TO service_role;
+GRANT EXECUTE ON FUNCTION public.fn_set_tax_sold_portion(uuid, uuid, numeric, int)                            TO service_role;
+
+
+-- ============================================================================
+-- SECTION I: SETTINGS AND VERSION MARKER
+-- ============================================================================
+INSERT INTO public.financial_settings (setting_key, value, description) VALUES
+  ('bond_renewal_reminder_days', '60'::jsonb, 'Days before a bond expires that the renewal reminder is sent (again at 14 days).')
+ON CONFLICT (setting_key) DO NOTHING;
+
+INSERT INTO public.financial_settings (setting_key, value, description)
+VALUES ('schema_version', '"4.8.0 (20261128_financial_phase7_long_tail)"'::jsonb,
         'Last financial migration applied to this database. Written by the migration itself.')
 ON CONFLICT (setting_key) DO UPDATE SET value = EXCLUDED.value;
 

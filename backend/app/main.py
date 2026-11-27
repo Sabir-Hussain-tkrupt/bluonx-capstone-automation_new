@@ -31,6 +31,9 @@ from app.routers import (
     budget_templates,
     budgets,
     contingency,
+    financial_health,
+    payments,
+    long_tail,
     contract_signers,
     contracts,
     docusign_health,
@@ -50,6 +53,7 @@ from app.routers import (
     users,
     vendor_auth,
     vendor_portal,
+    variances,
     vendors,
     webhooks,
 )
@@ -157,6 +161,10 @@ app.include_router(reviews.router, prefix=_v1, tags=["Reviews"])
 app.include_router(milestones.router, prefix=_v1, tags=["Milestones"])
 app.include_router(budgets.router, prefix=_v1, tags=["Budgets"])
 app.include_router(contingency.router, prefix=_v1, tags=["Contingency"])
+app.include_router(variances.router, prefix=_v1, tags=["Variances"])
+app.include_router(financial_health.router, prefix=_v1, tags=["Financial Health"])
+app.include_router(payments.router, prefix=_v1, tags=["Payments"])
+app.include_router(long_tail.router, prefix=_v1, tags=["Long-tail"])
 app.include_router(budget_templates.router, prefix=_v1, tags=["Budget Templates"])
 app.include_router(internal_invoices.router, prefix=_v1, tags=["Internal Invoices"])
 app.include_router(project_notes.router, prefix=_v1, tags=["Project Notes"])

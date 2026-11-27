@@ -20,6 +20,7 @@ import {
 } from '../hooks/useUserMutations';
 import type { UserAdminResponse } from '../types';
 import { FinancialRolesModal } from './FinancialRolesModal';
+import { ApprovalSettingsModal } from './ApprovalSettingsModal';
 
 interface UserRowActionsProps {
   user: UserAdminResponse;
@@ -45,6 +46,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
 
   const [confirm, setConfirm] = useState<'deactivate' | 'delete' | null>(null);
   const [editingRoles, setEditingRoles] = useState(false);
+  const [editingApprovals, setEditingApprovals] = useState(false);
 
   const isSelf = currentUserId === user.id;
   const isDeleted = user.deleted_at !== null;
@@ -149,6 +151,11 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
             Financial roles…
           </DropdownMenuItem>
         )}
+        {!isDeleted && (
+          <DropdownMenuItem icon={<Briefcase className="h-4 w-4" />} onClick={() => setEditingApprovals(true)}>
+            Payment approvals…
+          </DropdownMenuItem>
+        )}
 
         {(user.status === 'pending' || isDeleted) && (
           <DropdownMenuItem icon={<Send className="h-4 w-4" />} onClick={handleResend}>
@@ -191,6 +198,7 @@ export function UserRowActions({ user, currentUserId }: UserRowActionsProps) {
       </DropdownMenu>
 
       <FinancialRolesModal user={editingRoles ? user : null} onClose={() => setEditingRoles(false)} />
+      {editingApprovals && <ApprovalSettingsModal user={user} onClose={() => setEditingApprovals(false)} />}
 
       <ConfirmDialog
         isOpen={confirm === 'deactivate'}

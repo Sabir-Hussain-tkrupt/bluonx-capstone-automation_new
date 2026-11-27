@@ -365,4 +365,22 @@ def test_controlled_vocabulary_matches_spec():
         "milestone_completed",
         # Phase 10.2: bounced check-in delivery
         "milestone_delivery_failed",
+        # Financial Phase 3 to 5
+        "top_up_requested",
+        "top_up_decided",
+        "bidding_checkpoint_alert",
+        "variance_pending_approval",
+        "variance_approved",
+        "variance_rejected",
+        "contingency_health_alert",
+        "contingency_urgent_alert",
+        "long_tail_reserve_alert",
+        "contingency_escalation",
+        "financial_alert_decision",
+        "financial_hold_lifted",
+        "payment_approval_requested",
+        "payment_approved",
+        "payment_rejected",
+        "property_tax_due",
+        "bond_renewal_due",
     })

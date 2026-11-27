@@ -23,6 +23,9 @@ EXPECTED_JOB_IDS = {
     "milestone_daily_checkin",
     "milestone_no_response",
     "holiday_seed",
+    "financial_health_sweep",
+    "finance_daily_summary",
+    "long_tail_reminders",
     "scheduler_self_check",
 }
 

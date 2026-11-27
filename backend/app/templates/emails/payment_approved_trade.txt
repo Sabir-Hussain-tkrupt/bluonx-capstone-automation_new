@@ -1,0 +1,2 @@
+{% extends "_payment_notice.txt" %}
+{% block intro %}Dear {{ vendor | default("partner") }}, your payment has been approved and sent to our finance team. Payment is expected on the date below.{% endblock %}
